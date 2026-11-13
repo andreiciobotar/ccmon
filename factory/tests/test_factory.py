@@ -39,7 +39,7 @@ def task_entry(slug):
 
 
 class FakeRun:
-    """Canned runner. `answers` maps an argv prefix (tuple) to (rc, out, err); longest prefix wins."""
+    """Canned runner. `answers` maps an argv prefix (tuple) to (rc, out, err) or a list of them; longest prefix wins."""
 
     def __init__(self, answers):
         self.answers = answers
@@ -48,7 +48,12 @@ class FakeRun:
     def __call__(self, argv, cwd=None):
         self.calls.append(list(argv))
         best = max((p for p in self.answers if tuple(argv[:len(p)]) == p), key=len, default=None)
-        return self.answers[best] if best is not None else (1, "", "unexpected call")
+        if best is None:
+            return 1, "", "unexpected call"
+        result = self.answers[best]
+        if isinstance(result, list):  # successive answers; the last one repeats
+            return result.pop(0) if len(result) > 1 else result[0]
+        return result
 
     def ran(self, *prefix):
         return any(c[:len(prefix)] == list(prefix) for c in self.calls)
@@ -190,6 +195,14 @@ class NewTests(unittest.TestCase):
             "wrong dispatcher name": (self.ARGS, self.answers([], (), self.OK, dispatcher="other"), "/rename d1"),
             "unnamed dispatcher": (self.ARGS, repo_answers([], [{"sessionId": "sid-d"}], self.OK), "/rename d1"),
             "caller not listed": (self.ARGS, repo_answers([], [], self.OK), "not listed"),
+            "second session with the dispatcher name": (
+                self.ARGS, self.answers([], [{"sessionId": "sid-2", "name": "d1"}], self.OK), "also named 'd1'"),
+            "old merged pull request": (
+                self.ARGS, self.answers([], (), self.OK, {("gh",): (0, '[{"state": "MERGED"}]', "")}),
+                "merged pull request already exists"),
+            "old open pull request": (
+                self.ARGS, self.answers([], (), self.OK, {("gh",): (0, '[{"state": "OPEN"}]', "")}),
+                "open pull request already exists"),
         }
         for name, (argv, answers, pattern) in cases.items():
             with self.subTest(name):
@@ -198,6 +211,20 @@ class NewTests(unittest.TestCase):
                 self.assertRegex(err, pattern)
                 self.assertEqual(len(err.strip().splitlines()), 1)
                 self.assertFalse(fake.ran("claude", "--bg"))
+
+    def test_unanswerable_pull_request_check_warns_and_proceeds(self):
+        for gh in ((127, "", "no gh"), (0, "not json", ""), (0, "[{}]", "")):
+            with self.subTest(gh=gh):
+                code, _, err, fake = invoke(self.ARGS, self.answers([], (), self.OK, {("gh",): gh}))
+                self.assertEqual(code, 0, err)
+                self.assertEqual(len(err.strip().splitlines()), 1)
+                self.assertRegex(err, "warning: cannot check for an existing pull request on worktree-demo-task")
+                self.assertTrue(fake.ran("claude", "--bg"))
+        code, _, err, fake = invoke(self.ARGS, self.answers([], (), self.OK, {("gh",): (0, "[]", "")}))
+        self.assertEqual((code, err), (0, ""))
+        gh = next(c for c in fake.calls if c[0] == "gh")
+        self.assertEqual(gh[:6], ["gh", "pr", "list", "--head", "worktree-demo-task", "--state"])
+        self.assertEqual(gh[6], "all")
 
     def test_dispatcher_session_id_unset_is_refused(self):
         for value in ("", "sid-other"):
@@ -253,6 +280,13 @@ class NewTests(unittest.TestCase):
         self.assertIn("boom", err)
         self.assertIn(["git", "worktree", "remove", "--force", f"{WT}/demo-task"], fake.calls)
         self.assertIn(["git", "branch", "-D", "worktree-demo-task"], fake.calls)
+
+    def test_launch_exit_nonzero_with_backgrounded_line_removes_nothing(self):
+        code, _, err, fake = self.stacked({("claude", "--bg"): (1, "backgrounded · 96dc4869 · demo-task\n", "late")})
+        self.assertEqual(code, 1)
+        self.assertIn("exited 1 after printing a `backgrounded` line", err)
+        self.assertFalse(fake.ran("git", "worktree", "remove"))
+        self.assertFalse(fake.ran("git", "branch"))
 
     def test_launch_exit_zero_without_line_removes_nothing(self):
         code, _, err, fake = self.stacked({("claude", "--bg"): (0, "something odd\n", "")})
@@ -448,6 +482,17 @@ class StatusTests(unittest.TestCase):
         self.assertEqual(out.strip(), "open 0/5; leftover agent worktrees 0; worktrees outside .claude/worktrees 0")
 
 
+class MalformedGhTests(unittest.TestCase):
+    def test_bad_entries_are_unknown_not_a_traceback(self):
+        for name, pr in (("empty object", [{}]), ("null state", [{"state": None}]), ("number state", [{"state": 3}]),
+                         ("strings", ["x"]), ("null entry", [None])):
+            with self.subTest(name):
+                answers = repo_answers([task_entry("x")], (), git_task_answers("x", time.time(), pr=pr))
+                code, out, err, _ = invoke(["status", "--json"], answers)
+                self.assertEqual(code, 0, err)
+                self.assertEqual(json.loads(out)["rows"][0]["pr_state"], "unknown")
+
+
 class CleanTests(unittest.TestCase):
     HEAD = "sha-x"
 
@@ -486,8 +531,22 @@ class CleanTests(unittest.TestCase):
             "empty head": (dict(pr=self.pr(head=""), extra={("git", "log"): (0, "", "")}), "cannot compare its head"),
             "empty head on both sides": (dict(pr=self.pr(head=""), extra={("git", "log"): (1, "", "")}),
                                          "cannot compare its head"),
-            "busy session": (dict(sessions=[bg(status="busy", state="working")]), "busy or waiting"),
-            "waiting session": (dict(sessions=[bg(status="waiting")]), "busy or waiting"),
+            "busy session": (dict(sessions=[bg(status="busy", state="working")]),
+                             "not finished \\(status busy, state working\\)"),
+            "waiting session": (dict(sessions=[bg(status="waiting")]), "not finished \\(status waiting, state done\\)"),
+            "idle but working": (dict(sessions=[bg(state="working")]), "not finished \\(status idle, state working\\)"),
+            "unknown status": (dict(sessions=[bg(status="needs_input")]), "status needs_input, state done"),
+            "missing status": (dict(sessions=[{"id": "ab", "cwd": f"{WT}/x", "kind": "background", "state": "done"}]),
+                               "status missing, state done"),
+            "missing state": (dict(sessions=[{"id": "ab", "cwd": f"{WT}/x", "kind": "background", "status": "idle"}]),
+                              "status idle, state missing"),
+            "one finished, one not": (dict(sessions=[bg(), bg(id="cd", state="working")]), "session cd is not finished"),
+            "worktree nested inside": (
+                dict(entries=[task_entry("x"), (f"{WT}/x/.claude/worktrees/agent-1", "worktree-agent-1", False)]),
+                "registered inside it: .*/x/.claude/worktrees/agent-1"),
+            "session turns busy before removal": (
+                dict(extra={("claude", "agents"): [(0, "[]", ""), (0, json.dumps([bg(status="busy", state="working")]), "")]}),
+                "not finished \\(status busy"),
             "interactive session": (dict(sessions=[{"sessionId": "i1", "cwd": f"{WT}/x", "kind": "interactive"}]),
                                     "interactive session"),
             "interactive session in a subdirectory": (
@@ -508,6 +567,15 @@ class CleanTests(unittest.TestCase):
                      {"sessionId": "i4", "cwd": "", "kind": "interactive"}]
         code, out, _, _ = self.clean(sessions=elsewhere)
         self.assertEqual(out.strip(), "removed x")
+
+    def test_relist_failure_before_removal_stops_and_exits_2(self):
+        entries = [task_entry("x"), task_entry("y")]
+        agents = [(0, "[]", ""), (1, "", "boom")]
+        code, out, err, fake = self.clean(entries=entries, extra={("claude", "agents"): agents})
+        self.assertEqual(code, 2)
+        self.assertIn("cannot list sessions again before removing x", err)
+        self.assertEqual(out, "")
+        self.assertFalse(self.removed_anything(fake))
 
     def test_sessions_unlistable_removes_nothing(self):
         for name, result in (("missing claude", (127, "", "no claude")), ("bad json", (0, "not json", "")),
@@ -655,6 +723,13 @@ print(os.environ["FAKE_PR"])
         self.assertEqual((p.returncode, p.stdout.strip(), p.stderr), (0, "removed demo-task", ""))
         self.assertFalse(task_dir.exists())
         self.assertEqual(self.git("branch", "--list", "worktree-demo-task"), "")
+
+    def test_default_dispatcher_name_comes_from_the_main_checkout_inside_a_worktree(self):
+        self.git("worktree", "add", "-q", "-b", "worktree-first", ".claude/worktrees/first")
+        p = subprocess.run([sys.executable, str(BIN), "new", "second-task", "--brief", "x"],
+                           cwd=self.repo / ".claude/worktrees/first", env=self.env, capture_output=True, text=True)
+        self.assertEqual((p.returncode, p.stderr), (0, ""))
+        self.assertIn("The dispatcher's session name is dispatcher-repo.", json.loads(self.argv_file.read_text())[-1])
 
 
 if __name__ == "__main__":

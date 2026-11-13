@@ -111,6 +111,7 @@ class Repo:
             raise Fail("not inside a git repository")
         self.root = entries[0]["path"]
         base = os.path.join(self.root, ".claude", "worktrees")
+        self.worktree_paths = [e["path"] for e in entries[1:]]
         live = [e for e in entries[1:] if not e["prunable"]]
         under = [e for e in live if os.path.dirname(e["path"]) == base]
         self.tasks = [e for e in under if not os.path.basename(e["path"]).startswith("agent-")]
@@ -161,7 +162,20 @@ def pull_request(repo, branch):
     if not prs:
         return "none", "", "", ""
     pr = prs[0]
-    return pr["state"].lower(), pr["url"], pr.get("headRefOid", ""), pr.get("baseRefName", "")
+    if not isinstance(pr, dict) or not isinstance(pr.get("state"), str):
+        return "unknown", "", "", ""
+    return pr["state"].lower(), pr.get("url", ""), pr.get("headRefOid", ""), pr.get("baseRefName", "")
+
+
+def session_block(mine):
+    """Why the sessions of one task keep it, or None: only finished background sessions let it go."""
+    if any(s.get("kind") != "background" for s in mine):
+        return "an interactive session is open in it"
+    for s in mine:
+        status, state = s.get("status", "missing"), s.get("state", "missing")
+        if (status, state) != ("idle", "done"):
+            return f"background session {s.get('id')} is not finished (status {status}, state {state})"
+    return None
 
 
 def collect(repo, sessions, limit_hours):
@@ -177,8 +191,7 @@ def collect(repo, sessions, limit_hours):
         row["session_id"] = session.get("id") if session else None
         row["session"] = "unknown" if sessions is None else (
             (session.get("state") or session.get("status", "unknown")) if session else "none")
-        row["interactive"] = any(s.get("kind") != "background" for s in mine)
-        row["active"] = any(s.get("kind") == "background" and s.get("status") in ("busy", "waiting") for s in mine)
+        row["blocked"] = session_block(mine)
         recorded = repo.git("config", "--get", f"branch.{branch}.factoryBase")[1].strip() if branch else ""
         row["base"] = recorded or repo.base
         started = session.get("startedAt") if session else None
@@ -243,11 +256,18 @@ def cmd_new(args):
     if caller.get("name") != dispatcher:
         raise Fail(f"this session is named {caller.get('name')!r}, not {dispatcher!r}; "
                    f"the human must run /rename {dispatcher}")
+    if any(s is not caller and s.get("name") == dispatcher for s in sessions):
+        raise Fail(f"another session is also named {dispatcher!r}; rename or stop it")
     if any(s.get("name") == args.slug for s in sessions) or sessions_in(sessions, path):
         raise Fail(f"a session named {args.slug} or inside {path} already exists")
     if len(repo.tasks) >= settings["worktree_cap"]:
         open_tasks = ", ".join(os.path.basename(t["path"]) for t in repo.tasks)
         raise Fail(f"at the cap of {settings['worktree_cap']} worktrees; open tasks: {open_tasks}")
+    old_pr = pull_request(repo, branch)[0]
+    if old_pr == "unknown":
+        sys.stderr.write(f"factory: warning: cannot check for an existing pull request on {branch}; continuing\n")
+    elif old_pr != "none":
+        raise Fail(f"a {old_pr} pull request already exists for branch {branch}; pick another slug")
     if args.base:
         for argv in (["worktree", "add", "-b", branch, path, base],
                      ["config", f"branch.{branch}.factoryBase", base]):
@@ -259,15 +279,15 @@ def cmd_new(args):
     rc, out, err = run(build_launch_argv(args.slug, dispatcher, brief, settings, base, repo.remote, time.time()),
                        cwd=repo.root)
     match = BACKGROUNDED_RE.search(out)
-    if rc != 0:
+    if rc != 0 and not match:
         if args.base:
             remove_stacked(repo, path, branch)
         sys.stderr.write(err or out)
         raise Fail("claude did not start the session", code=1)
-    if not match:
+    if rc != 0 or not match:
         sys.stderr.write(f"{out}{err}")
-        raise Fail("claude exited 0 without a `backgrounded` line; the session may be running, "
-                   "nothing was removed", code=1)
+        what = "without a `backgrounded` line" if not match else "after printing a `backgrounded` line"
+        raise Fail(f"claude exited {rc} {what}; the session may be running, nothing was removed", code=1)
     print(f"started {match.group(2).strip()} (session {match.group(1)})")
     return 0
 
@@ -323,10 +343,11 @@ def keep_reason(repo, row, rows):
         return "detached HEAD, no branch to judge"
     if row["dirty"] is not False:
         return "uncommitted changes" if row["dirty"] else "cannot read git status"
-    if row["interactive"]:
-        return "an interactive session is open in it"
-    if row["active"]:
-        return "its session is busy or waiting"
+    if row["blocked"]:
+        return row["blocked"]
+    nested = [p for p in repo.worktree_paths if p.startswith(row["path"] + os.sep)]
+    if nested:
+        return f"another worktree is registered inside it: {nested[0]}"
     stacked = [r["slug"] for r in rows if r["base"] == row["branch"]]
     if stacked:
         return f"{', '.join(stacked)} is stacked on it"
@@ -357,6 +378,13 @@ def cmd_clean(args):
         elif args.dry_run:
             print(f"would remove {row['slug']}")
         else:
+            sessions = list_sessions()
+            if sessions is None:
+                raise Fail(f"cannot list sessions again before removing {row['slug']}; nothing further removed")
+            reason = session_block(sessions_in(sessions, row["path"]))
+            if reason:
+                print(f"kept {row['slug']}: {reason}")
+                continue
             if row["session_id"]:
                 steps = [["claude", "rm", row["session_id"]]]
             else:
