@@ -12,7 +12,10 @@ import (
 
 // Run starts the interactive dashboard. Quitting cancels every python call and waits
 // for them to end, so none outlives the TUI.
-func Run(o Options) error {
+func Run(o Options) error { return runProgram(o) }
+
+// runProgram is Run with extra program options, which tests use to drive it without a TTY.
+func runProgram(o Options, popts ...tea.ProgramOption) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	o.Ctx = ctx
 	defer func() {
@@ -21,7 +24,7 @@ func Run(o Options) error {
 			o.Runner.Wait()
 		}
 	}()
-	_, err := tea.NewProgram(New(o)).Run()
+	_, err := tea.NewProgram(New(o), popts...).Run()
 	return err
 }
 
@@ -122,7 +125,7 @@ func (m *model) finishSnapshot() string {
 
 // preload fills a model for tests and renders without any I/O.
 func (m *model) preload(sessions []*data.Session, details []*data.Session, agents *data.Agents) {
-	m.seen = map[string]time.Time{}
+	m.seen, m.loaded = map[string]time.Time{}, true
 	for _, s := range sessions {
 		m.sessions[s.ID] = s
 		m.seen[s.ID] = s.LastChange

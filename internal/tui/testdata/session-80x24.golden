@@ -3,22 +3,22 @@
  ○ fixture-0001  cwd  Jan 01 10:00 → 10:11 · 11m40s                             
  670 tokens   main 300 45%   subagents 370 55%                                  
  repeats 1  ·  review loops 3  ·  warnings 1  ·  re-check 67% (2/3)  ·  malform…
- ████████████████████████████████████▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▒▒▒▒░░# 
- █ explorer 47% 312   ▓ main 45% 300   ▒ reviewer 5% 36   ░ coder 3% 18   # gen…
+ ███████████████████████████████████▓▓▒▒▒▒░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░# 
+ █ main 45% 300   ▓ coder 3% 18   ▒ reviewer 5% 36   ░ explorer 47% 312   # gen…
 ╭─ Timeline ───────────────────────────────────────────────────────────────────╮
-│ ● explorer        ▓▓▓▓┈┈┈┈┈┈┈┈┈┈┈┈┈┈░┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈████┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈███┈ │
-│                   ┈▒███┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈███┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈▒┈┈ │
-│                   ┈▒▒┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈ │
-│ ● reviewer        ┈┈┈┈█████┈┈┈┈┈████┈┈┈┈┈┈┈┈┈┈┈████┈┈┈┈┈┈████┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈ │
+│ ● coder           ┈┈┈┈┈┈┈┈┈████┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈░┈┈┈┈┈┈┈┈┈┈┈┈┈┈░┈┈┈┈┈┈┈ │
+│ ● reviewer        ┈┈┈┈█████┈┈┈┈┈████┈┈┈┈┈┈┈┈┈┈┈████┈┈┈┈┈┈┈███┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈ │
+│ ● explorer        ▓▓▓┈┈┈┈┈┈┈┈┈┈┈┈┈┈░┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈████┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈███ │
+│                   ▒███┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈████┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈▒┈ │
 │ +2 more rows                                                                 │
-│                   10:00                      10:05                    10:11  │
+│                   10:00                                                10:11 │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Dispatches 18 ──────────────────────────────────────────────────────────────╮
-│   TIME     AGENT          TOTAL    DUR FLAGS            DESCRIPTION          ┃
-│ > 10:00:10 explorer         253    30s [rechecked]      Find config loader   │
-│   10:00:15   explorer         4      - [unfinished]     Nested lookup        │
-│   10:00:20 explorer          20      - [unfinished] +1  Find config loader … │
-│   10:00:30 explorer          15    20s [WARN]           Map database migrat… │
-│   10:01:00 reviewer          14    45s                  Review change        │
+│   TIME     AGENT             TOTAL    DUR FLAGS            DESCRIPTION       ┃
+│ > 10:00:10 explorer            253    30s [rechecked]      Find config load… │
+│   10:00:15   explorer            4      - [unfinished]     Nested lookup     │
+│   10:00:20 explorer             20      - [unfinished] +1  Find config load… │
+│   10:00:30 explorer             15    20s [WARN]           Map database mig… │
+│   10:01:00 reviewer             14    45s                  Review change     │
 ╰──────────────────────────────────────────────────────────────────────────────╯
  ↑↓/jk move  ·  enter open  ·  esc back  ·  f follow  ·  ? help  ·  q quit      

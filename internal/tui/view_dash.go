@@ -76,7 +76,7 @@ func (m *model) dashBody(p paint, w, h int) block {
 		out = append(out, m.nowRunningBox(p, w, l.nowH)...)
 	}
 	if l.stripH > 0 {
-		rows, total := sortedUsage(t.byAgent)
+		rows, total := agentUsage(t.byAgent)
 		out = append(out, m.mixStrip(p, "agents", rows, total, m.th.AgentColor, func(k string) string { return k }, w))
 		rows, total = sortedUsage(t.byModel)
 		out = append(out, m.mixStrip(p, "models", rows, total, m.th.ModelColor, shortModel, w))
@@ -451,41 +451,26 @@ func (m *model) sessionRow(s *data.Session, selected bool, c tableCols, iw int, 
 // signalPills lists the non-zero signals of a session as pills within w cells.
 func (m *model) signalPills(q paint, s *data.Session, w int) string {
 	th := m.th
-	type pl struct {
-		text string
-		col  color.Color
-	}
-	var pls []pl
+	var pls []pill
 	if s.WarnCount > 0 {
-		pls = append(pls, pl{fmt.Sprintf("WARN %d", s.WarnCount), th.Red})
+		pls = append(pls, pill{fmt.Sprintf("WARN %d", s.WarnCount), th.Red})
 	}
 	if s.Repeats > 0 {
-		pls = append(pls, pl{fmt.Sprintf("repeat %d", s.Repeats), th.Yellow})
+		pls = append(pls, pill{fmt.Sprintf("repeat %d", s.Repeats), th.Yellow})
 	}
 	if s.ReviewLoops > 0 {
-		pls = append(pls, pl{fmt.Sprintf("loop %d", s.ReviewLoops), th.Yellow})
+		pls = append(pls, pill{fmt.Sprintf("loop %d", s.ReviewLoops), th.Yellow})
 	}
 	if s.Recheck.Rate != nil && *s.Recheck.Rate > 0 {
-		pls = append(pls, pl{fmt.Sprintf("recheck %.0f%%", *s.Recheck.Rate*100), th.Orange})
+		pls = append(pls, pill{fmt.Sprintf("recheck %.0f%%", *s.Recheck.Rate*100), th.Orange})
 	}
 	if s.Malformed > 0 {
-		pls = append(pls, pl{fmt.Sprintf("bad %d", s.Malformed), th.Faint})
-	}
-	var sb strings.Builder
-	used := 0
-	for _, x := range pls {
-		pw := pillWidth(x.text)
-		if used+pw > w {
-			break
-		}
-		sb.WriteString(q.pill(x.text, x.col))
-		sb.WriteString(q.sp(1))
-		used += pw + 1
+		pls = append(pls, pill{fmt.Sprintf("bad %d", s.Malformed), th.Faint})
 	}
 	if len(pls) == 0 {
 		return q.t("·", th.Faint)
 	}
-	return sb.String()
+	return m.flagPills(q, pls, w)
 }
 
 // ---- mix panels -----------------------------------------------------------------------
@@ -495,13 +480,19 @@ type kv struct {
 	v int64
 }
 
-func sortedUsage(m map[string]data.Usage) ([]kv, int64) {
+func usageRows(m map[string]data.Usage) ([]kv, int64) {
 	var out []kv
 	var total int64
 	for k, u := range m {
 		out = append(out, kv{k, u.Total})
 		total += u.Total
 	}
+	return out, total
+}
+
+// sortedUsage lists a usage map by total, largest first (models).
+func sortedUsage(m map[string]data.Usage) ([]kv, int64) {
+	out, total := usageRows(m)
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].v != out[j].v {
 			return out[i].v > out[j].v
@@ -511,10 +502,17 @@ func sortedUsage(m map[string]data.Usage) ([]kv, int64) {
 	return out, total
 }
 
+// agentUsage lists a usage map by agent type in the fixed agent order.
+func agentUsage(m map[string]data.Usage) ([]kv, int64) {
+	out, total := usageRows(m)
+	sort.Slice(out, func(i, j int) bool { return agentLess(out[i].k, out[j].k) })
+	return out, total
+}
+
 func (m *model) agentMixBox(p paint, t totals, w, h int) block {
 	th := m.th
 	in := p.on(th.Surface)
-	rows, total := sortedUsage(t.byAgent)
+	rows, total := agentUsage(t.byAgent)
 	iw := w - 4
 	nameW := 0
 	for _, r := range rows {

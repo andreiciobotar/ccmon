@@ -10,6 +10,10 @@
     usage ███████████▓▓▓▓▓▓▓▓▓▒▒▒▒▒▒▒░░░░░  ░ in 3  ▒ out 4  ▓ cw 5  █ cr 6  = 18                                                           
     tok p50 ███░░░░░░░░░ 18  p90 ███░░░░░░░░░ 18    time p50 ███████████░ 38s  p90 ███████████░ 38s                                         
                                                                                                                                             
+  ● reviewer   4 dispatches   ■ opus-5-5                                                                      no repeats, loops or warnings 
+    usage ███████████▓▓▓▓▓▓▓▓▓▒▒▒▒▒▒▒░░░░░  ░ in 6  ▒ out 8  ▓ cw 10  █ cr 12  = 36                                                         
+    tok p50 ██░░░░░░░░░░ 9  p90 ███░░░░░░░░░ 14    time p50 █████████░░░ 31s  p90 ████████████ 41s                                          
+                                                                                                                                            
   ● explorer   10 dispatches   ■ haiku-5-5  ■ sonnet-5-5                                                                [WARN 1] [repeat 1] 
     usage ████████████████████████▓▒▒▒▒░░░  ░ in 26  ▒ out 39  ▓ cw 13  █ cr 234  = 312                                                     
     tok p50 █░░░░░░░░░░░ 4  p90 ████████████ 67    time p50 ████░░░░░░░░ 12s  p90 █████████░░░ 30s                                          
@@ -17,10 +21,6 @@
   ● general-purpose   1 dispatch   ■ haiku-5-5                                                                no repeats, loops or warnings 
     usage ████████▓▓▓▓▓▓▓▓▒▒▒▒▒▒▒▒░░░░░░░░  ░ in 1  ▒ out 1  ▓ cw 1  █ cr 1  = 4                                                            
     tok p50 █░░░░░░░░░░░ 4  p90 █░░░░░░░░░░░ 4    time p50 ░░░░░░░░░░░░ 0s  p90 ░░░░░░░░░░░░ 0s                                             
-                                                                                                                                            
-  ● reviewer   4 dispatches   ■ opus-5-5                                                                      no repeats, loops or warnings 
-    usage ███████████▓▓▓▓▓▓▓▓▓▒▒▒▒▒▒▒░░░░░  ░ in 6  ▒ out 8  ▓ cw 10  █ cr 12  = 36                                                         
-    tok p50 ██░░░░░░░░░░ 9  p90 ███░░░░░░░░░ 14    time p50 █████████░░░ 31s  p90 ████████████ 41s                                          
                                                                                                                                             
                                                                                                                                             
                                                                                                                                             

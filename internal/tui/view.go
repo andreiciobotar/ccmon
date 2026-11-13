@@ -111,7 +111,7 @@ func (m *model) header(p paint) string {
 	}
 	state := ""
 	switch {
-	case m.refreshErr != "" && len(m.sessions) > 0:
+	case (m.refreshErr != "" || m.scanErr != "") && len(m.sessions) > 0:
 		state = bar.b("⚠ stale", th.Yellow)
 	case m.loading && len(m.sessions) > 0:
 		state = bar.t(spin(m.spinFrame())+" reloading", th.Blue)

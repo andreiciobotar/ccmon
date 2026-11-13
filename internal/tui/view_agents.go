@@ -3,6 +3,8 @@ package tui
 import (
 	"fmt"
 	"image/color"
+	"slices"
+	"sort"
 	"strings"
 
 	"ccmon/internal/data"
@@ -20,7 +22,8 @@ func (m *model) agentsBody(p paint, w, h int) block {
 		msg := p.t(spin(m.spinFrame())+" ", th.Purple) + p.t("aggregating agents across the history…", th.Muted)
 		return p.center(block{msg}, w, h)
 	}
-	rows := m.agents.Agents
+	rows := slices.Clone(m.agents.Agents)
+	sort.Slice(rows, func(i, j int) bool { return agentLess(rows[i].Agent, rows[j].Agent) })
 	if len(rows) == 0 {
 		return p.center(block{p.b("No agent activity in this range", th.Text), p.t("press r to widen the range", th.Muted)}, w, h)
 	}
@@ -39,8 +42,14 @@ func (m *model) agentsBody(p paint, w, h int) block {
 	out := block{m.mixStrip(p, "models", models, total, th.ModelColor, shortModel, w), p.sp(w)}
 	per := (h - len(out)) / cardH
 	cur := min(m.acursor, len(rows)-1)
+	shown := 0
 	for i := m.atop; i < len(rows) && i < m.atop+per; i++ {
 		out = append(out, m.agentCard(p, rows[i], i == cur, w, maxTot, maxTok, maxDur)...)
+		shown++
+	}
+	if more := len(rows) - m.atop - shown; more > 0 && len(out) > 0 {
+		out[len(out)-1] = p.sp(1) + p.t(fmt.Sprintf("+%d more agent types · ↓ to scroll", more), th.Faint)
+		out[len(out)-1] = fit(out[len(out)-1], w, p)
 	}
 	return out
 }

@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -84,14 +85,14 @@ func TestTimelineSubLanes(t *testing.T) {
 		dispatchAt("e3", "explorer", 20, 2), // fits after e1
 		dispatchAt("c1", "coder", 5, 3),
 	}}
-	pl := m.timelinePlan(s, d, 140, 8)
-	if len(pl.lanes) != 3 || len(pl.lanes[0].items) != 2 || len(pl.lanes[1].items) != 1 || pl.lanes[1].agent != "explorer" || !pl.lanes[0].first || pl.lanes[1].first {
+	pl := m.timelinePlan(s, d, 140, 8, 0)
+	if len(pl.lanes) != 3 || pl.lanes[0].agent != "coder" || len(pl.lanes[1].items) != 2 || len(pl.lanes[2].items) != 1 || pl.lanes[2].agent != "explorer" || !pl.lanes[1].first || pl.lanes[2].first {
 		t.Fatalf("lanes: %+v", pl.lanes)
 	}
 	if pl.boxH() != 3+2+1 {
 		t.Fatalf("rows are not padded: box height %d", pl.boxH())
 	}
-	if pl2 := m.timelinePlan(s, d, 140, 2); len(pl2.lanes) != 1 || pl2.hidden != 2 {
+	if pl2 := m.timelinePlan(s, d, 140, 2, 0); len(pl2.lanes) != 1 || pl2.hidden != 2 {
 		t.Fatalf("a capped timeline says what it hides: %+v", pl2)
 	}
 }
@@ -147,12 +148,14 @@ func TestMultiDaySpanShowsDates(t *testing.T) {
 	s := m.sessions[sidA]
 	end := s.Start.Add(30 * time.Hour)
 	s.End = &end
+	d := m.details[sidA]
+	d.Dispatches = append(d.Dispatches, dispatchAt("late", "coder", 26*60, 120)) // the next day
 	m.view, m.selID = viewSession, sidA
 	out := plain(m)
 	if !strings.Contains(out, "→ Nov 14 16:00") {
 		t.Fatalf("header span lacks the end date:\n%s", out)
 	}
-	if !strings.Contains(out, "11-13 10:00") || !strings.Contains(out, "11-14 16:00") {
+	if !strings.Contains(out, "11-13 10:01") || !strings.Contains(out, "11-14 12:00") || !strings.Contains(out, "11-14 14:00") {
 		t.Fatalf("timeline axis lacks dates:\n%s", out)
 	}
 }
@@ -185,7 +188,7 @@ func TestNoColorLegendMatchesBar(t *testing.T) {
 	s := m.sessions[sidA]
 	b := m.agentBar(m.th.on(m.th.Bg), s, 140)
 	bar, legend := ansi.Strip(b[0]), ansi.Strip(b[1])
-	rows, _ := sortedUsage(s.ByAgent)
+	rows, _ := agentUsage(s.ByAgent)
 	for i := range rows {
 		g := plainFills[i%len(plainFills)]
 		if !strings.Contains(bar, g) || !strings.Contains(legend, g+" ") {
@@ -322,5 +325,137 @@ func TestSnapshotFailures(t *testing.T) {
 	bad := &data.Runner{Root: "../..", ProjectsDir: filepath.Join(projects, "does-not-exist")}
 	if _, err := Snapshot(SnapshotOptions{Options: Options{Runner: bad}, View: "dashboard", W: 100, H: 30}); err == nil {
 		t.Fatal("an unreadable projects dir must fail the snapshot")
+	}
+}
+
+// burstSession is a six-day-style session: two bursts of equal activity 66 hours apart,
+// with a one-second dispatch in the second.
+func burstSession(m *model) (*data.Session, *data.Session) {
+	s := m.sessions[sidA]
+	d := &data.Session{ID: sidA, Dispatches: []data.Dispatch{
+		dispatchAt("a1", "explorer", 0, 5),
+		dispatchAt("a2", "coder", 5, 5),
+		dispatchAt("b1", "coder", 10+66*60, 5),
+		dispatchAt("b2", "reviewer", 10+66*60+5, 4.99),
+		dispatchAt("b3", "reviewer", 10+66*60+9.99, 1.0/60),
+	}}
+	m.details[sidA] = d
+	m.view, m.selID = viewSession, sidA
+	return s, d
+}
+
+func TestTimelineSkipsIdleTime(t *testing.T) {
+	m := fakeModel(true, 140, 40)
+	s, d := burstSession(m)
+	pl := m.timelinePlan(s, d, 140, 8, 0)
+	var bursts, breaks []axisSeg
+	for _, sg := range pl.axis.segs {
+		if sg.brk {
+			breaks = append(breaks, sg)
+		} else {
+			bursts = append(bursts, sg)
+		}
+	}
+	if len(bursts) != 2 || len(breaks) != 1 || breaks[0].marker() != "┆ 2d 18h ┆" {
+		t.Fatalf("want two bursts around one break labelled 2d 18h: %+v", pl.axis.segs)
+	}
+	if a, b := bursts[0].w, bursts[1].w; a < 40 || b < 40 || a+b+breaks[0].w != pl.axis.tw {
+		t.Fatalf("bursts of equal activity share the width: %d + %d + break %d of %d", a, b, breaks[0].w, pl.axis.tw)
+	}
+	last := d.Dispatches[4]
+	st, en, _ := dispatchBounds(last, pl.clock)
+	if pl.axis.x(st) < bursts[1].x || pl.axis.x(en) >= bursts[1].x+bursts[1].w {
+		t.Fatal("a one-second bar stays inside its burst")
+	}
+	out := plain(m)
+	for _, want := range []string{"┆ 2d 18h ┆", "11-13 10:00", "11-16 04:10", "11-16 04:20"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("timeline lacks %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestTimelineKeepsTheSelectedLane(t *testing.T) {
+	m := fakeModel(true, 140, 40)
+	s := m.sessions[sidA]
+	d := &data.Session{ID: sidA}
+	for i, a := range []string{"main", "coder", "reviewer", "explorer", "Plan", "zed"} {
+		d.Dispatches = append(d.Dispatches, dispatchAt(fmt.Sprint(i), a, float64(i), 1))
+	}
+	pl := m.timelinePlan(s, d, 140, 3, 5) // room for two rows and the "more" line
+	if len(pl.lanes) != 2 || pl.hidden != 4 || pl.lanes[1].agent != "zed" || !pl.lanes[1].first || pl.lanes[1].items[0] != 5 {
+		t.Fatalf("the lane holding the selection must stay: %+v", pl)
+	}
+	if pl = m.timelinePlan(s, d, 140, 3, 0); pl.lanes[1].agent != "coder" {
+		t.Fatalf("without a hidden selection the first rows stay: %+v", pl.lanes)
+	}
+}
+
+func TestAgentOrderIsFixed(t *testing.T) {
+	want := []string{"main", "coder", "reviewer", "explorer", "general-purpose", "Explore", "Plan", "fork", "alpha", "zed"}
+	got := []string{"zed", "fork", "Plan", "explorer", "alpha", "main", "Explore", "reviewer", "general-purpose", "coder"}
+	sort.Slice(got, func(i, j int) bool { return agentLess(got[i], got[j]) })
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("order %v", got)
+	}
+	// by usage it would be the other way round: the order must not follow it
+	rows, _ := agentUsage(map[string]data.Usage{"explorer": usage(0, 0, 0, 900), "coder": usage(0, 0, 0, 1), "main": usage(0, 0, 0, 50)})
+	if rows[0].k != "main" || rows[1].k != "coder" || rows[2].k != "explorer" {
+		t.Fatalf("usage rows %v", rows)
+	}
+	m := fakeModel(true, 140, 40)
+	m.view = viewAgents
+	out := plain(m)
+	if !(strings.Index(out, "main") < strings.Index(out, "coder") && strings.Index(out, "coder") < strings.Index(out, "explorer") && strings.Index(out, "explorer") < strings.Index(out, "odd-one")) {
+		t.Fatalf("agents view not in the fixed order:\n%s", out)
+	}
+}
+
+func TestAgentsViewSaysWhenMoreExist(t *testing.T) {
+	m := fakeModel(true, 80, 24)
+	for i := 0; i < 4; i++ {
+		m.agents.Agents = append(m.agents.Agents, data.AgentRow{Agent: fmt.Sprintf("x%d", i), Usage: usage(1, 1, 1, 1)})
+	}
+	m.view = viewAgents
+	if out := plain(m); !strings.Contains(out, "+4 more agent types") {
+		t.Fatalf("a cut-off agents list says so:\n%s", out)
+	}
+}
+
+func TestListShortensFlagsDetailSpellsThemOut(t *testing.T) {
+	if got := shortFlag("review-loop(resume x1)"); got != "loop↻1" {
+		t.Fatalf("shortFlag = %q", got)
+	}
+	m := fakeModel(true, 140, 40)
+	m.details[sidA].Dispatches[0].Flags = []string{"review-loop(resume x1)"}
+	m.view, m.selID = viewSession, sidA
+	out := plain(m)
+	if !strings.Contains(out, "[loop↻1]") || !strings.Contains(out, "[review-loop(resume x1)]") {
+		t.Fatalf("list abbreviates, detail pane spells out:\n%s", out)
+	}
+}
+
+func TestDetailStatusLineKeepsTheDuration(t *testing.T) {
+	m := fakeModel(true, 140, 40)
+	d := m.details[sidA]
+	d.Dispatches[0].AgentType = "general-purpose"
+	m.view, m.selID = viewSession, sidA
+	if out := plain(m); !strings.Contains(out, "● general-purpose · completed") || !strings.Contains(out, "→ 10:04:00 · 3m00s") {
+		t.Fatalf("detail status or span line cut:\n%s", out)
+	}
+}
+
+func TestUnknownStatusIsNotGreen(t *testing.T) {
+	m := fakeModel(false, 140, 40)
+	m.details[sidA].Dispatches[0].Status = "killed"
+	m.view, m.selID = viewSession, sidA
+	out := m.Render()
+	i := strings.Index(out, "killed")
+	if i < 0 {
+		t.Fatal("status not shown")
+	}
+	sgr := out[strings.LastIndex(out[:i], "\x1b["):i]
+	if strings.Contains(sgr, "88;214;141") {
+		t.Fatalf("an unknown status must not look like success: %q", sgr)
 	}
 }

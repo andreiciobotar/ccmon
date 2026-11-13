@@ -1,8 +1,6 @@
 package data
 
 import (
-	"errors"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,8 +9,8 @@ import (
 
 // Scan stats the transcripts under root (<root>/<project>/<sid>.jsonl and
 // <root>/<project>/<sid>/subagents/*.jsonl) and returns the newest mtime per session id.
-// A session exists while its main transcript does. The result is only trustworthy
-// when err is nil.
+// A session exists while its main transcript does. A project directory that cannot be
+// read is skipped; only an unreadable root is an error, and then the result is nil.
 func Scan(root string) (map[string]time.Time, error) {
 	out := map[string]time.Time{}
 	projects, err := os.ReadDir(root)
@@ -26,10 +24,7 @@ func Scan(root string) (map[string]time.Time, error) {
 		pd := filepath.Join(root, p.Name())
 		ents, err := os.ReadDir(pd)
 		if err != nil {
-			if errors.Is(err, fs.ErrNotExist) {
-				continue
-			}
-			return nil, err
+			continue
 		}
 		for _, e := range ents {
 			if id, ok := strings.CutSuffix(e.Name(), ".jsonl"); ok && !e.IsDir() {

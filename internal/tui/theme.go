@@ -5,6 +5,7 @@ import (
 	"hash/fnv"
 	"image/color"
 	"math"
+	"slices"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -101,6 +102,25 @@ func (th *Theme) AgentColor(agent string) color.Color {
 		return mix(th.Purple, th.Text, 0.55) // faint lavender
 	}
 	return th.hashColor(agent)
+}
+
+// agentOrder is the fixed order of the known agent types wherever agents are listed.
+var agentOrder = []string{"main", "coder", "reviewer", "explorer", "general-purpose", "Explore", "Plan", "fork"}
+
+// agentLess is the one agent ordering: the known types in agentOrder, then any other
+// type alphabetically. Never by usage, so a colour keeps its place between sessions.
+func agentLess(a, b string) bool {
+	ra, rb := slices.Index(agentOrder, a), slices.Index(agentOrder, b)
+	if ra < 0 {
+		ra = len(agentOrder)
+	}
+	if rb < 0 {
+		rb = len(agentOrder)
+	}
+	if ra != rb {
+		return ra < rb
+	}
+	return a < b
 }
 
 // ModelColor is a stable color per model; families line up with the agents that

@@ -24,7 +24,7 @@ func (m *model) sessLayout() sessLayout {
 	bodyH := m.h - 3
 	tlH := 3 // an empty timeline: its axis in a box
 	if s, d := m.sessions[m.selID], m.details[m.selID]; s != nil && d != nil {
-		l.plan = m.timelinePlan(s, d, m.w, min(max(bodyH-sessHeaderH-2-8-3, 2), 8)) // keeps 8 rows for the list
+		l.plan = m.timelinePlan(s, d, m.w, min(max(bodyH-sessHeaderH-2-8-3, 2), 8), min(m.dcursor, max(0, len(d.Dispatches)-1))) // keeps 8 rows for the list
 		tlH = l.plan.boxH()
 	}
 	rest := bodyH - sessHeaderH - 2 - tlH
@@ -45,23 +45,17 @@ func (m *model) sessLayout() sessLayout {
 // sessRows is how many dispatch rows fit.
 func (m *model) sessRows() int { return max(1, m.sessLayout().listH-3) }
 
-// laneOrder lists the agent types of a session by first start.
+// laneOrder lists the agent types of a session in the fixed agent order.
 func laneOrder(d *data.Session) []string {
-	first := map[string]time.Time{}
+	seen := map[string]bool{}
 	var names []string
 	for _, x := range d.Dispatches {
-		t := time.Time{}
-		if x.Start != nil {
-			t = *x.Start
-		}
-		if f, ok := first[x.AgentType]; !ok {
-			first[x.AgentType] = t
+		if !seen[x.AgentType] {
+			seen[x.AgentType] = true
 			names = append(names, x.AgentType)
-		} else if !t.IsZero() && (f.IsZero() || t.Before(f)) {
-			first[x.AgentType] = t
 		}
 	}
-	sort.SliceStable(names, func(i, j int) bool { return first[names[i]].Before(first[names[j]]) })
+	sort.Slice(names, func(i, j int) bool { return agentLess(names[i], names[j]) })
 	return names
 }
 
@@ -183,7 +177,7 @@ func (m *model) sessionHeader(p paint, s *data.Session, w int) block {
 
 func (m *model) agentBar(p paint, s *data.Session, w int) block {
 	th := m.th
-	rows, total := sortedUsage(s.ByAgent)
+	rows, total := agentUsage(s.ByAgent)
 	var segs []seg
 	var legend []string
 	for i, r := range rows {
@@ -223,20 +217,14 @@ type subLane struct {
 	items []int // indexes into the session's dispatches, in start order
 }
 
-// tlPlan is the timeline laid out: the rows, the time scale and the label column.
+// tlPlan is the timeline laid out: the rows, the time axis and the label column.
 type tlPlan struct {
 	clock    time.Time
 	lanes    []subLane
 	hidden   int // rows left out for lack of height
-	t0, t1   time.Time
-	tw       int
+	axis     timeAxis
 	labelW   int
 	multiDay bool
-}
-
-func (pl tlPlan) x(t time.Time) int {
-	v := int(float64(t.Sub(pl.t0)) / float64(pl.t1.Sub(pl.t0)) * float64(pl.tw))
-	return max(0, min(pl.tw-1, v))
 }
 
 // boxH is the height of the timeline box: rows, optional "more" line, axis, borders.
@@ -249,43 +237,35 @@ func (pl tlPlan) boxH() int {
 }
 
 // timelinePlan puts every dispatch on a row. Dispatches of one agent type that overlap
-// in time stack on separate rows, so two concurrent explorers are two bars.
-func (m *model) timelinePlan(s, d *data.Session, w, maxRows int) tlPlan {
+// in time stack on separate rows, so two concurrent explorers are two bars. When the
+// height cuts rows off, the row holding dispatch sel stays.
+func (m *model) timelinePlan(s, d *data.Session, w, maxRows, sel int) tlPlan {
 	pl := tlPlan{clock: m.clock(s)}
-	grow := func(t time.Time) {
-		if pl.t0.IsZero() || t.Before(pl.t0) {
-			pl.t0 = t
-		}
-		if pl.t1.IsZero() || t.After(pl.t1) {
-			pl.t1 = t
-		}
-	}
-	if s.Start != nil {
-		grow(*s.Start)
-	}
-	if s.End != nil {
-		grow(*s.End)
-	}
+	var ivs []interval
 	for _, x := range d.Dispatches {
 		if st, en, ok := dispatchBounds(x, pl.clock); ok {
-			grow(st)
-			grow(en)
+			ivs = append(ivs, interval{st, en})
 		}
 	}
-	if pl.t1.Sub(pl.t0) < time.Second {
-		pl.t1 = pl.t0.Add(time.Second)
+	if len(ivs) == 0 {
+		if s.Start != nil && s.End != nil {
+			ivs = append(ivs, interval{*s.Start, *s.End})
+		} else {
+			ivs = append(ivs, interval{pl.clock, pl.clock})
+		}
 	}
-	l0, l1 := pl.t0.Local(), pl.t1.Local()
-	pl.multiDay = l0.YearDay() != l1.YearDay() || l0.Year() != l1.Year()
-
 	names := laneOrder(d)
 	for _, n := range names {
 		pl.labelW = max(pl.labelW, width(n))
 	}
 	pl.labelW = min(max(pl.labelW, 6), 16)
-	pl.tw = max(10, w-4-pl.labelW-3)
+	pl.axis = newTimeAxis(ivs, max(10, w-4-pl.labelW-3))
+	first, last := pl.axis.span()
+	l0, l1 := first.Local(), last.Local()
+	pl.multiDay = l0.YearDay() != l1.YearDay() || l0.Year() != l1.Year()
 
 	var all []subLane
+	selRow := -1
 	for _, name := range names {
 		var idx []int
 		for i, x := range d.Dispatches {
@@ -298,29 +278,104 @@ func (m *model) timelinePlan(s, d *data.Session, w, maxRows int) tlPlan {
 		var ends []int
 		for _, i := range idx {
 			st, en, _ := dispatchBounds(d.Dispatches[i], pl.clock)
-			a, b := pl.x(st), pl.x(en)
+			a, b := pl.axis.x(st), pl.axis.x(en)
 			k := 0
 			for k < len(ends) && ends[k] >= a {
 				k++
 			}
 			if k == len(ends) {
 				ends = append(ends, 0)
-				rows = append(rows, subLane{agent: name, first: k == 0})
+				rows = append(rows, subLane{agent: name})
 			}
 			ends[k] = max(a, b)
 			rows[k].items = append(rows[k].items, i)
+			if i == sel {
+				selRow = len(all) + k
+			}
 		}
 		if len(rows) == 0 {
-			rows = append(rows, subLane{agent: name, first: true})
+			rows = append(rows, subLane{agent: name})
 		}
 		all = append(all, rows...)
 	}
-	if len(all) > maxRows {
-		pl.hidden = len(all) - (maxRows - 1)
-		all = all[:maxRows-1]
+	if keep := maxRows - 1; len(all) > maxRows {
+		pl.hidden = len(all) - keep
+		if selRow >= keep {
+			all = append(all[:keep-1:keep-1], all[selRow])
+		} else {
+			all = all[:keep]
+		}
+	}
+	for i := range all {
+		all[i].first = i == 0 || all[i-1].agent != all[i].agent
 	}
 	pl.lanes = all
 	return pl
+}
+
+// axisLabels is the axis row: the length of every break, then the start and end of every
+// burst where there is room (the overall start and end first, so they win). A label
+// that does not fit with its date is tried as a time alone.
+func (pl tlPlan) axisLabels() string {
+	tw := pl.axis.tw
+	row := make([]rune, tw)
+	taken := make([]bool, tw)
+	for i := range row {
+		row[i] = ' '
+	}
+	// put writes the first text that fits at the column from(len(text)), keeping a blank
+	// column to its neighbours when margin is set.
+	put := func(margin bool, from func(n int) int, texts ...string) {
+		for _, text := range texts {
+			n := len([]rune(text))
+			at := from(n)
+			lo, hi := at, at+n
+			if margin {
+				lo, hi = lo-1, hi+1
+			}
+			if at < 0 || at+n > tw {
+				continue
+			}
+			free := true
+			for c := max(0, lo); c < min(tw, hi); c++ {
+				free = free && !taken[c]
+			}
+			if free {
+				copy(row[at:], []rune(text))
+				for c := max(0, lo); c < min(tw, hi); c++ {
+					taken[c] = true
+				}
+				return
+			}
+		}
+	}
+	var bursts []axisSeg
+	for _, sg := range pl.axis.segs {
+		if sg.brk {
+			n := width(sg.marker())
+			put(false, func(int) int { return sg.x + (sg.w-n)/2 }, sg.marker())
+		} else {
+			bursts = append(bursts, sg)
+		}
+	}
+	texts := func(t time.Time) []string {
+		l := t.Local()
+		if pl.multiDay {
+			return []string{l.Format("01-02 15:04"), l.Format("15:04")}
+		}
+		return []string{l.Format("15:04")}
+	}
+	atStart := func(sg axisSeg) { put(true, func(int) int { return sg.x }, texts(sg.t0)...) }
+	atEnd := func(sg axisSeg) { put(true, func(n int) int { return sg.x + sg.w - n }, texts(sg.t1)...) }
+	atStart(bursts[0])
+	atEnd(bursts[len(bursts)-1])
+	for _, sg := range bursts[1:] {
+		atStart(sg)
+	}
+	for _, sg := range bursts[:len(bursts)-1] {
+		atEnd(sg)
+	}
+	return string(row)
 }
 
 func (m *model) timeline(p paint, s, d *data.Session, pl tlPlan, w int) block {
@@ -337,12 +392,23 @@ func (m *model) timeline(p paint, s, d *data.Session, pl tlPlan, w int) block {
 			fg     color.Color
 			bright bool
 		}
-		cells := make([]pc, pl.tw)
+		tw := pl.axis.tw
+		cells := make([]pc, tw)
+		for _, sg := range pl.axis.segs {
+			if !sg.brk {
+				continue
+			}
+			for c := sg.x; c < sg.x+sg.w; c++ {
+				cells[c] = pc{r: " "}
+			}
+			off := (sg.w - width(sg.marker())) / 2
+			cells[sg.x+off].r, cells[sg.x+sg.w-1-off].r = "┆", "┆"
+		}
 		for _, di := range lane.items {
 			xd := d.Dispatches[di]
 			st, en, _ := dispatchBounds(xd, pl.clock)
-			a, b := pl.x(st), pl.x(en)
-			for c := a; c <= b && c < pl.tw; c++ {
+			a, b := pl.axis.x(st), pl.axis.x(en)
+			for c := a; c <= b && c < tw; c++ {
 				g, fg := "█", col
 				switch {
 				case xd.Status == "running" && live:
@@ -368,6 +434,8 @@ func (m *model) timeline(p paint, s, d *data.Session, pl tlPlan, w int) block {
 			switch {
 			case c.r == "":
 				sb.WriteString(in.t("┈", mix(th.Surface, th.Border, 0.8)))
+			case c.fg == nil:
+				sb.WriteString(in.t(c.r, th.Faint))
 			case c.bright:
 				sb.WriteString(in.b(c.r, mix(c.fg, th.Text, 0.45)))
 			default:
@@ -383,36 +451,7 @@ func (m *model) timeline(p paint, s, d *data.Session, pl tlPlan, w int) block {
 	if pl.hidden > 0 {
 		lines = append(lines, in.t(fmt.Sprintf("+%d more rows", pl.hidden), th.Faint))
 	}
-	// time axis, with dates when the session spans more than one day
-	axis := make([]rune, pl.tw)
-	for i := range axis {
-		axis[i] = ' '
-	}
-	put := func(pos int, s string, anchor string) {
-		r := []rune(s)
-		start := pos
-		switch anchor {
-		case "mid":
-			start = pos - len(r)/2
-		case "end":
-			start = pos - len(r)
-		}
-		start = max(0, min(pl.tw-len(r), start))
-		for i, c := range r {
-			axis[start+i] = c
-		}
-	}
-	layout := "15:04"
-	if pl.multiDay {
-		layout = "01-02 15:04"
-	}
-	fmtT := func(t time.Time) string { return t.Local().Format(layout) }
-	put(0, fmtT(pl.t0), "start")
-	put(pl.tw-1, fmtT(pl.t1), "end")
-	if pl.tw >= 3*len(layout)+6 {
-		put(pl.tw/2, fmtT(pl.t0.Add(pl.t1.Sub(pl.t0)/2)), "mid")
-	}
-	lines = append(lines, in.sp(pl.labelW+3)+in.t(string(axis), th.Muted))
+	lines = append(lines, in.sp(pl.labelW+3)+in.t(pl.axisLabels(), th.Muted))
 	return p.boxed("Timeline", lines, w, pl.boxH(), th.Blue)
 }
 
@@ -423,8 +462,18 @@ type pill struct {
 	col  color.Color
 }
 
-// flagList is a dispatch's status and flags as pills.
-func (m *model) flagList(s *data.Session, x data.Dispatch) []pill {
+// shortFlag abbreviates a flag for the dispatch list: review-loop(resume x1) -> loop↻1.
+func shortFlag(f string) string {
+	f = strings.Replace(f, "review-loop", "loop", 1)
+	if i := strings.Index(f, "(resume x"); i >= 0 {
+		return f[:i] + "↻" + strings.TrimSuffix(f[i+len("(resume x"):], ")")
+	}
+	return f
+}
+
+// flagList is a dispatch's status and flags as pills; short abbreviates the flags
+// (the list), the detail pane spells them out.
+func (m *model) flagList(s *data.Session, x data.Dispatch, short bool) []pill {
 	th := m.th
 	var pls []pill
 	switch {
@@ -444,6 +493,9 @@ func (m *model) flagList(s *data.Session, x data.Dispatch) []pill {
 			col = th.Red
 		case "rechecked":
 			col = th.Orange
+		}
+		if short {
+			f = shortFlag(f)
 		}
 		pls = append(pls, pill{f, col})
 	}
@@ -501,9 +553,9 @@ func (m *model) dispLayout(iw int, s, d *data.Session) dispCols {
 	for _, x := range d.Dispatches {
 		c.agent = max(c.agent, width(x.AgentType)+2*max(0, x.Depth-1))
 		c.model = max(c.model, width(modelsText(x)))
-		c.flags = max(c.flags, pillsWidth(m.flagList(s, x)))
+		c.flags = max(c.flags, pillsWidth(m.flagList(s, x, true)))
 	}
-	c.agent = min(c.agent, 12)
+	c.agent = min(c.agent, 16)
 	c.model = min(c.model, 10)
 	c.flags = min(c.flags, 16)
 	c.inout = true
@@ -621,7 +673,7 @@ func (m *model) dispatchRow(s *data.Session, x data.Dispatch, selected bool, c d
 	line += q.t(cell(HumanInt(x.Usage.Total), totalW, true), th.Text) + q.sp(1)
 	line += q.t(cell(m.durText(s, x), durW, true), th.Muted)
 	if c.flags > 0 {
-		line += q.sp(1) + fit(m.flagPills(q, m.flagList(s, x), c.flags), c.flags, q)
+		line += q.sp(1) + fit(m.flagPills(q, m.flagList(s, x, true), c.flags), c.flags, q)
 	}
 	dc := th.Muted
 	if selected {
@@ -655,29 +707,32 @@ func (m *model) detailBox(p paint, s, d *data.Session, cur, w, h int) block {
 		ls = ls[:3]
 	}
 	status := x.Status
-	sc := th.Green
+	sc := th.Muted // a status we do not know is neither good nor bad
 	switch {
 	case m.unfinished(s, x):
 		sc, status = th.Orange, "unfinished"
 	case x.Status == "running":
 		sc, status = th.Blue, spin(m.spinFrame())+" running"
+	case x.Status == "completed":
+		sc = th.Green
 	case x.Status == "failed":
 		sc = th.Red
 	case x.Status == "no-run", x.Status == "orphan":
 		sc = th.Faint
 	}
-	ls = append(ls, in.t("● ", col)+in.b(x.AgentType, col)+in.t("  ·  ", th.Faint)+in.b(status, sc)+in.t("  ·  "+m.durText(s, x), th.Muted))
-	span := ""
+	ls = append(ls, in.t("● ", col)+in.b(x.AgentType, col)+in.t(" · ", th.Faint)+in.b(status, sc))
+	span := m.durText(s, x)
 	if x.Start != nil {
-		span = x.Start.Local().Format("15:04:05")
+		times := x.Start.Local().Format("15:04:05")
 		if x.ReturnedAt != nil {
-			span += " → " + x.ReturnedAt.Local().Format("15:04:05")
+			times += " → " + x.ReturnedAt.Local().Format("15:04:05")
 		}
-	}
-	if x.Resumes > 0 {
-		span += fmt.Sprintf("  (resumed ×%d)", x.Resumes)
+		span = times + " · " + span
 	}
 	ls = append(ls, in.t(span, th.Muted))
+	if x.Resumes > 0 {
+		ls = append(ls, in.t(fmt.Sprintf("resumed ×%d", x.Resumes), th.Muted))
+	}
 	var ms []string
 	for _, mo := range x.Models {
 		ms = append(ms, in.t("■ ", th.ModelColor(mo))+in.t(shortModel(mo), th.Text))
@@ -698,7 +753,7 @@ func (m *model) detailBox(p paint, s, d *data.Session, cur, w, h int) block {
 	}
 	ls = append(ls, in.t(cell("total", 8, false), th.Faint)+in.b(cell(HumanInt(x.Usage.Total), iw-8, false), th.Text))
 	if len(x.Flags) > 0 {
-		ls = append(ls, "", m.flagPills(in, m.flagList(s, x), iw))
+		ls = append(ls, "", m.flagPills(in, m.flagList(s, x, false), iw))
 	}
 	desc := func(agentID, toolUseID string) string {
 		for _, o := range d.Dispatches {

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -119,8 +120,12 @@ func TestChangeRefreshResultSequence(t *testing.T) {
 	if n := calls(t, dir, "session "+sidA); n != 2 {
 		t.Fatalf("%d fetches, want 2", n)
 	}
-	if got := m.details[sidA].LastChange; !got.Equal(at.Add(0)) && got.Before(at) {
-		t.Fatalf("result carries the mtime it was read at, got %v", got)
+	// each fetch is stamped with the mtime known when it started
+	if !d[0].at.Equal(at) || !d2[0].at.Equal(at.Add(3*time.Second)) {
+		t.Fatalf("fetches stamped %v and %v, want %v and %v", d[0].at, d2[0].at, at, at.Add(3*time.Second))
+	}
+	if got := m.details[sidA].LastChange; !got.Equal(at.Add(3 * time.Second)) {
+		t.Fatalf("the newest result carries the mtime it was read at, got %v", got)
 	}
 }
 
@@ -283,14 +288,47 @@ func TestNewLoadCancelsTheOneItReplaces(t *testing.T) {
 	if m.loadCtx.Err() != nil {
 		t.Fatal("the new load runs")
 	}
+	gen := m.loadGen
 	m.reload()
-	m.reload()
-	// quitting cancels everything: detail fetches live on the root context
-	ctx, cancel := contextPair()
-	q := New(Options{Ctx: ctx})
-	cancel()
-	if q.loadCtx.Err() == nil {
-		t.Fatal("quit must cancel the load context")
+	if m.loadGen != gen+1 {
+		t.Fatal("each load has its own generation")
+	}
+}
+
+// TestRunQuitCancelsCallsAndWaits drives the real Run loop: quitting must cancel the
+// python call in flight and return once it has ended, long before its own timeout.
+func TestRunQuitCancelsCallsAndWaits(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("STUBDIR", dir)
+	os.WriteFile(filepath.Join(dir, "hang"), nil, 0o644)
+	py, _ := filepath.Abs("../data/testdata/fakepy.sh")
+	r := &data.Runner{Root: "../..", Python: py, ProjectsDir: dir, Timeout: time.Minute}
+	if r.Check() != nil {
+		t.Skip("stub runner unusable")
+	}
+	in, w := io.Pipe()
+	done := make(chan error, 1)
+	start := time.Now()
+	go func() {
+		done <- runProgram(Options{Runner: r, NoColor: true}, tea.WithInput(in), tea.WithOutput(io.Discard), tea.WithWindowSize(100, 30))
+	}()
+	for calls(t, dir, "sessions") == 0 {
+		if time.Since(start) > 5*time.Second {
+			t.Fatal("the load never started")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	w.Write([]byte("q"))
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Run did not return after quit")
+	}
+	if time.Since(start) > 10*time.Second {
+		t.Fatal("quit waited for the call's timeout")
+	}
+	if _, err := r.Session(context.Background(), "x"); err == nil {
+		t.Fatal("Run must leave the runner closed: no call may start after quit")
 	}
 }
 
@@ -338,6 +376,134 @@ func TestIdleTickIsSupersededWhenAnimationStarts(t *testing.T) {
 	}
 }
 
-func contextPair() (ctx context.Context, cancel context.CancelFunc) {
-	return context.WithCancel(context.Background())
+// ---- robust poll ---------------------------------------------------------------------
+
+// pollModel is a model over a real projects directory: a readable project, one that
+// cannot be read, and a runner that answers with the stub.
+func pollModel(t *testing.T) (*model, string, string) {
+	t.Helper()
+	m, _ := stubModel(t)
+	root := t.TempDir()
+	m.runner.ProjectsDir = root
+	good, locked := filepath.Join(root, "good"), filepath.Join(root, "locked")
+	for _, p := range []string{good, locked} {
+		os.MkdirAll(p, 0o755)
+		os.WriteFile(filepath.Join(p, filepath.Base(p)+"-s.jsonl"), []byte("{}\n"), 0o644)
+	}
+	if err := os.Chmod(locked, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(root, 0o755); os.Chmod(locked, 0o755) })
+	if _, err := os.ReadDir(locked); err == nil {
+		t.Skip("directory permissions are not enforced")
+	}
+	m.sessions, m.details, m.seen, m.loaded = map[string]*data.Session{}, map[string]*data.Session{}, nil, false
+	return m, root, locked
+}
+
+func TestUnreadableProjectDoesNotStopTheLoadOrThePoll(t *testing.T) {
+	m, root, _ := pollModel(t)
+	var load sessionsMsg
+	for _, msg := range run(m.loadSessionsCmd()) {
+		load = msg.(sessionsMsg)
+	}
+	if load.scanErr != nil || load.seen["good-s"].IsZero() || len(load.seen) != 1 {
+		t.Fatalf("the readable project is scanned, the locked one skipped: %v err=%v", load.seen, load.scanErr)
+	}
+	upd(m, load)
+	if !m.loaded || m.seen == nil || m.scanErr != "" {
+		t.Fatalf("first load done: loaded=%v seen=%v scanErr=%q", m.loaded, m.seen, m.scanErr)
+	}
+	// polling runs, and a change to the readable project is noticed
+	m.sessions[sidA] = fakeSession(sidA, "alpha", 0, 1, 1)
+	m.polledAt = time.Time{}
+	got := only[scanMsg](upd(m, tickMsg{gen: m.tickGen}))
+	if len(got) != 1 || got[0].err != nil {
+		t.Fatalf("the poll must start after the first load: %+v", got)
+	}
+	upd(m, got[0])
+	// the root itself becoming unreadable is an error and marks the screen stale
+	os.Chmod(root, 0)
+	m.polledAt = time.Time{}
+	got = only[scanMsg](upd(m, tickMsg{gen: m.tickGen}))
+	if len(got) != 1 || got[0].err == nil {
+		t.Fatalf("an unreadable root fails the scan: %+v", got)
+	}
+	upd(m, got[0])
+	if m.scanErr == "" || !strings.Contains(plain(m), "stale") {
+		t.Fatalf("a failing poll must mark the screen stale (scanErr=%q)", m.scanErr)
+	}
+	m.polledAt = time.Time{}
+	got = only[scanMsg](upd(m, tickMsg{gen: m.tickGen}))
+	if len(got) != 1 {
+		t.Fatal("a failing poll keeps retrying")
+	}
+	upd(m, got[0])
+	// and it recovers
+	os.Chmod(root, 0o755)
+	m.polledAt = time.Time{}
+	upd(m, only[scanMsg](upd(m, tickMsg{gen: m.tickGen}))[0])
+	if m.scanErr != "" || strings.Contains(plain(m), "stale") {
+		t.Fatal("a scan that works again clears the stale marker")
+	}
+}
+
+func TestPollStartsAfterAFailedFirstLoad(t *testing.T) {
+	m, _, _ := pollModel(t)
+	os.WriteFile(filepath.Join(os.Getenv("STUBDIR"), "fail"), nil, 0o644)
+	var load sessionsMsg
+	for _, msg := range run(m.loadSessionsCmd()) {
+		load = msg.(sessionsMsg)
+	}
+	if load.err == nil {
+		t.Fatal("the load fails")
+	}
+	upd(m, load)
+	if !m.loaded || m.seen == nil {
+		t.Fatalf("a failed first load still starts the poll: loaded=%v seen=%v", m.loaded, m.seen)
+	}
+	m.polledAt = time.Time{}
+	if len(only[scanMsg](upd(m, tickMsg{gen: m.tickGen}))) != 1 {
+		t.Fatal("the poll runs after a failed first load")
+	}
+}
+
+func TestFailedSessionRefreshIsRetriedAtTheSlowCadence(t *testing.T) {
+	m, dir := stubModel(t)
+	m.scanning = true // keep the poll out of this
+	now := t0.Add(time.Hour)
+	m.now = func() time.Time { return now }
+	os.WriteFile(filepath.Join(dir, "fail"), nil, 0o644)
+	d := only[detailMsg](upd(m, changed(m, sidA, t0.Add(2*time.Hour))))
+	if len(d) != 1 || d[0].err == nil {
+		t.Fatalf("the refresh fails: %+v", d)
+	}
+	upd(m, d[0])
+	tick := func() []detailMsg { return only[detailMsg](upd(m, tickMsg{gen: m.tickGen})) }
+	for i := 0; i < 5; i++ { // the transcript stays unchanged: nothing retries before the cadence
+		now = now.Add(time.Second)
+		if got := tick(); len(got) != 0 {
+			t.Fatalf("tick %d retried early", i)
+		}
+	}
+	now = now.Add(agentsEvery)
+	again := tick()
+	if len(again) != 1 || again[0].err == nil {
+		t.Fatalf("the due retry runs (and fails again here): %+v", again)
+	}
+	upd(m, again[0])
+	os.Remove(filepath.Join(dir, "fail"))
+	now = now.Add(agentsEvery)
+	ok := tick()
+	if len(ok) != 1 || ok[0].err != nil || !ok[0].at.Equal(t0.Add(2*time.Hour)) {
+		t.Fatalf("the retry succeeds with the mtime of the unchanged transcript: %+v", ok)
+	}
+	upd(m, ok[0])
+	if len(m.retry) != 0 || !m.details[sidA].LastChange.Equal(t0.Add(2*time.Hour)) {
+		t.Fatalf("a success ends the retries: %v", m.retry)
+	}
+	now = now.Add(agentsEvery)
+	if got := tick(); len(got) != 0 {
+		t.Fatal("nothing left to retry")
+	}
 }

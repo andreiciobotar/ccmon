@@ -44,8 +44,8 @@ const (
 	toastFor    = 4 * time.Second
 	tickFast    = 80 * time.Millisecond
 	tickSlow    = 400 * time.Millisecond
-	tickIdle    = time.Second // also the transcript poll interval
-	pollEvery   = time.Second
+	tickIdle    = time.Second // redraw interval when nothing moves
+	pollEvery   = time.Second // transcript mtime poll interval
 	minWidth    = 60
 	minHeight   = 16
 )
@@ -108,10 +108,14 @@ type model struct {
 	agentsAt    time.Time // when the agents aggregate last finished, ok or not
 
 	// seen is the newest transcript mtime per session id as of the last scan; nil until
-	// the first load gives the poll a baseline.
+	// the first load has finished, which is also when polling starts.
 	seen     map[string]time.Time
+	loaded   bool   // the first load has finished, whatever its outcome
+	scanErr  string // the last scan failed (the projects root cannot be read): data is stale
 	scanning bool
 	polledAt time.Time
+	// retry: per-session refreshes that failed, with when; tried again every agentsEvery.
+	retry map[string]time.Time
 	// dirty: changed while its refresh was in flight. inflight: a detail fetch is running.
 	dirty    map[string]bool
 	inflight map[string]bool
@@ -148,7 +152,7 @@ func New(o Options) *model {
 		opts: o, th: NewTheme(o.NoColor), runner: o.Runner, now: o.Now, ctx: o.Ctx,
 		w: 100, h: 30, rangeIdx: idx, follow: o.Follow, loading: true,
 		sessions: map[string]*data.Session{}, details: map[string]*data.Session{},
-		dirty: map[string]bool{}, inflight: map[string]bool{}, counter: map[string]*Counter{},
+		dirty: map[string]bool{}, inflight: map[string]bool{}, retry: map[string]time.Time{}, counter: map[string]*Counter{},
 		rowTok: map[string]*Counter{}, flash: map[string]time.Time{},
 	}
 	m.loadCtx, m.loadCancel = context.WithCancel(m.ctx)
@@ -164,10 +168,11 @@ func New(o Options) *model {
 // ---- messages ----------------------------------------------------------------
 
 type sessionsMsg struct {
-	gen  int
-	res  *data.SessionsResult
-	seen map[string]time.Time // mtimes taken before the read
-	err  error
+	gen     int
+	res     *data.SessionsResult
+	seen    map[string]time.Time // mtimes taken before the read
+	err     error
+	scanErr error // the scan behind seen failed
 }
 type agentsMsg struct {
 	gen int
@@ -208,14 +213,14 @@ func (m *model) loadSessionsCmd() tea.Cmd {
 	r, ctx, since, gen := m.runner, m.loadCtx, ranges[m.rangeIdx].since, m.loadGen
 	return func() tea.Msg {
 		// stat first: anything written after this shows up as a change in the poll
-		seen, _ := data.Scan(r.Projects())
+		seen, scanErr := data.Scan(r.Projects())
 		res, err := r.Sessions(ctx, since)
 		if err == nil {
 			for i := range res.Sessions {
 				res.Sessions[i].LastChange = seen[res.Sessions[i].ID]
 			}
 		}
-		return sessionsMsg{gen: gen, res: res, seen: seen, err: err}
+		return sessionsMsg{gen: gen, res: res, seen: seen, err: err, scanErr: scanErr}
 	}
 }
 
@@ -241,6 +246,7 @@ func (m *model) fetchSession(id string) tea.Cmd {
 	}
 	m.inflight[id] = true
 	delete(m.dirty, id)
+	delete(m.retry, id)
 	r, ctx, at := m.runner, m.ctx, m.seen[id]
 	return func() tea.Msg {
 		res, err := r.Session(ctx, id)
@@ -589,20 +595,23 @@ func (m *model) mergeSession(ns *data.Session) {
 	m.retarget(false)
 }
 
+// mergeSeen folds the mtimes a load took into the poll baseline; afterwards seen is
+// never nil.
+func (m *model) mergeSeen(seen map[string]time.Time) {
+	if m.seen == nil {
+		m.seen = map[string]time.Time{}
+	}
+	for id, t := range seen {
+		if t.After(m.seen[id]) {
+			m.seen[id] = t
+		}
+	}
+}
+
 // mergeLoad folds a full load into the model. The load read its data after taking its
 // mtimes, so a session whose data is newer than that (a per-session refresh landed
 // meanwhile) is kept as it is.
 func (m *model) mergeLoad(msg sessionsMsg) {
-	if msg.seen != nil {
-		if m.seen == nil {
-			m.seen = map[string]time.Time{}
-		}
-		for id, t := range msg.seen {
-			if t.After(m.seen[id]) {
-				m.seen[id] = t
-			}
-		}
-	}
 	next := map[string]*data.Session{}
 	for i := range msg.res.Sessions {
 		s := &msg.res.Sessions[i]
@@ -664,6 +673,7 @@ func (m *model) applyScan(cur map[string]time.Time) []tea.Cmd {
 		if _, ok := cur[id]; !ok {
 			delete(m.seen, id)
 			delete(m.dirty, id)
+			delete(m.retry, id)
 			delete(m.sessions, id)
 			m.agentsDirty = true
 			if m.view == viewSession && m.selID == id {
@@ -746,7 +756,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.gen != m.loadGen {
 			break
 		}
-		m.loading = false
+		m.loading, m.loaded = false, true
+		m.mergeSeen(msg.seen)
+		m.setScanErr(msg.scanErr)
 		if msg.err != nil {
 			m.noteFailure(msg.err)
 			break
@@ -784,8 +796,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case msg.err != nil:
 			if m.sessions[msg.id] != nil {
 				m.noteFailure(msg.err)
+				m.retry[msg.id] = m.now()
 			}
 		case exists:
+			delete(m.retry, msg.id)
 			m.refreshErr = ""
 			msg.res.LastChange = msg.at
 			m.mergeSession(msg.res)
@@ -799,7 +813,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case scanMsg:
 		m.scanning = false
-		if msg.err == nil && m.seen != nil {
+		m.setScanErr(msg.err)
+		if msg.err == nil {
 			cmds = append(cmds, m.applyScan(msg.seen)...)
 			m.fixScroll()
 		}
@@ -811,9 +826,14 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.tickOn = false
 		now := m.now()
 		m.step(now.Sub(m.tickFrom))
-		if m.seen != nil && !m.scanning && now.Sub(m.polledAt) >= pollEvery {
+		if m.loaded && !m.scanning && now.Sub(m.polledAt) >= pollEvery {
 			m.polledAt = now
 			cmds = append(cmds, m.scanCmd())
+		}
+		for id, at := range m.retry {
+			if now.Sub(at) >= agentsEvery && !m.inflight[id] {
+				cmds = append(cmds, m.fetchSession(id))
+			}
 		}
 		if m.agentsDirty && !m.agentsBusy && now.Sub(m.agentsAt) >= agentsEvery {
 			cmds = append(cmds, m.loadAgentsCmd())
@@ -824,6 +844,19 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	cmds = append(cmds, m.ensureTick())
 	return m, tea.Batch(cmds...)
+}
+
+// setScanErr records whether the last scan worked; a failing one marks the screen
+// stale, with one toast when it starts failing.
+func (m *model) setScanErr(err error) {
+	if err == nil {
+		m.scanErr = ""
+		return
+	}
+	if m.scanErr == "" && len(m.sessions) > 0 {
+		m.setToast("scan failed: "+firstLine(err.Error()), true)
+	}
+	m.scanErr = err.Error()
 }
 
 func (m *model) noteFailure(err error) {

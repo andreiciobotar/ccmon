@@ -167,6 +167,25 @@ func TestScan(t *testing.T) {
 	}
 }
 
+func TestScanSkipsUnreadableProject(t *testing.T) {
+	root := t.TempDir()
+	t1 := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
+	writeTranscript(t, filepath.Join(root, "good", "s1.jsonl"), t1)
+	writeTranscript(t, filepath.Join(root, "locked", "s2.jsonl"), t1)
+	locked := filepath.Join(root, "locked")
+	if err := os.Chmod(locked, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(locked, 0o755) })
+	if _, err := os.ReadDir(locked); err == nil {
+		t.Skip("directory permissions are not enforced (running as root?)")
+	}
+	got, err := Scan(root)
+	if err != nil || len(got) != 1 || !got["s1"].Equal(t1) {
+		t.Fatalf("an unreadable project is skipped: %v, %v", got, err)
+	}
+}
+
 func stubRunner(t *testing.T) *Runner {
 	t.Helper()
 	dir := t.TempDir()
@@ -211,5 +230,16 @@ func TestCancelKillsCallAndWaitReturns(t *testing.T) {
 	case <-waited:
 	case <-time.After(5 * time.Second):
 		t.Fatal("Wait did not return after cancel")
+	}
+}
+
+func TestCallAfterWaitDoesNotStart(t *testing.T) {
+	r := stubRunner(t)
+	r.Wait()
+	if _, err := r.Session(context.Background(), "x"); err == nil {
+		t.Fatal("a call after Wait must fail")
+	}
+	if _, err := os.Stat(filepath.Join(os.Getenv("STUBDIR"), "calls")); err == nil {
+		t.Fatal("no process may start after Wait")
 	}
 }

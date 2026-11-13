@@ -5,10 +5,10 @@
 ▌ 1 sessions         ▌ ████████░░░░░░░   ▌ 18.0 per session  ▌ re-dispatches     ▌ reviewer → coder  ▌ claims re-read    ▌ wrong model used 
                                                                                                                                             
 ╭─ Sessions 1 ──────────────────────────────────────────────────────────────────────────────────────╮ ╭─ Agent mix ────────────────────────╮
-│    PROJECT                SESSION  ACTIVE       TOKENS MAIN│SUB DISP SIGNALS                      │ │ ● explorer        █████░░░░░░  47% │
-│ >· cwd                    fixture- 01-01 10:30     670 ████▓▓▓▓   18 [WARN 1] [repeat 1] [loop 3] │ │ ● main            █████░░░░░░  45% │
+│    PROJECT                SESSION  ACTIVE       TOKENS MAIN│SUB DISP SIGNALS                      │ │ ● main            █████░░░░░░  45% │
+│ >· cwd                    fixture- 01-01 10:30     670 ████▓▓▓▓   18 [WARN 1] [repeat 1] [loop 3] │ │ ● coder           ░░░░░░░░░░░   3% │
 │                                                                                                   │ │ ● reviewer        █░░░░░░░░░░   5% │
-│                                                                                                   │ │ ● coder           ░░░░░░░░░░░   3% │
+│                                                                                                   │ │ ● explorer        █████░░░░░░  47% │
 │                                                                                                   │ │ ● general-purpose ░░░░░░░░░░░   1% │
 │                                                                                                   │ ╰────────────────────────────────────╯
 │                                                                                                   │ ╭─ Model mix ────────────────────────╮

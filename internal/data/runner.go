@@ -2,6 +2,7 @@ package data
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -32,7 +33,9 @@ type Runner struct {
 	Timeout     time.Duration // per call; default callTimeout
 	Err         error         // set when the root could not be located; reported by Check
 
-	calls sync.WaitGroup
+	mu     sync.Mutex
+	closed bool // set by Wait: no call starts after it
+	calls  sync.WaitGroup
 }
 
 // Projects is the transcripts root the CLI reads.
@@ -44,8 +47,25 @@ func (r *Runner) Projects() string {
 	return filepath.Join(home, ".claude", "projects")
 }
 
-// Wait blocks until every call has returned; cancel their context first.
-func (r *Runner) Wait() { r.calls.Wait() }
+// Wait blocks until every call has returned; cancel their context first. Calls
+// requested afterwards fail without starting a process.
+func (r *Runner) Wait() {
+	r.mu.Lock()
+	r.closed = true
+	r.mu.Unlock()
+	r.calls.Wait()
+}
+
+// begin registers a call; false once Wait has been called.
+func (r *Runner) begin() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed {
+		return false
+	}
+	r.calls.Add(1)
+	return true
+}
 
 // LocateRoot finds the repo root: $CCMON_ROOT, else walking up from the executable
 // (bin/ccmon-tui -> ..), else walking up from the working directory.
@@ -106,7 +126,9 @@ func (r *Runner) python() string {
 }
 
 func (r *Runner) run(ctx context.Context, out any, args ...string) error {
-	r.calls.Add(1)
+	if !r.begin() {
+		return cmp.Or(ctx.Err(), context.Canceled)
+	}
 	defer r.calls.Done()
 	timeout := r.Timeout
 	if timeout <= 0 {
