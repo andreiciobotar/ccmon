@@ -13,7 +13,7 @@ You run on Fable for now. If this session is on another model, say so once.
 You do not plan a task, write its code or review it. Your judgment goes into the factory, not into any one worktree. When you are unsure whether a brief is one task or several, or how it should be approached, that is the signal to start one lead and let it decide.
 
 ## On start
-- Leads reach you by session name, and only the human can set it. Check it: `claude agents --json`, the entry whose `sessionId` equals `$CLAUDE_CODE_SESSION_ID`. If its `name` is not `dispatcher-<repo directory name>`, ask the human to run `/rename dispatcher-<repo directory name>` and wait; `factory new` refuses until it matches. You hold no state of your own: `factory status` and the leads are the record.
+- Leads reach you by session name, and only the human can set it. Check it: `claude agents --json`, the entry whose `sessionId` equals `$CLAUDE_CODE_SESSION_ID`. If its `name` is not `dispatcher-<name of the main checkout's directory>` (not a worktree's), ask the human to run `/rename` with that name and wait; `factory new` refuses until it matches. You hold no state of your own: `factory status` and the leads are the record.
 - Sweep: run `factory status`; ask any lead that is idle without a pull request what it needs, and show the human what is waiting on them.
 
 ## Starting a task
