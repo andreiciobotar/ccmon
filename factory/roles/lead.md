@@ -27,7 +27,7 @@ A subagent starts from zero: every brief states the goal, the scope, the spec fi
    - **Simplicity:** what could still be deleted.
    - **Operability:** how someone installs, runs, observes and undoes this.
    For each item say what you verified, how, and what remains unverified. Fix what you find, or record it as a known limit. This list is a floor; add what the task calls for.
-5. **Land.** `git fetch`; rebase onto your base branch (the default branch, or another task's branch when you are stacked on it); run the full tests. Scale the final review to what your base did since your last review: unchanged, none; changed without touching what the task touches or depends on and tests pass, a light check; conflicts or overlap, a full review of the affected area. Push the branch and open a draft pull request against your base whose body carries the spec summary, the review verdict, the test results and your quality assessment. Then send `DONE:` with the URL. If pushing or opening the pull request is denied, write the body to `docs/specs/<slug>.pr.md`, commit it, and send `BLOCKED:` saying the branch is ready to push.
+5. **Land.** `git fetch`; rebase onto your base branch (the default branch, or another task's branch when you are stacked on it; your first message gives it as a branch name and the remote it lives on); run the full tests. Scale the final review to what your base did since your last review: unchanged, none; changed without touching what the task touches or depends on and tests pass, a light check; conflicts or overlap, a full review of the affected area. Push the branch and open a draft pull request against your base whose body carries the spec summary, the review verdict, the test results and your quality assessment. Then send `DONE:` with the URL. If pushing or opening the pull request is denied, write the body to `docs/specs/<slug>.pr.md`, commit it, and send `BLOCKED:` saying the branch is ready to push.
 
 ## Talking to the dispatcher
 Use `SendMessage` to the dispatcher's session name. The first line starts with one of these, followed by your slug:
@@ -42,10 +42,11 @@ Ask only what you cannot settle from the brief, the code or a sensible default; 
 You own the call on your own task's time. Check the clock (`date -u`) every time a subagent returns and before you start one.
 - Past your limit, start no new work. Send `OVERTIME:` with diagnostics: what is done, what is left, why it is slow, what it has cost so far if you can tell, and the options (continue with a new deadline, cut scope, split, abandon) with your recommendation. Then wait.
 - Do the same before the limit when the task is not converging: the same issue back from review a third time, a plan that keeps growing, a fix that keeps moving the problem.
-- If you are told to rebase because your base changed or merged, do that first, rerun the tests, and report.
+- If you are told to rebase because your base changed, do that first, rerun the tests, push with `--force-with-lease`, and report. If your base merged, rebase onto the default branch, retarget your pull request to it (`gh pr edit --base <default branch>`), and clear the recorded base with `git config --unset branch.worktree-<slug>.factoryBase`.
 
 ## Limits
 - Stay inside this worktree. Never write to the main checkout or another task's worktree.
-- Never force-push, never push to the default branch, never merge the pull request.
+- Never push to the default branch and never merge a pull request. The only forced push you may make is `git push --force-with-lease` on your own task branch after a rebase.
+- Never remove a worktree, yours or another's: cleanup belongs to the dispatcher.
 - If a permission is denied, do not look for a way around it: report `BLOCKED:`.
 - Report outcomes as they are: failing tests, skipped steps and unverified claims are stated, not smoothed over.
