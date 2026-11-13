@@ -1,0 +1,366 @@
+#!/usr/bin/env python3
+"""factory: start, list and clean task worktrees run by lead sessions."""
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+PLUGIN_ROOT = Path(__file__).resolve().parent.parent
+SETTINGS_PATH = Path("~/.claude/factory/settings.json")
+PERMISSION_MODES = ("acceptEdits", "auto", "bypassPermissions", "manual", "dontAsk", "plan")
+STALE_SECONDS = 7 * 24 * 3600
+SLUG_RE = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*")
+BACKGROUNDED_RE = re.compile(r"backgrounded\s*·\s*(\S+)\s*·\s*(.+)")
+
+
+class Fail(Exception):
+    """A usage or precondition error: one line on stderr, exit 2."""
+
+
+def run(argv, cwd=None):
+    """The only place git, claude and gh are executed. Returns (returncode, stdout, stderr)."""
+    try:
+        p = subprocess.run(argv, cwd=cwd, capture_output=True, text=True)
+    except OSError as e:
+        return 127, "", str(e)
+    return p.returncode, p.stdout, p.stderr
+
+
+def validate_slug(slug):
+    if not 3 <= len(slug) <= 40 or not SLUG_RE.fullmatch(slug):
+        raise Fail(f"invalid slug {slug!r}: 3 to 40 characters, lowercase letters, digits and single hyphens")
+    if slug.startswith("agent-"):
+        raise Fail(f"invalid slug {slug!r}: must not start with 'agent-'")
+
+
+def load_settings():
+    settings = {"worktree_cap": 5, "lead_model": "fable", "lead_permission_mode": "auto",
+                "task_time_limit_hours": 2}
+    try:
+        data = json.loads(SETTINGS_PATH.expanduser().read_text())
+    except (OSError, ValueError):
+        return settings
+    if not isinstance(data, dict):
+        return settings
+    cap = data.get("worktree_cap", settings["worktree_cap"])
+    if isinstance(cap, bool) or not isinstance(cap, int) or cap < 1:
+        raise Fail("settings: worktree_cap must be an integer of at least 1")
+    model = data.get("lead_model", settings["lead_model"])
+    if not isinstance(model, str) or not model.strip():
+        raise Fail("settings: lead_model must be a non-empty string")
+    mode = data.get("lead_permission_mode", settings["lead_permission_mode"])
+    if mode not in PERMISSION_MODES:
+        raise Fail(f"settings: lead_permission_mode must be one of {', '.join(PERMISSION_MODES)}")
+    hours = data.get("task_time_limit_hours", settings["task_time_limit_hours"])
+    if isinstance(hours, bool) or not isinstance(hours, (int, float)) or not hours > 0:
+        raise Fail("settings: task_time_limit_hours must be a positive number")
+    return {"worktree_cap": cap, "lead_model": model, "lead_permission_mode": mode,
+            "task_time_limit_hours": hours}
+
+
+def build_launch_argv(slug, dispatcher, brief, settings, base, now):
+    """The lead's launch command: the one place another runner would plug in."""
+    lead_rules = (PLUGIN_ROOT / "roles" / "lead.md").read_text()
+    prompt = (
+        f"Your task slug is {slug}. The dispatcher's session name is {dispatcher}. "
+        f"Your base branch is {base}. You started at {time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(now))}. "
+        f"Your time limit is {settings['task_time_limit_hours']} hours. "
+        f"Your brief follows.\n\n{brief}"
+    )
+    return [
+        "claude", "--bg", "--worktree", slug, "-n", slug,
+        "--model", settings["lead_model"],
+        "--permission-mode", settings["lead_permission_mode"],
+        "--plugin-dir", str(PLUGIN_ROOT),
+        "--append-system-prompt", lead_rules,
+        prompt,
+    ]
+
+
+# ---- repo state -------------------------------------------------------------
+
+def parse_worktrees(porcelain):
+    entries, cur = [], None
+    for line in porcelain.splitlines():
+        if line.startswith("worktree "):
+            cur = {"path": os.path.realpath(line[9:]), "branch": None, "prunable": False}
+            entries.append(cur)
+        elif cur is not None and line.startswith("branch "):
+            cur["branch"] = line[7:].removeprefix("refs/heads/")
+        elif cur is not None and line.startswith("prunable"):
+            cur["prunable"] = True
+    return entries
+
+
+class Repo:
+    def __init__(self):
+        rc, out, _ = run(["git", "worktree", "list", "--porcelain"])
+        entries = parse_worktrees(out) if rc == 0 else []
+        if not entries:
+            raise Fail("not inside a git repository")
+        self.root = entries[0]["path"]
+        base = os.path.join(self.root, ".claude", "worktrees")
+        live = [e for e in entries[1:] if not e["prunable"]]
+        under = [e for e in live if os.path.dirname(e["path"]) == base]
+        self.tasks = [e for e in under if not os.path.basename(e["path"]).startswith("agent-")]
+        self.leftover = len(under) - len(self.tasks)
+        self.outside = len(live) - len(under)
+        rc, out, _ = run(["git", "symbolic-ref", "refs/remotes/origin/HEAD"], cwd=self.root)
+        self.base = out.strip().removeprefix("refs/remotes/") if rc == 0 and out.strip() else "main"
+
+    def git(self, *args, path=None):
+        return run(["git", *args], cwd=path or self.root)
+
+    def worktree_path(self, slug):
+        return os.path.join(self.root, ".claude", "worktrees", slug)
+
+
+def list_sessions():
+    """Sessions from `claude agents`, or None when they cannot be listed."""
+    rc, out, _ = run(["claude", "agents", "--json", "--all"])
+    try:
+        data = json.loads(out)
+    except ValueError:
+        return None
+    return data if rc == 0 and isinstance(data, list) else None
+
+
+def session_for(sessions, path):
+    found = [s for s in sessions if os.path.realpath(s.get("cwd", "")) == path]
+    return next((s for s in found if s.get("kind") == "background"), found[0] if found else None)
+
+
+def pull_request(repo, branch):
+    """(state, url, head sha); state is 'unknown' when gh cannot answer."""
+    rc, out, _ = run(
+        ["gh", "pr", "list", "--head", branch, "--state", "all", "--limit", "1",
+         "--json", "state,url,headRefOid"], cwd=repo.root)
+    try:
+        prs = json.loads(out)
+    except ValueError:
+        prs = None
+    if rc != 0 or not isinstance(prs, list):
+        return "unknown", "", ""
+    if not prs:
+        return "none", "", ""
+    return prs[0]["state"].lower(), prs[0]["url"], prs[0].get("headRefOid", "")
+
+
+def collect(repo, limit_hours):
+    """One row per task worktree."""
+    sessions = list_sessions()
+    now = time.time()
+    rows = []
+    for wt in repo.tasks:
+        path, branch = wt["path"], wt["branch"]
+        slug = os.path.basename(path)
+        row = {"slug": slug, "branch": branch, "path": path}
+        session = session_for(sessions, path) if sessions is not None else None
+        row["session_id"] = session.get("id") if session else None
+        row["session"] = "unknown" if sessions is None else (
+            (session.get("state") or session.get("status", "unknown")) if session else "none")
+        row["busy"] = bool(session) and session.get("status") == "busy"
+        recorded = repo.git("config", "--get", f"branch.{branch}.factoryBase")[1].strip() if branch else ""
+        row["base"] = recorded or repo.base
+        started = session.get("startedAt") if session else None
+        row["elapsed"] = int(now - started / 1000) if started else None
+        working = bool(session) and (session.get("status") == "busy" or session.get("state") == "working")
+        row["overtime"] = working and row["elapsed"] is not None and row["elapsed"] > limit_hours * 3600
+        rc, out, _ = repo.git("status", "--porcelain", path=path)
+        row["dirty"] = bool(out.strip()) if rc == 0 else None
+        rc, out, _ = repo.git("rev-list", "--left-right", "--count", f"{row['base']}...HEAD", path=path)
+        counts = out.split()
+        row["behind"], row["ahead"] = (int(counts[0]), int(counts[1])) if rc == 0 and len(counts) == 2 else (None, None)
+        rc, out, _ = repo.git("log", "-1", "--format=%ct %H", path=path)
+        ts, _, row["head"] = out.strip().partition(" ")
+        row["last_commit"] = int(ts) if rc == 0 and ts.isdigit() else None
+        row["pr_state"], row["pr_url"], row["pr_head"] = (
+            pull_request(repo, branch) if branch else ("unknown", "", ""))
+        activity = (session.get("updatedAt") or session.get("startedAt")) if session else None
+        times = [t for t in (row["last_commit"], activity and activity / 1000) if t]
+        row["stale"] = bool(times) and now - max(times) > STALE_SECONDS
+        rows.append(row)
+    return rows
+
+
+# ---- commands ---------------------------------------------------------------
+
+def cmd_new(args):
+    validate_slug(args.slug)
+    if args.brief_file:
+        try:
+            brief = Path(args.brief_file).read_text()
+        except OSError as e:
+            raise Fail(f"cannot read brief file: {e}")
+    else:
+        brief = args.brief
+    if not brief.strip():
+        raise Fail("the brief is empty")
+    settings = load_settings()
+    repo = Repo()
+    branch = f"worktree-{args.slug}"
+    path = repo.worktree_path(args.slug)
+    base = repo.base
+    if args.base:
+        if not any(os.path.basename(t["path"]) == args.base for t in repo.tasks):
+            raise Fail(f"--base {args.base} is not an open task")
+        base = f"worktree-{args.base}"
+    if os.path.exists(path) or any(t["path"] == path for t in repo.tasks):
+        raise Fail(f"worktree already exists: {path}")
+    if repo.git("rev-parse", "--verify", "--quiet", f"refs/heads/{branch}")[0] == 0:
+        raise Fail(f"branch already exists: {branch}")
+    sessions = list_sessions()
+    if sessions is None:
+        raise Fail("cannot list sessions with `claude agents --json --all`")
+    if any(s.get("name") == args.slug for s in sessions):
+        raise Fail(f"a session named {args.slug} already exists")
+    if len(repo.tasks) >= settings["worktree_cap"]:
+        open_tasks = ", ".join(os.path.basename(t["path"]) for t in repo.tasks)
+        raise Fail(f"at the cap of {settings['worktree_cap']} worktrees; open tasks: {open_tasks}")
+    if args.base:
+        for argv in (["worktree", "add", "-b", branch, path, base],
+                     ["config", f"branch.{branch}.factoryBase", base]):
+            rc, _, err = repo.git(*argv)
+            if rc != 0:
+                if argv[0] == "config":
+                    remove_stacked(repo, path, branch)
+                raise Fail(f"git {' '.join(argv)} failed: {err.strip()}")
+    rc, out, err = run(build_launch_argv(args.slug, args.dispatcher, brief, settings, base, time.time()),
+                       cwd=repo.root)
+    match = BACKGROUNDED_RE.search(out)
+    if rc != 0 or not match:
+        if args.base:
+            remove_stacked(repo, path, branch)
+        sys.stderr.write(err or out)
+        print("factory: claude did not start the session", file=sys.stderr)
+        return 1
+    print(f"started {match.group(2).strip()} (session {match.group(1)})")
+    return 0
+
+
+def remove_stacked(repo, path, branch):
+    """Undo the worktree and branch `new --base` created; they hold no work of their own."""
+    repo.git("worktree", "remove", "--force", path)
+    repo.git("branch", "-D", branch)
+
+
+def age(ts, now):
+    if ts is None:
+        return "?"
+    secs = max(0, now - ts)
+    for unit, size in (("d", 86400), ("h", 3600), ("m", 60)):
+        if secs >= size:
+            return f"{int(secs // size)}{unit}"
+    return "now"
+
+
+def cmd_status(args):
+    repo = Repo()
+    settings = load_settings()
+    cap = settings["worktree_cap"]
+    rows = collect(repo, settings["task_time_limit_hours"])
+    if args.json:
+        doc = {"rows": rows, "cap": cap, "open": len(rows),
+               "leftover_agent_worktrees": repo.leftover, "outside_worktrees": repo.outside}
+        print(json.dumps(doc, indent=2))
+        return 0
+    now = time.time()
+    table = [["SLUG", "BRANCH", "BASE", "SESSION", "ELAPSED", "CHANGES", "AHEAD/BEHIND", "LAST COMMIT", "PR", "FLAGS"]]
+    for r in rows:
+        ab = "?" if r["ahead"] is None else f"+{r['ahead']}/-{r['behind']}"
+        changes = "?" if r["dirty"] is None else ("dirty" if r["dirty"] else "clean")
+        pr = r["pr_state"] + (f" {r['pr_url']}" if r["pr_url"] else "")
+        flags = " ".join(f for f in ("overtime" if r["overtime"] else "", "stale" if r["stale"] else "") if f)
+        elapsed = "-" if r["elapsed"] is None else age(now - r["elapsed"], now)
+        table.append([r["slug"], r["branch"] or "(detached)", r["base"], r["session"], elapsed, changes, ab,
+                      age(r["last_commit"], now), pr, flags])
+    widths = [max(len(row[i]) for row in table) for i in range(len(table[0]))]
+    if rows:
+        for row in table:
+            print("  ".join(c.ljust(w) for c, w in zip(row, widths)).rstrip())
+    print(f"open {len(rows)}/{cap}; leftover agent worktrees {repo.leftover}; "
+          f"worktrees outside .claude/worktrees {repo.outside}")
+    return 0
+
+
+def keep_reason(repo, row, rows):
+    """Why a task must stay, or None when it is safe to remove."""
+    if not row["branch"]:
+        return "detached HEAD, no branch to judge"
+    if row["dirty"] is not False:
+        return "uncommitted changes" if row["dirty"] else "cannot read git status"
+    if row["busy"]:
+        return "its session is busy"
+    stacked = [r["slug"] for r in rows if r["base"] == row["branch"]]
+    if stacked:
+        return f"{', '.join(stacked)} is stacked on it"
+    if repo.git("merge-base", "--is-ancestor", row["branch"], repo.base)[0] == 0:
+        return None
+    if row["pr_state"] == "merged":
+        if row["head"] == row["pr_head"]:
+            return None
+        return "commits newer than its merged pull request"
+    if row["pr_state"] == "unknown":
+        return f"not merged into {repo.base}, and the pull request state is unknown"
+    return f"not merged into {repo.base} and no merged pull request ({row['pr_state']})"
+
+
+def cmd_clean(args):
+    repo = Repo()
+    failed = False
+    rows = collect(repo, load_settings()["task_time_limit_hours"])
+    for row in rows:
+        reason = keep_reason(repo, row, rows)
+        if reason:
+            print(f"kept {row['slug']}: {reason}")
+        elif args.dry_run:
+            print(f"would remove {row['slug']}")
+        else:
+            if row["session_id"]:
+                steps = [["claude", "rm", row["session_id"]]]
+            else:
+                steps = [["git", "worktree", "remove", row["path"]],
+                         ["git", "branch", "-d", row["branch"]]]
+            for argv in steps:
+                rc, _, err = run(argv, cwd=repo.root)
+                if rc != 0:
+                    print(f"failed {row['slug']}: {' '.join(argv)}: {err.strip()}", file=sys.stderr)
+                    failed = True
+                    break
+            else:
+                print(f"removed {row['slug']}")
+    return 1 if failed else 0
+
+
+def parse_args(argv):
+    parser = argparse.ArgumentParser(prog="factory", description=__doc__)
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    new = sub.add_parser("new", help="start a lead for a task")
+    new.add_argument("slug")
+    group = new.add_mutually_exclusive_group(required=True)
+    group.add_argument("--brief")
+    group.add_argument("--brief-file")
+    new.add_argument("--dispatcher", required=True, help="the dispatcher's session name")
+    new.add_argument("--base", help="slug of an open task to stack this task on")
+    status = sub.add_parser("status", help="one row per task worktree")
+    status.add_argument("--json", action="store_true")
+    clean = sub.add_parser("clean", help="remove finished tasks")
+    clean.add_argument("--dry-run", action="store_true")
+    return parser.parse_args(argv)
+
+
+def main(argv=None):
+    args = parse_args(sys.argv[1:] if argv is None else argv)
+    try:
+        return {"new": cmd_new, "status": cmd_status, "clean": cmd_clean}[args.cmd](args)
+    except Fail as e:
+        print(f"factory: {e}", file=sys.stderr)
+        return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main())

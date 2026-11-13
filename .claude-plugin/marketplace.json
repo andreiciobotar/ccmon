@@ -1,0 +1,11 @@
+{
+  "name": "factory",
+  "owner": { "name": "Andrei Ciobotar" },
+  "plugins": [
+    {
+      "name": "factory",
+      "source": "./factory",
+      "description": "Dispatcher and leads that turn briefs into pull requests, one worktree per task."
+    }
+  ]
+}
