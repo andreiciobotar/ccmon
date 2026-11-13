@@ -24,6 +24,5 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.11" # the oldest version the code supports
-      - run: go test -v ./... | grep -E -- '--- SKIP|^(ok|FAIL)' || true
       - run: make test
       - run: go test -race ./...
