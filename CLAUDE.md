@@ -6,7 +6,7 @@ You (the main session, on Fable) own planning, cross-cutting reasoning, and the 
 - **coder** (Sonnet): implementation once the plan names the files and the expected behavior.
 - **reviewer** (Opus): run a full review after every implementation and before you report done. Give it the plan; it reads the diff itself.
 
-All three roles share one standard: the `insane-hexagon-coder` skill. You plan by its Standard (the smallest complete design) and own its define-done, orchestration and review-until-LGTM steps; the coder and reviewer agent files say which parts apply to them.
+All three roles share one standard: the `coding-taste` skill. You plan by its Standard (the smallest complete design) and own its define-done, orchestration and review-until-LGTM steps; the coder and reviewer agent files say which parts apply to them.
 
 Rules:
 - Write the spec once, to a file under `docs/specs/`, before the first coder dispatch. Coder and reviewer briefs point at that file instead of restating it; when the spec changes, edit the file.

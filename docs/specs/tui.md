@@ -36,7 +36,8 @@ Fixed dark truecolor palette, whole screen painted, `NO_COLOR` honored with a pl
 - Resize-safe; a friendly "too small" screen; deliberate empty, loading, error and stale states; display-width truncation; no line wider than the terminal.
 
 ## Build
-- `Makefile`: `up` (build then run), `build`, `test` (Python unittest plus Go), `snapshot`, `screenshot`.
+- `Makefile`: `install`, `up` (build then run), `build`, `test` (Python unittest plus Go), `snapshot`, `screenshot`.
+- `make install` gets a fresh clone ready: checks that Go and Python 3.11+ are present (a clear message naming what is missing and how to get it, non-zero exit), downloads the Go modules, builds the binary, and reports whether Chrome is available for `make screenshot` (optional, never a failure). It installs nothing system-wide.
 - Snapshot mode: `bin/ccmon-tui --snapshot <dashboard|session|agents|help> --size 140x40 [--session <id>] [--no-color]` renders one settled frame to stdout and exits.
 - `make screenshot` renders a colored snapshot to a PNG so the look can be judged without a TTY.
 - README section.
