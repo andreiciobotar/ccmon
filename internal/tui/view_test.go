@@ -459,3 +459,87 @@ func TestUnknownStatusIsNotGreen(t *testing.T) {
 		t.Fatalf("an unknown status must not look like success: %q", sgr)
 	}
 }
+
+func TestBreakMarkersLineUpOnLaneAndAxis(t *testing.T) {
+	for _, gap := range []float64{5, 14, 48, 50, 12*60 + 5, 66 * 60} { // even and odd marker widths
+		m := fakeModel(true, 140, 40)
+		d := &data.Session{ID: sidA, Dispatches: []data.Dispatch{
+			dispatchAt("a", "coder", 0, 5), dispatchAt("b", "coder", 5+gap, 5),
+		}}
+		m.details[sidA] = d
+		m.view, m.selID = viewSession, sidA
+		var cols [][]int
+		for _, line := range strings.Split(plain(m), "\n") {
+			var c []int
+			for i, r := range []rune(line) {
+				if r == '┆' {
+					c = append(c, i)
+				}
+			}
+			if len(c) > 0 {
+				cols = append(cols, c)
+			}
+		}
+		if len(cols) < 2 {
+			t.Fatalf("gap %vm: want the lane and the axis to show the break:\n%s", gap, plain(m))
+		}
+		for _, c := range cols[1:] {
+			if fmt.Sprint(c) != fmt.Sprint(cols[0]) {
+				t.Fatalf("gap %vm: ┆ columns differ between rows: %v", gap, cols)
+			}
+		}
+	}
+}
+
+func TestTimeAxisLimits(t *testing.T) {
+	for _, tw := range []int{1, 4, 12, 24, 40, 60, 80, 120, 200} {
+		// ten bursts split by long gaps (more breaks than fit), the first one tiny and
+		// the last one long
+		var ivs []interval
+		at := t0
+		for i := 0; i < 10; i++ {
+			dur := time.Minute
+			if i == 9 {
+				dur = 8 * time.Hour
+			}
+			ivs = append(ivs, interval{at, at.Add(dur)})
+			at = at.Add(dur + 3*time.Hour)
+		}
+		a := newTimeAxis(ivs, tw)
+		bursts, sum := 0, 0
+		for i, sg := range a.segs {
+			if sg.x != sum {
+				t.Fatalf("tw %d: segment %d starts at %d, want %d", tw, i, sg.x, sum)
+			}
+			sum += sg.w
+			if sg.brk {
+				continue
+			}
+			bursts++
+			if sg.w < 1 || (tw >= 10*minBurstW+len(a.segs)*breakW && sg.w < minBurstW) {
+				t.Fatalf("tw %d: burst %d is %d wide", tw, i, sg.w)
+			}
+		}
+		if sum != max(tw, bursts) {
+			t.Fatalf("tw %d: widths sum to %d", tw, sum)
+		}
+		for _, iv := range ivs {
+			for _, x := range []int{a.x(iv.start), a.x(iv.end)} {
+				in := false
+				for _, sg := range a.segs {
+					in = in || (!sg.brk && x >= sg.x && x < sg.x+sg.w)
+				}
+				if x < 0 || x >= sum || !in {
+					t.Fatalf("tw %d: a bar end at column %d is outside the bursts of %+v", tw, x, a.segs)
+				}
+			}
+		}
+	}
+}
+
+func TestFirstBurstGetsLabelRoom(t *testing.T) {
+	ivs := []interval{{t0, t0.Add(15 * time.Minute)}, {t0.Add(10 * time.Hour), t0.Add(20 * time.Hour)}}
+	if a := newTimeAxis(ivs, 80); a.segs[0].w < minBurstW {
+		t.Fatalf("a short first burst keeps room for a label: %+v", a.segs)
+	}
+}

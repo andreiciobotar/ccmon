@@ -13,6 +13,8 @@ const (
 	idleMin  = 5 * time.Minute
 	// breakW is the fixed width of a break marker, wide enough for "┆ 12d 23h ┆".
 	breakW = 12
+	// minBurstW leaves a burst room for one HH:MM label.
+	minBurstW = 5
 )
 
 type interval struct{ start, end time.Time }
@@ -33,8 +35,8 @@ type timeAxis struct {
 
 // newTimeAxis lays the intervals out over tw columns. Gaps between them that are long
 // compared with the active time become break markers (as many as fit in half the
-// width, longest first); the bursts share the remaining columns by duration, each at
-// least one column.
+// width, longest first); the bursts share the remaining columns by duration, each
+// at least minBurstW columns when the width allows, else one.
 func newTimeAxis(ivs []interval, tw int) timeAxis {
 	sort.Slice(ivs, func(i, j int) bool { return ivs[i].start.Before(ivs[j].start) })
 	var merged []interval
@@ -86,6 +88,12 @@ func newTimeAxis(ivs []interval, tw int) timeAxis {
 	}
 	bursts := len(segs) - len(cands)
 	rem = max(rem, bursts)
+	floor := 1
+	if bursts > 0 && rem/bursts >= minBurstW {
+		floor = minBurstW
+	}
+	// the floor is paid first; only what is left is split by duration
+	share := float64(rem - floor*bursts)
 	x, left, widest := 0, rem, -1
 	for i := range segs {
 		sg := &segs[i]
@@ -93,7 +101,7 @@ func newTimeAxis(ivs []interval, tw int) timeAxis {
 		if sg.brk {
 			sg.w = breakW
 		} else {
-			sg.w = max(1, int(weight(*sg)/sum*float64(rem)))
+			sg.w = floor + int(weight(*sg)/sum*share)
 			left -= sg.w
 			if widest < 0 || sg.w > segs[widest].w {
 				widest = i
@@ -134,6 +142,12 @@ func (a timeAxis) x(t time.Time) int {
 // marker is the text a break shows, centred in its columns.
 func (sg axisSeg) marker() string {
 	return "┆ " + fmtGap(sg.t1.Sub(sg.t0)) + " ┆"
+}
+
+// markerEdges are the columns of the marker's two ┆, which lane and axis both draw.
+func (sg axisSeg) markerEdges() (int, int) {
+	l := sg.x + (sg.w-width(sg.marker()))/2
+	return l, l + width(sg.marker()) - 1
 }
 
 // fmtGap renders an idle length: 45m, 5h 12m, 2d 18h.

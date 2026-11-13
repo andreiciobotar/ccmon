@@ -448,6 +448,23 @@ func TestUnreadableProjectDoesNotStopTheLoadOrThePoll(t *testing.T) {
 	}
 }
 
+func TestFailedFirstScanMarksTheScreenStale(t *testing.T) {
+	m, root, _ := pollModel(t)
+	os.Chmod(root, 0)
+	var load sessionsMsg
+	for _, msg := range run(m.loadSessionsCmd()) {
+		load = msg.(sessionsMsg)
+	}
+	if load.scanErr == nil {
+		t.Fatal("an unreadable root fails the scan")
+	}
+	load.res.Sessions = []data.Session{*fakeSession(sidA, "alpha", 0, 1, 1)} // the stub lists none, and the marker needs a session
+	upd(m, load)
+	if m.scanErr == "" || !strings.Contains(plain(m), "stale") {
+		t.Fatalf("a failed first scan marks the screen stale (scanErr=%q)", m.scanErr)
+	}
+}
+
 func TestPollStartsAfterAFailedFirstLoad(t *testing.T) {
 	m, _, _ := pollModel(t)
 	os.WriteFile(filepath.Join(os.Getenv("STUBDIR"), "fail"), nil, 0o644)

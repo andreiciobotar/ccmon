@@ -352,8 +352,7 @@ func (pl tlPlan) axisLabels() string {
 	var bursts []axisSeg
 	for _, sg := range pl.axis.segs {
 		if sg.brk {
-			n := width(sg.marker())
-			put(false, func(int) int { return sg.x + (sg.w-n)/2 }, sg.marker())
+			put(false, func(int) int { l, _ := sg.markerEdges(); return l }, sg.marker())
 		} else {
 			bursts = append(bursts, sg)
 		}
@@ -401,8 +400,8 @@ func (m *model) timeline(p paint, s, d *data.Session, pl tlPlan, w int) block {
 			for c := sg.x; c < sg.x+sg.w; c++ {
 				cells[c] = pc{r: " "}
 			}
-			off := (sg.w - width(sg.marker())) / 2
-			cells[sg.x+off].r, cells[sg.x+sg.w-1-off].r = "┆", "┆"
+			l, r := sg.markerEdges()
+			cells[l].r, cells[r].r = "┆", "┆"
 		}
 		for _, di := range lane.items {
 			xd := d.Dispatches[di]
