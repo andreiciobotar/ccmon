@@ -2,8 +2,10 @@ package data
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -55,7 +57,7 @@ func TestSessionDetailFixture(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(s.Dispatches) != 18 || !s.Detail {
+	if len(s.Dispatches) != 18 {
 		t.Fatalf("dispatches=%d", len(s.Dispatches))
 	}
 	var found bool
@@ -124,65 +126,90 @@ func TestMissingPackage(t *testing.T) {
 	}
 }
 
-func TestSessionIDFor(t *testing.T) {
-	root := "/p"
-	cases := map[string]string{
-		"/p/proj/abc.jsonl":                       "abc",
-		"/p/proj/abc/subagents/agent-1.jsonl":     "abc",
-		"/p/proj/abc/subagents/agent-1.meta.json": "",
-		"/p/proj/abc/memory/x.jsonl":              "",
-		"/q/proj/abc.jsonl":                       "",
+func writeTranscript(t *testing.T, path string, mtime time.Time) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
 	}
-	for path, want := range cases {
-		got, ok := SessionIDFor(root, path)
-		if got != want || ok != (want != "") {
-			t.Errorf("%s: got %q,%v want %q", path, got, ok, want)
-		}
+	if err := os.WriteFile(path, []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(path, mtime, mtime); err != nil {
+		t.Fatal(err)
 	}
 }
 
-func TestWatchEmitsOnAppend(t *testing.T) {
+func TestScan(t *testing.T) {
 	root := t.TempDir()
-	dir := filepath.Join(root, "proj")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	f := filepath.Join(dir, "sess1.jsonl")
-	if err := os.WriteFile(f, []byte("{}\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	ch, err := Watch(ctx, root, 200*time.Millisecond)
+	t1 := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
+	t2 := t1.Add(time.Hour)
+	writeTranscript(t, filepath.Join(root, "proj", "s1.jsonl"), t1)
+	writeTranscript(t, filepath.Join(root, "proj", "s2.jsonl"), t1)
+	writeTranscript(t, filepath.Join(root, "proj", "s2", "subagents", "agent-1.jsonl"), t2) // bumps s2
+	writeTranscript(t, filepath.Join(root, "proj", "s2", "subagents", "agent-1.meta.json"), t2.Add(time.Hour))
+	writeTranscript(t, filepath.Join(root, "proj", "orphan", "subagents", "agent-1.jsonl"), t2) // no main transcript
+	writeTranscript(t, filepath.Join(root, "proj", "s3", "memory", "x.jsonl"), t2)              // not a subagent file
+	got, err := Scan(root)
 	if err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(100 * time.Millisecond)
-	fh, _ := os.OpenFile(f, os.O_APPEND|os.O_WRONLY, 0o644)
-	fh.WriteString("{}\n")
-	fh.Close()
-	select {
-	case c := <-ch:
-		if c.SessionID != "sess1" {
-			t.Fatalf("got %+v", c)
-		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("no change event")
+	if len(got) != 2 || !got["s1"].Equal(t1) || !got["s2"].Equal(t2) {
+		t.Fatalf("scan = %v", got)
 	}
-	// a brand new session directory with a subagent file
-	sub := filepath.Join(dir, "sess2", "subagents")
-	os.MkdirAll(sub, 0o755)
-	time.Sleep(50 * time.Millisecond)
-	os.WriteFile(filepath.Join(sub, "agent-x.jsonl"), []byte("{}\n"), 0o644)
-	deadline := time.After(3 * time.Second)
-	for {
-		select {
-		case c := <-ch:
-			if c.SessionID == "sess2" {
-				return
-			}
-		case <-deadline:
-			t.Fatal("no event for new subagent dir")
+	if err := os.Remove(filepath.Join(root, "proj", "s1.jsonl")); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ = Scan(root); len(got) != 1 {
+		t.Fatalf("a deleted transcript must disappear, got %v", got)
+	}
+	if _, err := Scan(filepath.Join(root, "missing")); err == nil {
+		t.Fatal("an unreadable root is an error, not an empty corpus")
+	}
+}
+
+func stubRunner(t *testing.T) *Runner {
+	t.Helper()
+	dir := t.TempDir()
+	t.Setenv("STUBDIR", dir)
+	py, _ := filepath.Abs("testdata/fakepy.sh")
+	return &Runner{Root: "../..", Python: py, ProjectsDir: dir, Timeout: 500 * time.Millisecond}
+}
+
+func TestCallTimeout(t *testing.T) {
+	r := stubRunner(t)
+	os.WriteFile(filepath.Join(os.Getenv("STUBDIR"), "hang"), nil, 0o644)
+	start := time.Now()
+	_, err := r.Session(context.Background(), "x")
+	if err == nil || !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("got %v", err)
+	}
+	if time.Since(start) > 5*time.Second {
+		t.Fatal("the hung call was not killed")
+	}
+}
+
+func TestCancelKillsCallAndWaitReturns(t *testing.T) {
+	r := stubRunner(t)
+	r.Timeout = time.Minute
+	os.WriteFile(filepath.Join(os.Getenv("STUBDIR"), "hang"), nil, 0o644)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { _, err := r.Agents(ctx, ""); done <- err }()
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+	waited := make(chan struct{})
+	go func() { r.Wait(); close(waited) }()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("got %v", err)
 		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("cancel did not end the call")
+	}
+	select {
+	case <-waited:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Wait did not return after cancel")
 	}
 }

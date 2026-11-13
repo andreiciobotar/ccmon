@@ -2,10 +2,6 @@ package tui
 
 import (
 	"context"
-	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -14,21 +10,18 @@ import (
 	"ccmon/internal/data"
 )
 
-// DefaultProjects is where Claude Code keeps transcripts.
-func DefaultProjects() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".claude", "projects")
-}
-
-// Run starts the interactive dashboard.
-func Run(o Options, projectsDir string) error {
-	if o.Runner != nil && o.Runner.Check() == nil && projectsDir != "" {
-		if ch, err := data.Watch(context.Background(), projectsDir, 15*time.Second); err == nil {
-			o.Changes = ch
+// Run starts the interactive dashboard. Quitting cancels every python call and waits
+// for them to end, so none outlives the TUI.
+func Run(o Options) error {
+	ctx, cancel := context.WithCancel(context.Background())
+	o.Ctx = ctx
+	defer func() {
+		cancel()
+		if o.Runner != nil {
+			o.Runner.Wait()
 		}
-	}
-	p := tea.NewProgram(New(o))
-	_, err := p.Run()
+	}()
+	_, err := tea.NewProgram(New(o)).Run()
 	return err
 }
 
@@ -40,73 +33,79 @@ type SnapshotOptions struct {
 	W, H    int
 }
 
-// Snapshot loads data once and renders a single settled frame; no TTY needed.
+// Snapshot loads data once and renders a single settled frame; no TTY needed. A
+// session prefix is resolved by the python CLI, so an ambiguous one is an error here.
 func Snapshot(so SnapshotOptions) (string, error) {
 	o := so.Options
 	o.Static = true
 	m := New(o)
 	m.w, m.h = so.W, so.H
 	if m.fatal != nil {
-		m.loading = false
-		return m.finishSnapshot(), nil
+		return "", m.fatal
 	}
-	ctx := context.Background()
-	since := ranges[m.rangeIdx].since
-	res, err := m.runner.Sessions(ctx, since)
+	ctx := o.Ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	seen, _ := data.Scan(m.runner.Projects())
+	res, err := m.runner.Sessions(ctx, ranges[m.rangeIdx].since)
 	if err != nil {
-		m.loading = false
-		m.refreshErr = err.Error()
-		return m.finishSnapshot(), nil
+		return "", err
 	}
+	m.seen = seen
 	for i := range res.Sessions {
-		s := res.Sessions[i]
-		if t := data.StatMtime(s.Path); t > 0 {
-			s.LastChange = time.Unix(0, t)
-		}
-		m.sessions[s.ID] = &s
+		s := &res.Sessions[i]
+		s.LastChange = seen[s.ID]
+		m.sessions[s.ID] = s
 	}
 	m.loading = false
-	if ag, err := m.runner.Agents(ctx, since); err == nil {
+	if ag, err := m.runner.Agents(ctx, ranges[m.rangeIdx].since); err == nil {
 		m.agents = ag
+	}
+	detail := func(id string) error {
+		d, err := m.runner.Session(ctx, id)
+		if err != nil {
+			return err
+		}
+		d.LastChange = seen[d.ID]
+		m.details[d.ID] = d
+		if m.sessions[d.ID] == nil {
+			summary := *d
+			summary.Dispatches = nil
+			m.sessions[d.ID] = &summary
+		}
+		return nil
 	}
 	switch so.View {
 	case "session":
 		m.view = viewSession
-		id := so.Session
-		for k := range m.sessions {
-			if id != "" && strings.HasPrefix(k, id) {
-				m.selID = k
+		if so.Session != "" {
+			if err := detail(so.Session); err != nil {
+				return "", err
 			}
-		}
-		if id != "" && m.selID == "" {
-			return "", fmt.Errorf("no session matching %q in range %s", id, ranges[m.rangeIdx].label)
-		}
-		if m.selID == "" {
-			if s := m.mostRecent(); s != nil {
-				m.selID = s.ID
+			for id := range m.details {
+				m.selID = id
 			}
-		}
-		if m.selID != "" {
-			if d, err := m.runner.Session(ctx, m.selID); err == nil {
-				m.details[d.ID] = d
-				if s := m.sessions[d.ID]; s != nil {
-					s.Dispatches = nil
-				}
+		} else if s := m.mostRecent(); s != nil {
+			m.selID = s.ID
+			if err := detail(s.ID); err != nil {
+				return "", err
 			}
 		}
 	case "agents":
 		m.view = viewAgents
 	case "help":
 		m.help = true
-	}
-	if m.selID == "" {
-		m.normalizeSelection()
-		if m.selID == "" {
-			if s := m.mostRecent(); s != nil {
-				m.selID = s.ID
+	default:
+		for _, s := range m.sessions {
+			if m.isLive(s) {
+				if err := detail(s.ID); err != nil {
+					return "", err
+				}
 			}
 		}
 	}
+	m.normalizeSelection()
 	return m.finishSnapshot(), nil
 }
 
@@ -121,10 +120,12 @@ func (m *model) finishSnapshot() string {
 	return out
 }
 
-// Preload fills a model for tests and renders without any I/O.
+// preload fills a model for tests and renders without any I/O.
 func (m *model) preload(sessions []*data.Session, details []*data.Session, agents *data.Agents) {
+	m.seen = map[string]time.Time{}
 	for _, s := range sessions {
 		m.sessions[s.ID] = s
+		m.seen[s.ID] = s.LastChange
 	}
 	for _, d := range details {
 		m.details[d.ID] = d

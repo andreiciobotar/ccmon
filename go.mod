@@ -7,7 +7,6 @@ require (
 	charm.land/bubbletea/v2 v2.1.1
 	charm.land/lipgloss/v2 v2.1.0
 	github.com/charmbracelet/x/ansi v0.11.9
-	github.com/fsnotify/fsnotify v1.10.1
 )
 
 require (

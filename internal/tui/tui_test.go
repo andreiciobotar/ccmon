@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +12,11 @@ import (
 
 	"ccmon/internal/data"
 )
+
+func TestMain(m *testing.M) {
+	time.Local = time.UTC // rendered times must not depend on the machine
+	os.Exit(m.Run())
+}
 
 // ---- fixtures ---------------------------------------------------------------------
 
@@ -40,7 +46,6 @@ func fakeSession(id, project string, startMin int, main, sub int64) *data.Sessio
 
 func fakeDetail(s *data.Session) *data.Session {
 	d := *s
-	d.Detail = true
 	mk := func(i int, agent, status string, min, durMin float64, flags ...string) data.Dispatch {
 		st := s.Start.Add(time.Duration(min * float64(time.Minute)))
 		x := data.Dispatch{
@@ -84,7 +89,14 @@ func fakeAgents() *data.Agents {
 }
 
 func fakeModel(noColor bool, w, h int) *model {
-	m := New(Options{NoColor: noColor, Static: true, Now: func() time.Time { return t0.Add(time.Hour) }})
+	return newFake(Options{NoColor: noColor}, w, h)
+}
+
+// newFake is a static model holding three fake sessions, one with detail.
+func newFake(o Options, w, h int) *model {
+	o.Static = true
+	o.Now = func() time.Time { return t0.Add(time.Hour) }
+	m := New(o)
 	m.w, m.h = w, h
 	a, b, c := fakeSession("aaaaaaaa-0001", "alpha", 0, 800000, 2000000), fakeSession("bbbbbbbb-0002", "beta-é", 5, 100, 50), fakeSession("cccccccc-0003", "gamma", 10, 9000000, 1000)
 	m.preload([]*data.Session{a, b, c}, []*data.Session{fakeDetail(a)}, fakeAgents())
@@ -293,7 +305,7 @@ func TestCursorBounds(t *testing.T) {
 }
 
 func TestRangeCycle(t *testing.T) {
-	m := fakeModel(true, 100, 30)
+	m, _ := stubModel(t)
 	start := m.rangeIdx
 	gen := m.loadGen
 	var seen []string
@@ -313,7 +325,7 @@ func TestRangeCycle(t *testing.T) {
 }
 
 func TestStaleLoadIgnored(t *testing.T) {
-	m := fakeModel(true, 100, 30)
+	m, _ := stubModel(t)
 	send(m, "r")
 	old := m.loadGen - 1
 	n := len(m.sessions)
@@ -399,7 +411,7 @@ func TestFollowMode(t *testing.T) {
 		t.Fatalf("follow selects most recent: follow=%v sel=%s", m.follow, m.selID)
 	}
 	// a session gets newer activity
-	m.sessions["bbbbbbbb-0002"].LastChange = t0.Add(5 * time.Hour)
+	m.seen["bbbbbbbb-0002"] = t0.Add(5 * time.Hour)
 	m.followTarget()
 	if m.selID != "bbbbbbbb-0002" {
 		t.Fatalf("follow tracks the newest session, got %s", m.selID)
@@ -417,18 +429,18 @@ func TestFollowMode(t *testing.T) {
 func TestLiveDetection(t *testing.T) {
 	m := fakeModel(true, 100, 30)
 	s := m.sessions["aaaaaaaa-0001"]
-	s.LastChange = m.now().Add(-5 * time.Second)
+	m.seen[s.ID] = m.now().Add(-5 * time.Second)
 	s.End = ptr(m.now().Add(-time.Hour))
 	if !m.isLive(s) {
 		t.Fatal("changed 5s ago is live")
 	}
-	s.LastChange = m.now().Add(-31 * time.Second)
+	m.seen[s.ID] = m.now().Add(-31 * time.Second)
 	if m.isLive(s) {
 		t.Fatal("31s ago is not live")
 	}
 }
 
-// ---- merge / debounce -----------------------------------------------------------------------
+// ---- merge -----------------------------------------------------------------------
 
 func TestMergeRefreshedSession(t *testing.T) {
 	m := fakeModel(true, 120, 40)
@@ -478,72 +490,6 @@ func TestMergeRefreshedSession(t *testing.T) {
 	m.mergeSession(nw)
 	if _, ok := m.sessions["dddddddd-0004"]; !ok {
 		t.Fatal("new session should be inserted")
-	}
-}
-
-func TestDebounceBookkeeping(t *testing.T) {
-	now := t0
-	m := fakeModel(true, 100, 30)
-	m.now = func() time.Time { return now }
-	id := "aaaaaaaa-0001"
-	cmd := m.noteChange(id, now)
-	if cmd == nil {
-		t.Fatal("first change schedules a timer")
-	}
-	p := m.pend[id]
-	if !p.scheduled || p.gen != 1 {
-		t.Fatalf("pending %+v", p)
-	}
-	now = now.Add(100 * time.Millisecond)
-	m.noteChange(id, now)
-	m.noteChange(id, now)
-	if p.gen != 3 {
-		t.Fatalf("each change bumps gen, got %d", p.gen)
-	}
-	// the first timer is stale and must not start a refresh
-	if c := m.refreshDue(refreshDueMsg{id: id, gen: 1}); c != nil || p.inflight {
-		t.Fatal("stale timer fired a refresh")
-	}
-	now = now.Add(400 * time.Millisecond)
-	m.refreshDue(refreshDueMsg{id: id, gen: 3})
-	if !p.inflight || p.scheduled {
-		t.Fatalf("latest timer starts the refresh: %+v", p)
-	}
-	// changes during the flight do not start a second refresh
-	if c := m.noteChange(id, now); c != nil {
-		t.Fatal("no timer while a refresh is in flight")
-	}
-	if !p.dirty {
-		t.Fatal("change during flight marks dirty")
-	}
-	if c := m.refreshDue(refreshDueMsg{id: id, gen: p.gen}); c != nil {
-		t.Fatal("at most one refresh in flight per session")
-	}
-	if c := m.refreshDone(id); c == nil || p.inflight || !p.scheduled || p.dirty {
-		t.Fatalf("done should clear inflight and reschedule: %+v", p)
-	}
-	// a continuous stream cannot starve the refresh past debounceMax
-	p.scheduled, p.inflight = true, false
-	p.firstDirty = now.Add(-3 * time.Second)
-	p.gen = 9
-	m.refreshDue(refreshDueMsg{id: id, gen: 8})
-	if !p.inflight {
-		t.Fatal("max wait must force the refresh")
-	}
-	// different sessions are independent
-	if c := m.noteChange("other", now); c == nil || m.pend["other"].inflight {
-		t.Fatal("independent bookkeeping per session")
-	}
-}
-
-func TestChangeUpdatesLiveness(t *testing.T) {
-	m := fakeModel(true, 100, 30)
-	s := m.sessions["bbbbbbbb-0002"]
-	s.LastChange = t0
-	at := m.now().Add(-time.Second)
-	m.Update(changeMsg{SessionID: "bbbbbbbb-0002", At: at})
-	if !s.LastChange.Equal(at) {
-		t.Fatal("watcher event should refresh last change")
 	}
 }
 
@@ -599,10 +545,6 @@ func TestRenderAllViewsAllSizes(t *testing.T) {
 				m.fixScroll()
 				name := fmt.Sprintf("%s %dx%d nc=%v", view, sz[0], sz[1], nc)
 				checkFrame(t, name, m, nc)
-				if nc {
-					// plain rendering must carry its meaning in glyphs, not color
-					_ = ansi.Strip(m.Render())
-				}
 			}
 		}
 	}

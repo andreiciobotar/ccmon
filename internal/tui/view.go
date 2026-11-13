@@ -3,8 +3,8 @@ package tui
 import (
 	"fmt"
 	"strings"
-	"time"
 
+	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 )
 
@@ -12,7 +12,6 @@ import (
 func (m *model) View() tea.View {
 	v := tea.NewView(m.Render())
 	v.AltScreen = true
-	v.MouseMode = tea.MouseModeCellMotion
 	v.WindowTitle = "ccmon"
 	if !m.th.NoColor {
 		// Bubble Tea sets the terminal's own background too, so any cell the frame
@@ -183,27 +182,14 @@ func (m *model) subheader(p paint) string {
 	return fit(p.sp(1)+left+p.sp(pad)+right, m.w, p)
 }
 
-type hint struct{ key, desc string }
-
 func (m *model) footer(p paint) string {
 	th := m.th
 	bar := p.on(th.Surface)
-	var hs []hint
-	switch m.view {
-	case viewSession:
-		hs = []hint{{"↑↓", "dispatch"}, {"enter", "detail"}, {"esc", "back"}, {"f", "follow"}, {"tab", "views"}, {"?", "help"}, {"q", "quit"}}
-	case viewAgents:
-		hs = []hint{{"↑↓", "move"}, {"r", "range"}, {"tab", "views"}, {"esc", "back"}, {"?", "help"}, {"q", "quit"}}
-	default:
-		hs = []hint{{"↑↓", "move"}, {"enter", "open"}, {"/", "filter"}, {"s", "sort"}, {"r", "range"}, {"f", "follow"}, {"tab", "views"}, {"?", "help"}, {"q", "quit"}}
-	}
-	if m.filterIn {
-		hs = []hint{{"type", "to filter"}, {"enter", "keep"}, {"esc", "clear"}}
-	}
-	build := func(hs []hint) string {
-		var parts []string
-		for _, h := range hs {
-			parts = append(parts, bar.b(h.key, th.Purple)+bar.t(" "+h.desc, th.Muted))
+	hs := m.footerKeys()
+	build := func(hs []key.Binding) string {
+		parts := make([]string, len(hs))
+		for i, b := range hs {
+			parts[i] = bar.b(b.Help().Key, th.Purple) + bar.t(" "+b.Help().Desc, th.Muted)
 		}
 		return bar.sp(1) + strings.Join(parts, bar.t("  ·  ", th.Faint))
 	}
@@ -336,33 +322,17 @@ func (m *model) errorScreen(p paint) []string {
 
 func (m *model) helpScreen(p paint) []string {
 	th := m.th
-	row := func(k, d string) string {
-		return p.b(cell(k, 14, false), th.Purple) + p.t(d, th.Text)
+	lines := []string{p.gradient("ccmon", true) + p.t("  keys", th.Muted)}
+	for _, g := range helpGroups() {
+		lines = append(lines, "")
+		for _, b := range g {
+			lines = append(lines, p.b(cell(b.Help().Key, 14, false), th.Purple)+p.t(b.Help().Desc, th.Text))
+		}
 	}
-	lines := []string{
-		p.gradient("ccmon", true) + p.t("  keys", th.Muted),
-		"",
-		p.b("Move", th.Yellow),
-		row("j k ↑ ↓", "move the cursor (mouse wheel too)"),
-		row("g G", "jump to first / last"),
-		row("enter", "open the selected session"),
-		row("esc backspace", "go back"),
-		"",
-		p.b("Views", th.Yellow),
-		row("tab shift+tab", "next / previous view"),
-		row("1 2 3", "dashboard · session · agents"),
-		"",
-		p.b("Data", th.Yellow),
-		row("r", "cycle range: 24h 7d 30d all"),
-		row("s", "sort: recent · tokens · subagent share"),
-		row("/", "filter sessions by project or id"),
-		row("f", "follow the most recently active session"),
-		"",
-		row("?", "toggle this help"),
-		row("q ctrl+c", "quit"),
-		"",
-		p.t("A dot pulses on sessions written in the last 30 seconds.", th.Faint),
-	}
+	lines = append(lines, "",
+		p.t("r cycles 24h · 7d · 30d · all; on the error screen it retries.", th.Faint),
+		p.t("s sorts by recent · tokens · subagent share.", th.Faint),
+		p.t("A dot pulses on sessions written in the last 30 seconds.", th.Faint))
 	bw := 0
 	for _, l := range lines {
 		bw = max(bw, width(l))
@@ -408,5 +378,3 @@ func wrapPlain(s string, w int) []string {
 	}
 	return out
 }
-
-var _ = time.Second

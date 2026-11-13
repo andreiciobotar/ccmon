@@ -1,10 +1,20 @@
-.PHONY: up build test snapshot screenshot clean
+.PHONY: install up build test snapshot screenshot clean
 
 BIN := bin/ccmon-tui
 VIEW ?= dashboard
 SIZE ?= 140x40
 CHROME ?= /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
 SHOT := shots/$(VIEW)-$(SIZE)
+
+# Get a fresh clone ready: check the toolchain, fetch the Go modules, build. Installs nothing system-wide.
+install:
+	@command -v go >/dev/null || { echo "ccmon: Go is missing. Install Go 1.27 or newer (https://go.dev/dl/ or: brew install go), then run make install again." >&2; exit 1; }
+	@command -v python3 >/dev/null || { echo "ccmon: python3 is missing. Install Python 3.11 or newer (https://www.python.org/downloads/ or: brew install python), then run make install again." >&2; exit 1; }
+	@python3 -c 'import sys; sys.exit(sys.version_info < (3, 11))' || { echo "ccmon: Python 3.11 or newer is required. Install a newer one (https://www.python.org/downloads/ or: brew install python)." >&2; exit 1; }
+	go mod download
+	$(MAKE) build
+	@if [ -x "$(CHROME)" ]; then echo "Chrome found: make screenshot is available."; else echo "Chrome not found (optional): make screenshot needs it; set CHROME=/path/to/chrome."; fi
+	@echo "Ready: run make up, or $(BIN)."
 
 # Build the dashboard and run it.
 up: build

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
 	"ccmon/internal/data"
@@ -37,28 +38,26 @@ type rangeOpt struct{ label, since string }
 var ranges = []rangeOpt{{"24h", "24h"}, {"7d", "7d"}, {"30d", "30d"}, {"all", ""}}
 
 const (
-	liveWindow      = 30 * time.Second
-	debounceDelay   = 400 * time.Millisecond
-	debounceMax     = 2 * time.Second
-	agentsEvery     = 20 * time.Second
-	flashFor        = 1500 * time.Millisecond
-	toastFor        = 4 * time.Second
-	tickFast        = 80 * time.Millisecond
-	tickSlow        = 400 * time.Millisecond
-	tickIdle        = time.Second
-	minWidth        = 60
-	minHeight       = 16
-	staleAfterFails = 1
+	liveWindow  = 30 * time.Second
+	agentsEvery = 20 * time.Second
+	flashFor    = 1500 * time.Millisecond
+	toastFor    = 4 * time.Second
+	tickFast    = 80 * time.Millisecond
+	tickSlow    = 400 * time.Millisecond
+	tickIdle    = time.Second // also the transcript poll interval
+	pollEvery   = time.Second
+	minWidth    = 60
+	minHeight   = 16
 )
 
 // Options configures a model.
 type Options struct {
 	Runner  *data.Runner
-	Range   string // initial range label, default 7d
+	Ctx     context.Context // cancelled on quit; every python call runs under it
+	Range   string          // initial range label, default 7d
 	NoColor bool
 	Follow  bool
-	Changes <-chan data.Change // watcher events; nil disables live updates
-	Static  bool               // render settled (snapshots, tests): no animation phase
+	Static  bool // render settled (snapshots, tests): no animation phase, no clock
 	Now     func() time.Time
 }
 
@@ -68,21 +67,16 @@ type toast struct {
 	until time.Time
 }
 
-// pending is the per-session refresh bookkeeping (debounce, one refresh in flight).
-type pending struct {
-	gen        int       // bumped on every change; a timer only fires when it carries the latest
-	firstDirty time.Time // when the current burst began
-	scheduled  bool
-	inflight   bool
-	dirty      bool // changed while a refresh was in flight
-}
-
 type model struct {
 	opts   Options
 	th     *Theme
 	runner *data.Runner
 	now    func() time.Time
 	w, h   int
+
+	ctx        context.Context // lives until quit
+	loadCtx    context.Context // lives until the next load replaces it
+	loadCancel context.CancelFunc
 
 	view     viewID
 	help     bool
@@ -92,8 +86,8 @@ type model struct {
 	filter   string
 	filterIn bool // typing in the filter box
 
-	sessions map[string]*data.Session
-	details  map[string]*data.Session
+	sessions map[string]*data.Session // list entries: summaries, no dispatches
+	details  map[string]*data.Session // per-session results with dispatches
 	agents   *data.Agents
 
 	selID      string
@@ -108,19 +102,29 @@ type model struct {
 	loadGen     int
 	fatal       error // python or package missing: nothing can load
 	refreshErr  string
-	failures    int
 	lastUpdate  time.Time
 	agentsBusy  bool
 	agentsDirty bool
-	agentsAt    time.Time
+	agentsAt    time.Time // when the agents aggregate last finished, ok or not
 
-	pend    map[string]*pending
+	// seen is the newest transcript mtime per session id as of the last scan; nil until
+	// the first load gives the poll a baseline.
+	seen     map[string]time.Time
+	scanning bool
+	polledAt time.Time
+	// dirty: changed while its refresh was in flight. inflight: a detail fetch is running.
+	dirty    map[string]bool
+	inflight map[string]bool
+
 	counter map[string]*Counter
 	rowTok  map[string]*Counter
 	flash   map[string]time.Time
 	toast   toast
 
-	tickOn bool
+	tickOn   bool
+	tickGen  int           // a tick carrying an older generation was superseded
+	tickD    time.Duration // delay of the pending tick
+	tickFrom time.Time     // when the pending tick was scheduled
 }
 
 // New builds the model.
@@ -131,6 +135,9 @@ func New(o Options) *model {
 	if o.Now == nil {
 		o.Now = time.Now
 	}
+	if o.Ctx == nil {
+		o.Ctx = context.Background()
+	}
 	idx := 1
 	for i, r := range ranges {
 		if r.label == o.Range {
@@ -138,12 +145,13 @@ func New(o Options) *model {
 		}
 	}
 	m := &model{
-		opts: o, th: NewTheme(o.NoColor), runner: o.Runner, now: o.Now,
+		opts: o, th: NewTheme(o.NoColor), runner: o.Runner, now: o.Now, ctx: o.Ctx,
 		w: 100, h: 30, rangeIdx: idx, follow: o.Follow, loading: true,
 		sessions: map[string]*data.Session{}, details: map[string]*data.Session{},
-		pend: map[string]*pending{}, counter: map[string]*Counter{},
+		dirty: map[string]bool{}, inflight: map[string]bool{}, counter: map[string]*Counter{},
 		rowTok: map[string]*Counter{}, flash: map[string]time.Time{},
 	}
+	m.loadCtx, m.loadCancel = context.WithCancel(m.ctx)
 	for _, k := range []string{"tokens", "dispatches", "repeats", "loops", "warns", "share", "recheck"} {
 		m.counter[k] = &Counter{}
 	}
@@ -156,9 +164,10 @@ func New(o Options) *model {
 // ---- messages ----------------------------------------------------------------
 
 type sessionsMsg struct {
-	gen int
-	res *data.SessionsResult
-	err error
+	gen  int
+	res  *data.SessionsResult
+	seen map[string]time.Time // mtimes taken before the read
+	err  error
 }
 type agentsMsg struct {
 	gen int
@@ -167,77 +176,93 @@ type agentsMsg struct {
 }
 type detailMsg struct {
 	id  string
+	at  time.Time // mtime known when the read started
 	res *data.Session
 	err error
 }
-type changeMsg data.Change
-type refreshDueMsg struct {
-	id  string
-	gen int
+type scanMsg struct {
+	seen map[string]time.Time
+	err  error
 }
-type tickMsg time.Time
+type tickMsg struct{ gen int }
 
 // ---- commands ----------------------------------------------------------------
 
-func (m *model) loadSessionsCmd() tea.Cmd {
+// reload starts a full load for the current range, cancelling the one it replaces.
+func (m *model) reload() tea.Cmd {
 	if m.runner == nil || m.fatal != nil {
 		return nil
 	}
-	r, since, gen := m.runner, ranges[m.rangeIdx].since, m.loadGen
+	m.loadCancel()
+	m.loadCtx, m.loadCancel = context.WithCancel(m.ctx)
+	m.loadGen++
+	m.loading = true
+	if len(m.sessions) == 0 {
+		m.refreshErr = ""
+	}
+	m.agentsBusy = false
+	return tea.Batch(m.loadSessionsCmd(), m.loadAgentsCmd())
+}
+
+func (m *model) loadSessionsCmd() tea.Cmd {
+	r, ctx, since, gen := m.runner, m.loadCtx, ranges[m.rangeIdx].since, m.loadGen
 	return func() tea.Msg {
-		res, err := r.Sessions(context.Background(), since)
+		// stat first: anything written after this shows up as a change in the poll
+		seen, _ := data.Scan(r.Projects())
+		res, err := r.Sessions(ctx, since)
 		if err == nil {
 			for i := range res.Sessions {
-				if t := data.StatMtime(res.Sessions[i].Path); t > 0 {
-					res.Sessions[i].LastChange = time.Unix(0, t)
-				}
+				res.Sessions[i].LastChange = seen[res.Sessions[i].ID]
 			}
 		}
-		return sessionsMsg{gen: gen, res: res, err: err}
+		return sessionsMsg{gen: gen, res: res, seen: seen, err: err}
 	}
 }
 
 func (m *model) loadAgentsCmd() tea.Cmd {
-	if m.runner == nil || m.fatal != nil {
-		return nil
-	}
 	m.agentsBusy = true
-	r, since, gen := m.runner, ranges[m.rangeIdx].since, m.loadGen
+	r, ctx, since, gen := m.runner, m.loadCtx, ranges[m.rangeIdx].since, m.loadGen
 	return func() tea.Msg {
-		res, err := r.Agents(context.Background(), since)
+		res, err := r.Agents(ctx, since)
 		return agentsMsg{gen: gen, res: res, err: err}
 	}
 }
 
-func (m *model) fetchSessionCmd(id string) tea.Cmd {
+// fetchSession is the only way a detail fetch starts. A fetch already running for the
+// session is not doubled: the session is marked dirty and fetched once more when the
+// running one returns.
+func (m *model) fetchSession(id string) tea.Cmd {
 	if m.runner == nil || m.fatal != nil {
 		return nil
 	}
-	r := m.runner
-	return func() tea.Msg {
-		res, err := r.Session(context.Background(), id)
-		return detailMsg{id: id, res: res, err: err}
-	}
-}
-
-func waitChange(ch <-chan data.Change) tea.Cmd {
-	if ch == nil {
+	if m.inflight[id] {
+		m.dirty[id] = true
 		return nil
 	}
+	m.inflight[id] = true
+	delete(m.dirty, id)
+	r, ctx, at := m.runner, m.ctx, m.seen[id]
 	return func() tea.Msg {
-		c, ok := <-ch
-		if !ok {
-			return nil
-		}
-		return changeMsg(c)
+		res, err := r.Session(ctx, id)
+		return detailMsg{id: id, at: at, res: res, err: err}
 	}
 }
 
+func (m *model) scanCmd() tea.Cmd {
+	m.scanning = true
+	root := m.runner.Projects()
+	return func() tea.Msg {
+		seen, err := data.Scan(root)
+		return scanMsg{seen: seen, err: err}
+	}
+}
+
+// ensureTick keeps one clock running at the pace the screen needs. A pending tick that
+// is slower than needed (an animation just started during idle) is superseded.
 func (m *model) ensureTick() tea.Cmd {
-	if m.tickOn || m.opts.Static {
+	if m.opts.Static {
 		return nil
 	}
-	m.tickOn = true
 	d := tickIdle
 	switch {
 	case m.animating():
@@ -245,19 +270,25 @@ func (m *model) ensureTick() tea.Cmd {
 	case m.pulsing():
 		d = tickSlow
 	}
-	return tea.Tick(d, func(t time.Time) tea.Msg { return tickMsg(t) })
+	if m.tickOn && m.tickD <= d {
+		return nil
+	}
+	m.tickOn, m.tickD, m.tickFrom = true, d, m.now()
+	m.tickGen++
+	gen := m.tickGen
+	return tea.Tick(d, func(time.Time) tea.Msg { return tickMsg{gen} })
 }
 
-// Init starts the first load, the watcher loop and the animation clock.
+// Init starts the first load and the clock.
 func (m *model) Init() tea.Cmd {
-	m.loadGen++
-	return tea.Batch(m.loadSessionsCmd(), m.loadAgentsCmd(), waitChange(m.opts.Changes), m.ensureTick())
+	return tea.Batch(m.reload(), m.ensureTick())
 }
 
 // ---- derived state -------------------------------------------------------------
 
+// activity is when the session last moved: its newest transcript write or its end.
 func (m *model) activity(s *data.Session) time.Time {
-	t := s.LastChange
+	t := m.seen[s.ID]
 	if s.End != nil && s.End.After(t) {
 		t = *s.End
 	}
@@ -333,6 +364,7 @@ func (m *model) mostRecent() *data.Session {
 func (m *model) normalizeSelection() {
 	vis := m.visible()
 	if len(vis) == 0 {
+		m.selID = ""
 		return
 	}
 	for _, s := range vis {
@@ -443,8 +475,11 @@ func (m *model) animating() bool {
 	if m.toast.text != "" && m.toast.until.After(now) {
 		return true
 	}
-	if m.view == viewSession {
-		if d := m.details[m.selID]; d != nil {
+	switch m.view {
+	case viewDashboard:
+		return len(m.nowRunning()) > 0
+	case viewSession:
+		if d, s := m.details[m.selID], m.sessions[m.selID]; d != nil && s != nil && m.isLive(s) {
 			for _, x := range d.Dispatches {
 				if x.Status == "running" {
 					return true
@@ -453,6 +488,36 @@ func (m *model) animating() bool {
 		}
 	}
 	return false
+}
+
+// running is a running dispatch of a live session.
+type running struct {
+	s *data.Session
+	d data.Dispatch
+}
+
+// nowRunning lists every running dispatch of every live session, oldest first.
+func (m *model) nowRunning() []running {
+	var out []running
+	for id, s := range m.sessions {
+		det := m.details[id]
+		if det == nil || !m.isLive(s) {
+			continue
+		}
+		for _, x := range det.Dispatches {
+			if x.Status == "running" && x.Start != nil {
+				out = append(out, running{s, x})
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		a, b := out[i].d, out[j].d
+		if !a.Start.Equal(*b.Start) {
+			return a.Start.Before(*b.Start)
+		}
+		return a.ToolUseID < b.ToolUseID
+	})
+	return out
 }
 
 // pulsing is true while a live dot is on screen.
@@ -498,26 +563,20 @@ func (m *model) inRange(s *data.Session) bool {
 }
 
 // mergeSession folds a refreshed session into the list, the detail cache and the
-// aggregates, raising toasts for events in sessions we have detail for.
+// aggregates, raising toasts for events in sessions we have detail for. ns.LastChange
+// says how new its data is; the list entry is never replaced by an older one.
 func (m *model) mergeSession(ns *data.Session) {
 	old := m.sessions[ns.ID]
-	prev := m.details[ns.ID]
-	if old != nil {
-		ns.LastChange = old.LastChange
-	}
-	if t := data.StatMtime(ns.Path); t > 0 {
-		if lt := time.Unix(0, t); lt.After(ns.LastChange) {
-			ns.LastChange = lt
-		}
-	}
 	if old == nil && !m.inRange(ns) {
-		m.details[ns.ID] = ns
 		return
 	}
-	if prev != nil && (m.follow || (m.view == viewSession && m.selID == ns.ID)) {
+	if prev := m.details[ns.ID]; prev != nil && (m.follow || (m.view == viewSession && m.selID == ns.ID)) {
 		m.diffToasts(prev, ns)
 	}
 	m.details[ns.ID] = ns
+	if old != nil && old.LastChange.After(ns.LastChange) {
+		return
+	}
 	summary := *ns
 	summary.Dispatches = nil
 	m.sessions[ns.ID] = &summary
@@ -528,6 +587,105 @@ func (m *model) mergeSession(ns *data.Session) {
 		m.selID = ns.ID
 	}
 	m.retarget(false)
+}
+
+// mergeLoad folds a full load into the model. The load read its data after taking its
+// mtimes, so a session whose data is newer than that (a per-session refresh landed
+// meanwhile) is kept as it is.
+func (m *model) mergeLoad(msg sessionsMsg) {
+	if msg.seen != nil {
+		if m.seen == nil {
+			m.seen = map[string]time.Time{}
+		}
+		for id, t := range msg.seen {
+			if t.After(m.seen[id]) {
+				m.seen[id] = t
+			}
+		}
+	}
+	next := map[string]*data.Session{}
+	for i := range msg.res.Sessions {
+		s := &msg.res.Sessions[i]
+		if cur := m.sessions[s.ID]; cur != nil && cur.LastChange.After(s.LastChange) {
+			s = cur
+		}
+		next[s.ID] = s
+	}
+	for id, cur := range m.sessions {
+		_, loaded := next[id]
+		if !loaded && m.exists(id) && msg.seen != nil && cur.LastChange.After(msg.seen[id]) {
+			next[id] = cur // appeared after the load looked
+		}
+	}
+	m.sessions = next
+	m.pruneCaches()
+}
+
+// exists reports whether the session's transcript is known to be on disk.
+func (m *model) exists(id string) bool {
+	if m.seen == nil {
+		return m.sessions[id] != nil
+	}
+	_, ok := m.seen[id]
+	return ok
+}
+
+// pruneCaches forgets everything kept for sessions that left the list.
+func (m *model) pruneCaches() {
+	for id := range m.details {
+		if m.sessions[id] == nil {
+			delete(m.details, id)
+		}
+	}
+	for id := range m.rowTok {
+		if m.sessions[id] == nil {
+			delete(m.rowTok, id)
+		}
+	}
+	for id := range m.flash {
+		if m.sessions[id] == nil {
+			delete(m.flash, id)
+		}
+	}
+}
+
+// applyScan compares a poll with what was seen: changed and new sessions refresh,
+// sessions whose transcript is gone are dropped.
+func (m *model) applyScan(cur map[string]time.Time) []tea.Cmd {
+	var cmds []tea.Cmd
+	for id, t := range cur {
+		if t.After(m.seen[id]) {
+			m.seen[id] = t
+			m.agentsDirty = true
+			cmds = append(cmds, m.fetchSession(id))
+		}
+	}
+	for id := range m.seen {
+		if _, ok := cur[id]; !ok {
+			delete(m.seen, id)
+			delete(m.dirty, id)
+			delete(m.sessions, id)
+			m.agentsDirty = true
+			if m.view == viewSession && m.selID == id {
+				m.view = viewDashboard
+			}
+		}
+	}
+	m.pruneCaches()
+	m.normalizeSelection()
+	m.retarget(false)
+	return cmds
+}
+
+// fetchLive makes sure every live session has its dispatches, for the Now running panel.
+func (m *model) fetchLive() []tea.Cmd {
+	var cmds []tea.Cmd
+	for id, s := range m.sessions {
+		if m.details[id] == nil && !m.inflight[id] && m.isLive(s) {
+			cmds = append(cmds, m.fetchSession(id))
+		}
+	}
+	return cmds
 }
 
 func (m *model) diffToasts(prev, cur *data.Session) {
@@ -563,68 +721,6 @@ func firstLine(s string) string {
 	return s
 }
 
-// noteChange does the debounce bookkeeping for a transcript change and returns the
-// timer command when one needs scheduling.
-func (m *model) noteChange(id string, at time.Time) tea.Cmd {
-	p := m.pend[id]
-	if p == nil {
-		p = &pending{}
-		m.pend[id] = p
-	}
-	if s := m.sessions[id]; s != nil && at.After(s.LastChange) {
-		s.LastChange = at
-	}
-	m.agentsDirty = true
-	p.gen++
-	if p.inflight {
-		p.dirty = true
-		return nil
-	}
-	now := m.now()
-	if !p.scheduled {
-		p.firstDirty = now
-	}
-	p.scheduled = true
-	delay := debounceDelay
-	if left := debounceMax - now.Sub(p.firstDirty); left < delay {
-		delay = max(left, 0)
-	}
-	id2, gen := id, p.gen
-	return tea.Tick(delay, func(time.Time) tea.Msg { return refreshDueMsg{id: id2, gen: gen} })
-}
-
-// refreshDue starts the single refresh for a session, unless a newer timer exists.
-func (m *model) refreshDue(msg refreshDueMsg) tea.Cmd {
-	p := m.pend[msg.id]
-	if p == nil || !p.scheduled || p.inflight {
-		return nil
-	}
-	if msg.gen != p.gen && m.now().Sub(p.firstDirty) < debounceMax {
-		return nil // a later change rescheduled the timer
-	}
-	p.scheduled = false
-	p.inflight = true
-	return m.fetchSessionCmd(msg.id)
-}
-
-// refreshDone clears the in-flight flag and schedules another pass when more changed.
-func (m *model) refreshDone(id string) tea.Cmd {
-	p := m.pend[id]
-	if p == nil {
-		return nil
-	}
-	p.inflight = false
-	if p.dirty {
-		p.dirty = false
-		p.firstDirty = m.now()
-		p.scheduled = true
-		p.gen++
-		id2, gen := id, p.gen
-		return tea.Tick(debounceDelay, func(time.Time) tea.Msg { return refreshDueMsg{id: id2, gen: gen} })
-	}
-	return nil
-}
-
 func (m *model) followTarget() tea.Cmd {
 	if !m.follow {
 		return nil
@@ -634,10 +730,7 @@ func (m *model) followTarget() tea.Cmd {
 		return nil
 	}
 	m.selID = s.ID
-	if m.details[s.ID] == nil {
-		return m.fetchSessionCmd(s.ID)
-	}
-	return nil
+	return m.ensureDetail()
 }
 
 // ---- update ------------------------------------------------------------------------
@@ -658,96 +751,82 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.noteFailure(msg.err)
 			break
 		}
-		m.refreshErr, m.failures = "", 0
-		first := len(m.sessions) == 0
-		next := map[string]*data.Session{}
-		for i := range msg.res.Sessions {
-			s := msg.res.Sessions[i]
-			next[s.ID] = &s
-		}
-		m.sessions = next
+		m.refreshErr = ""
+		m.mergeLoad(msg)
 		m.lastUpdate = m.now()
 		m.normalizeSelection()
 		m.retarget(false)
-		if first {
-			// count up from zero on the first load only
+		cmds = append(cmds, m.followTarget())
+		if m.view == viewSession {
+			cmds = append(cmds, m.ensureDetail())
 		}
-		if c := m.followTarget(); c != nil {
-			cmds = append(cmds, c)
-		}
-		if m.view == viewSession && m.selID != "" {
-			cmds = append(cmds, m.fetchSessionCmd(m.selID))
-		}
+		cmds = append(cmds, m.fetchLive()...)
 		m.fixScroll()
 
 	case agentsMsg:
-		m.agentsBusy = false
 		if msg.gen != m.loadGen {
 			break
 		}
+		m.agentsBusy = false
+		m.agentsAt = m.now()
 		if msg.err != nil {
+			m.agentsDirty = true // the next try waits for the next cadence
 			m.noteFailure(msg.err)
 			break
 		}
 		m.agents = msg.res
-		m.agentsAt = m.now()
 		m.agentsDirty = false
 
 	case detailMsg:
-		if c := m.refreshDone(msg.id); c != nil {
-			cmds = append(cmds, c)
-		}
-		if msg.err != nil {
+		delete(m.inflight, msg.id)
+		exists := m.exists(msg.id)
+		switch {
+		case msg.err != nil:
 			if m.sessions[msg.id] != nil {
 				m.noteFailure(msg.err)
 			}
-			break
+		case exists:
+			m.refreshErr = ""
+			msg.res.LastChange = msg.at
+			m.mergeSession(msg.res)
+			m.normalizeSelection()
+			cmds = append(cmds, m.followTarget())
+			m.fixScroll()
 		}
-		m.refreshErr, m.failures = "", 0
-		m.mergeSession(msg.res)
-		m.normalizeSelection()
-		if m.follow {
-			if c := m.followTarget(); c != nil {
-				cmds = append(cmds, c)
-			}
+		if m.dirty[msg.id] && exists {
+			cmds = append(cmds, m.fetchSession(msg.id))
 		}
-		m.fixScroll()
 
-	case changeMsg:
-		if c := m.noteChange(msg.SessionID, msg.At); c != nil {
-			cmds = append(cmds, c)
-		}
-		cmds = append(cmds, waitChange(m.opts.Changes))
-
-	case refreshDueMsg:
-		if c := m.refreshDue(msg); c != nil {
-			cmds = append(cmds, c)
+	case scanMsg:
+		m.scanning = false
+		if msg.err == nil && m.seen != nil {
+			cmds = append(cmds, m.applyScan(msg.seen)...)
+			m.fixScroll()
 		}
 
 	case tickMsg:
+		if msg.gen != m.tickGen {
+			break // a faster tick replaced this one
+		}
 		m.tickOn = false
-		m.step(tickFast)
-		if m.agentsDirty && !m.agentsBusy && m.now().Sub(m.agentsAt) >= agentsEvery {
+		now := m.now()
+		m.step(now.Sub(m.tickFrom))
+		if m.seen != nil && !m.scanning && now.Sub(m.polledAt) >= pollEvery {
+			m.polledAt = now
+			cmds = append(cmds, m.scanCmd())
+		}
+		if m.agentsDirty && !m.agentsBusy && now.Sub(m.agentsAt) >= agentsEvery {
 			cmds = append(cmds, m.loadAgentsCmd())
 		}
 
 	case tea.KeyPressMsg:
 		cmds = append(cmds, m.handleKey(msg))
-
-	case tea.MouseWheelMsg:
-		switch msg.Button {
-		case tea.MouseWheelUp:
-			m.move(-1)
-		case tea.MouseWheelDown:
-			m.move(1)
-		}
 	}
 	cmds = append(cmds, m.ensureTick())
 	return m, tea.Batch(cmds...)
 }
 
 func (m *model) noteFailure(err error) {
-	m.failures++
 	m.refreshErr = err.Error()
 	if len(m.sessions) > 0 {
 		m.setToast("refresh failed: "+firstLine(err.Error()), true)
@@ -782,69 +861,66 @@ func (m *model) settle() {
 // ---- keys ----------------------------------------------------------------------------
 
 func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
-	k := msg.String()
-	if k == "ctrl+c" {
+	switch {
+	case key.Matches(msg, keys.Interrupt):
 		return tea.Quit
-	}
-	if m.filterIn {
+	case m.filterIn:
 		return m.filterKey(msg)
-	}
-	if m.help {
-		switch k {
-		case "?", "esc", "q", "enter", "backspace":
+	case m.help:
+		if key.Matches(msg, keys.Help, keys.Back, keys.Open, keys.Quit) {
 			m.help = false
 		}
 		return nil
 	}
-	switch k {
-	case "q":
+	switch {
+	case key.Matches(msg, keys.Quit):
 		return tea.Quit
-	case "?":
+	case key.Matches(msg, keys.Help):
 		m.help = true
-	case "tab":
+	case key.Matches(msg, keys.Next):
 		return m.switchView(viewID((int(m.view) + 1) % 3))
-	case "shift+tab":
+	case key.Matches(msg, keys.Prev):
 		return m.switchView(viewID((int(m.view) + 2) % 3))
-	case "1":
+	case key.Matches(msg, keys.Dash):
 		return m.switchView(viewDashboard)
-	case "2":
+	case key.Matches(msg, keys.Sess):
 		return m.switchView(viewSession)
-	case "3":
+	case key.Matches(msg, keys.Agents):
 		return m.switchView(viewAgents)
-	case "j", "down":
+	case key.Matches(msg, keys.Down):
 		m.move(1)
-	case "k", "up":
+	case key.Matches(msg, keys.Up):
 		m.move(-1)
-	case "g", "home":
+	case key.Matches(msg, keys.Top):
 		m.moveTo(0)
-	case "G", "end":
+	case key.Matches(msg, keys.Bottom):
 		m.moveTo(1 << 30)
-	case "pgdown", "ctrl+d":
+	case key.Matches(msg, keys.PageDown):
 		m.move(max(1, m.pageSize()/2))
-	case "pgup", "ctrl+u":
+	case key.Matches(msg, keys.PageUp):
 		m.move(-max(1, m.pageSize()/2))
-	case "enter":
+	case key.Matches(msg, keys.Open):
 		return m.enter()
-	case "esc", "backspace":
+	case key.Matches(msg, keys.Back):
 		m.back()
-	case "r":
+	case key.Matches(msg, keys.Range):
+		if len(m.sessions) == 0 && m.refreshErr != "" {
+			return m.reload() // the error screen: try the same range again
+		}
 		m.rangeIdx = (m.rangeIdx + 1) % len(ranges)
-		m.loadGen++
-		m.loading = true
 		m.setToast("range: "+ranges[m.rangeIdx].label, false)
-		return tea.Batch(m.loadSessionsCmd(), m.loadAgentsCmd())
-	case "f":
+		return m.reload()
+	case key.Matches(msg, keys.Follow):
 		m.follow = !m.follow
 		if m.follow {
 			m.setToast("follow mode on: tracking the most recent session", false)
 			return m.followTarget()
 		}
 		m.setToast("follow mode off", false)
-	case "s":
+	case key.Matches(msg, keys.Sort):
 		m.sortBy = (m.sortBy + 1) % 3
 		m.setToast("sort: "+m.sortBy.String(), false)
-		m.fixScroll()
-	case "/":
+	case key.Matches(msg, keys.Filter):
 		if m.view == viewDashboard {
 			m.filterIn = true
 		}
@@ -854,16 +930,16 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 }
 
 func (m *model) filterKey(msg tea.KeyPressMsg) tea.Cmd {
-	switch k := msg.String(); k {
-	case "esc":
+	switch {
+	case key.Matches(msg, keys.FilterClear):
 		m.filter, m.filterIn = "", false
-	case "enter":
+	case key.Matches(msg, keys.FilterKeep):
 		m.filterIn = false
-	case "backspace":
+	case key.Matches(msg, keys.Erase):
 		if r := []rune(m.filter); len(r) > 0 {
 			m.filter = string(r[:len(r)-1])
 		}
-	case "ctrl+u":
+	case key.Matches(msg, keys.Wipe):
 		m.filter = ""
 	default:
 		if t := msg.Key().Text; t != "" {
@@ -892,11 +968,12 @@ func (m *model) switchView(v viewID) tea.Cmd {
 	return nil
 }
 
+// ensureDetail fetches the selected session's dispatches unless they are here or coming.
 func (m *model) ensureDetail() tea.Cmd {
-	if m.selID == "" || m.details[m.selID] != nil {
+	if m.selID == "" || m.details[m.selID] != nil || m.inflight[m.selID] {
 		return nil
 	}
-	return m.fetchSessionCmd(m.selID)
+	return m.fetchSession(m.selID)
 }
 
 func (m *model) enter() tea.Cmd {

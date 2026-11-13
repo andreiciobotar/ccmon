@@ -37,27 +37,41 @@ func (p paint) bar(w int, frac float64, fg color.Color, gradient bool) string {
 	cells := frac * float64(w)
 	full := int(cells)
 	part := int((cells - float64(full)) * 8)
-	var sb strings.Builder
 	colorAt := func(i int) color.Color {
-		if gradient {
-			t := 0.0
-			if w > 1 {
-				t = float64(i) / float64(w-1)
-			}
-			return p.th.gradientAt(t)
+		if !gradient {
+			return fg
 		}
-		return fg
+		t := 0.0
+		if w > 1 {
+			t = float64(i) / float64(w-1)
+		}
+		return p.th.gradientAt(t)
 	}
-	for i := 0; i < full && i < w; i++ {
-		sb.WriteString(track.t("█", colorAt(i)))
+	var sb strings.Builder
+	for i := 0; i < full && i < w; {
+		j := i + 1 // one render per run of one color
+		for j < full && j < w && key24(colorAt(j)) == key24(colorAt(i)) {
+			j++
+		}
+		sb.WriteString(track.t(strings.Repeat("█", j-i), colorAt(i)))
+		i = j
 	}
 	used := full
 	if part > 0 && full < w {
 		sb.WriteString(track.t(string(partials[part]), colorAt(full)))
 		used++
 	}
-	sb.WriteString(track.t(strings.Repeat(" ", w-used), p.th.Faint))
+	sb.WriteString(track.sp(w - used))
 	return sb.String()
+}
+
+// swatch is a legend entry's mark for segment i of a stack: the segment's own glyph
+// when there are no colors to tell them apart.
+func (p paint) swatch(i int, fg color.Color) string {
+	if p.th.NoColor {
+		return plainFills[i%len(plainFills)]
+	}
+	return p.t("■", fg)
 }
 
 type seg struct {

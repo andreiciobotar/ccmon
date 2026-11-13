@@ -28,13 +28,7 @@ func main() {
 
 	root, rootErr := data.LocateRoot()
 	// a missing root is not fatal here: the TUI reports it on screen
-	r := &data.Runner{Root: root, ProjectsDir: *projects, AgentsDir: *agents, Err: rootErr}
-	watchDir := *projects
-	if watchDir == "" {
-		watchDir = tui.DefaultProjects()
-	} else {
-		watchDir, _ = filepath.Abs(watchDir)
-	}
+	r := &data.Runner{Root: root, ProjectsDir: absolute(*projects), AgentsDir: absolute(*agents), Err: rootErr}
 	nc := *noColor || os.Getenv("NO_COLOR") != ""
 	o := tui.Options{Runner: r, Range: *rng, NoColor: nc, Follow: *follow}
 
@@ -58,10 +52,22 @@ func main() {
 		fmt.Println(out)
 		return
 	}
-	if err := tui.Run(o, watchDir); err != nil {
+	if err := tui.Run(o); err != nil {
 		fmt.Fprintln(os.Stderr, "ccmon-tui:", err)
 		os.Exit(1)
 	}
+}
+
+// absolute resolves a directory flag against the user's working directory, because
+// the python side runs with the repo root as its own.
+func absolute(dir string) string {
+	if dir == "" {
+		return ""
+	}
+	if abs, err := filepath.Abs(dir); err == nil {
+		return abs
+	}
+	return dir
 }
 
 func parseSize(s string) (int, int, error) {

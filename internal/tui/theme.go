@@ -155,13 +155,11 @@ func (p paint) styleRev(fg color.Color, bold, rev bool) lipgloss.Style {
 		th.cache[k] = s
 		return s
 	}
-	if !th.NoColor {
-		if fg != nil {
-			s = s.Foreground(fg)
-		}
-		if p.bg != nil {
-			s = s.Background(p.bg)
-		}
+	if fg != nil {
+		s = s.Foreground(fg)
+	}
+	if p.bg != nil {
+		s = s.Background(p.bg)
 	}
 	if bold {
 		s = s.Bold(true)

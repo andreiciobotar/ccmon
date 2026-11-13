@@ -1,0 +1,326 @@
+package tui
+
+import (
+	"flag"
+	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/charmbracelet/x/ansi"
+
+	"ccmon/internal/data"
+)
+
+func plain(m *model) string { return ansi.Strip(m.Render()) }
+
+func TestMixesAreAlwaysVisible(t *testing.T) {
+	for _, sz := range [][2]int{{60, 16}, {80, 24}, {99, 30}, {100, 30}, {123, 33}, {140, 40}} {
+		out := plain(fakeModel(true, sz[0], sz[1]))
+		agents := strings.Contains(out, "Agent mix") || strings.Contains(out, "agents ")
+		models := strings.Contains(out, "Model mix") || strings.Contains(out, "models ")
+		if !agents || !models {
+			t.Errorf("%dx%d: agent mix visible=%v, model mix visible=%v\n%s", sz[0], sz[1], agents, models, out)
+		}
+	}
+}
+
+func TestTimeColumnFollowsSort(t *testing.T) {
+	m := fakeModel(true, 140, 40)
+	if out := plain(m); !strings.Contains(out, "ACTIVE") || strings.Contains(out, "STARTED") {
+		t.Fatal("sorted by recent, the column is ACTIVE")
+	}
+	send(m, "s")
+	if out := plain(m); !strings.Contains(out, "STARTED") || strings.Contains(out, "ACTIVE") {
+		t.Fatal("sorted otherwise, the column is STARTED")
+	}
+	// the cell shows start for session a (t0 10:00) rather than its activity (10:30)
+	if !strings.Contains(plain(m), "11-13 10:00") {
+		t.Fatal("STARTED shows the start time")
+	}
+}
+
+func TestNowRunning(t *testing.T) {
+	m := fakeModel(true, 140, 40)
+	if out := plain(m); !strings.Contains(out, "Now running") || !strings.Contains(out, "nothing running") {
+		t.Fatal("empty state")
+	}
+	m.seen[sidA] = m.now().Add(-5 * time.Second) // live
+	out := plain(m)
+	if !strings.Contains(out, "my-custom-agent") || strings.Contains(out, "nothing running") {
+		t.Fatalf("a running dispatch of a live session is listed:\n%s", out)
+	}
+	if !m.animating() {
+		t.Fatal("a running dispatch on screen animates")
+	}
+	m.view, m.selID = viewSession, sidA
+	if out := plain(m); !strings.Contains(out, "running") || strings.Contains(out, "unfinished") {
+		t.Fatal("live session: running")
+	}
+	m.seen[sidA] = t0 // no longer live
+	m.view = viewSession
+	if out := plain(m); !strings.Contains(out, "unfinished") {
+		t.Fatalf("a running dispatch in a stale session is labelled unfinished:\n%s", out)
+	}
+	if m.animating() {
+		t.Fatal("unfinished dispatches do not animate")
+	}
+}
+
+func dispatchAt(id, agent string, startMin, durMin float64) data.Dispatch {
+	st := t0.Add(time.Duration(startMin * float64(time.Minute)))
+	return data.Dispatch{ToolUseID: id, AgentID: id, AgentType: agent, Status: "completed", Start: &st, DurationMS: ptr(durMin * 60000)}
+}
+
+func TestTimelineSubLanes(t *testing.T) {
+	m := fakeModel(true, 140, 40)
+	s := m.sessions[sidA]
+	d := &data.Session{ID: sidA, Dispatches: []data.Dispatch{
+		dispatchAt("e1", "explorer", 1, 10),
+		dispatchAt("e2", "explorer", 3, 10), // overlaps e1
+		dispatchAt("e3", "explorer", 20, 2), // fits after e1
+		dispatchAt("c1", "coder", 5, 3),
+	}}
+	pl := m.timelinePlan(s, d, 140, 8)
+	if len(pl.lanes) != 3 || len(pl.lanes[0].items) != 2 || len(pl.lanes[1].items) != 1 || pl.lanes[1].agent != "explorer" || !pl.lanes[0].first || pl.lanes[1].first {
+		t.Fatalf("lanes: %+v", pl.lanes)
+	}
+	if pl.boxH() != 3+2+1 {
+		t.Fatalf("rows are not padded: box height %d", pl.boxH())
+	}
+	if pl2 := m.timelinePlan(s, d, 140, 2); len(pl2.lanes) != 1 || pl2.hidden != 2 {
+		t.Fatalf("a capped timeline says what it hides: %+v", pl2)
+	}
+}
+
+func TestDispatchRowsAlignWithAndWithoutFlags(t *testing.T) {
+	m := fakeModel(true, 140, 40)
+	m.view, m.selID = viewSession, sidA
+	var head string
+	col := -1
+	for _, l := range strings.Split(plain(m), "\n") {
+		if strings.Contains(l, "DESCRIPTION") {
+			head = l
+			col = len([]rune(l[:strings.Index(l, "DESCRIPTION")]))
+			continue
+		}
+		if i := strings.Index(l, "Task number"); head != "" && i >= 0 {
+			if got := len([]rune(l[:i])); got != col {
+				t.Fatalf("description starts at cell %d, header says %d: %q", got, col, l)
+			}
+		}
+	}
+	if col < 0 {
+		t.Fatal("no dispatch list found")
+	}
+	for _, h := range []string{"MODEL", "IN", "OUT", "TOTAL", "DUR", "FLAGS"} {
+		if !strings.Contains(head, h) {
+			t.Fatalf("column %s missing at 140 columns: %q", h, head)
+		}
+	}
+}
+
+func TestSessionHeaderSignalsAndNoSignalsBox(t *testing.T) {
+	m := fakeModel(true, 140, 40)
+	m.view, m.selID = viewSession, sidA
+	out := plain(m)
+	if strings.Contains(out, "Signals") {
+		t.Fatal("the Signals box is gone")
+	}
+	for _, want := range []string{"repeats 1", "review loops 1", "warnings 1", "re-check 50%", "malformed 2"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("signals line lacks %q", want)
+		}
+	}
+	// the review-loop event shows in the detail of the coder it names
+	send(m, "down")
+	if out := plain(m); !strings.Contains(out, "CHANGES_NEEDED") {
+		t.Fatalf("detail of dispatch 2 lacks its review-loop event:\n%s", out)
+	}
+}
+
+func TestMultiDaySpanShowsDates(t *testing.T) {
+	m := fakeModel(true, 140, 40)
+	s := m.sessions[sidA]
+	end := s.Start.Add(30 * time.Hour)
+	s.End = &end
+	m.view, m.selID = viewSession, sidA
+	out := plain(m)
+	if !strings.Contains(out, "→ Nov 14 16:00") {
+		t.Fatalf("header span lacks the end date:\n%s", out)
+	}
+	if !strings.Contains(out, "11-13 10:00") || !strings.Contains(out, "11-14 16:00") {
+		t.Fatalf("timeline axis lacks dates:\n%s", out)
+	}
+}
+
+func TestScrollThumbKeepsTheBorder(t *testing.T) {
+	m := fakeModel(false, 100, 30)
+	p := m.th.on(m.th.Surface)
+	box := p.boxed("t", []string{"a", "b", "c", "d", "e", "f"}, 20, 8, m.th.Pink)
+	box = m.scrollMark(p, box, 0, 3, 9)
+	thumbs := 0
+	for i, l := range box {
+		if width(l) != 20 {
+			t.Fatalf("line %d is %d cells", i, width(l))
+		}
+		s := ansi.Strip(l)
+		if strings.HasSuffix(s, "┃") {
+			thumbs++
+			if !strings.HasSuffix(strings.TrimSuffix(s, "┃"), " ") {
+				t.Fatalf("thumb ate content: %q", s)
+			}
+		}
+	}
+	if thumbs == 0 {
+		t.Fatal("no thumb drawn")
+	}
+}
+
+func TestNoColorLegendMatchesBar(t *testing.T) {
+	m := fakeModel(true, 140, 40)
+	s := m.sessions[sidA]
+	b := m.agentBar(m.th.on(m.th.Bg), s, 140)
+	bar, legend := ansi.Strip(b[0]), ansi.Strip(b[1])
+	rows, _ := sortedUsage(s.ByAgent)
+	for i := range rows {
+		g := plainFills[i%len(plainFills)]
+		if !strings.Contains(bar, g) || !strings.Contains(legend, g+" ") {
+			t.Fatalf("segment %d: glyph %q must be in the bar and lead its legend entry\nbar    %s\nlegend %s", i, g, bar, legend)
+		}
+	}
+}
+
+func TestHelpAndFooterComeFromKeys(t *testing.T) {
+	m := fakeModel(true, 140, 40)
+	m.help = true
+	out := plain(m)
+	for _, g := range helpGroups() {
+		for _, b := range g {
+			if !strings.Contains(out, b.Help().Key) || !strings.Contains(out, b.Help().Desc) {
+				t.Fatalf("help lacks %q %q", b.Help().Key, b.Help().Desc)
+			}
+		}
+	}
+	m.help = false
+	foot := plain(m)
+	foot = foot[strings.LastIndex(foot, "\n"):]
+	for _, b := range m.footerKeys() {
+		if !strings.Contains(foot, b.Help().Key+" "+b.Help().Desc) {
+			t.Fatalf("footer lacks %q: %q", b.Help().Key, foot)
+		}
+	}
+}
+
+func TestNoMouseCapture(t *testing.T) {
+	if v := fakeModel(false, 100, 30).View(); v.MouseMode != 0 {
+		t.Fatalf("mouse mode %v: the terminal's own selection must keep working", v.MouseMode)
+	}
+}
+
+// ---- snapshots against the fixture ------------------------------------------------------------
+
+var update = flag.Bool("update", false, "rewrite the golden files")
+
+var goldenNow = time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC)
+
+// fixtureCopy copies tests/fixtures/projects to a temp dir with a fixed mtime on every file.
+func fixtureCopy(t *testing.T) string {
+	t.Helper()
+	src, dst := "../../tests/fixtures/projects", t.TempDir()
+	mtime := time.Date(2026, 1, 1, 10, 30, 0, 0, time.UTC)
+	err := filepath.WalkDir(src, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(src, p)
+		if d.IsDir() {
+			return os.MkdirAll(filepath.Join(dst, rel), 0o755)
+		}
+		b, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		out := filepath.Join(dst, rel)
+		if err := os.WriteFile(out, b, 0o644); err != nil {
+			return err
+		}
+		return os.Chtimes(out, mtime, mtime)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return dst
+}
+
+func fixtureSnapshot(t *testing.T, projects, view, session string, w, h int) (string, error) {
+	t.Helper()
+	root, _ := filepath.Abs("../..")
+	r := &data.Runner{Root: root, ProjectsDir: projects, AgentsDir: filepath.Join(root, "tests", "fixtures", "agents")}
+	if err := r.Check(); err != nil {
+		t.Skipf("python unavailable: %v", err)
+	}
+	return Snapshot(SnapshotOptions{
+		Options: Options{Runner: r, NoColor: true, Range: "all", Now: func() time.Time { return goldenNow }},
+		View:    view, Session: session, W: w, H: h,
+	})
+}
+
+func TestGoldenSnapshots(t *testing.T) {
+	projects := fixtureCopy(t)
+	for _, sz := range [][2]int{{140, 40}, {80, 24}} {
+		for _, view := range []string{"dashboard", "session", "agents", "help"} {
+			name := fmt.Sprintf("%s-%dx%d", view, sz[0], sz[1])
+			t.Run(name, func(t *testing.T) {
+				got, err := fixtureSnapshot(t, projects, view, "", sz[0], sz[1])
+				if err != nil {
+					t.Fatal(err)
+				}
+				path := filepath.Join("testdata", name+".golden")
+				if *update {
+					if err := os.WriteFile(path, []byte(got+"\n"), 0o644); err != nil {
+						t.Fatal(err)
+					}
+					return
+				}
+				want, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatalf("%v (run go test ./internal/tui -update)", err)
+				}
+				if got+"\n" != string(want) {
+					t.Fatalf("%s changed; run go test ./internal/tui -update and review the diff\n--- got ---\n%s", name, got)
+				}
+			})
+		}
+	}
+}
+
+func TestSnapshotFailures(t *testing.T) {
+	projects := fixtureCopy(t)
+	// the python CLI resolves the prefix: two matches is an error, not a pick
+	b, _ := os.ReadFile(filepath.Join(projects, "-fixture-proj", "fixture-0001.jsonl"))
+	if err := os.WriteFile(filepath.Join(projects, "-fixture-proj", "fixture-0002.jsonl"), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fixtureSnapshot(t, projects, "session", "fixture", 100, 30); err == nil || !strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("ambiguous prefix: %v", err)
+	}
+	if _, err := fixtureSnapshot(t, projects, "session", "nope", 100, 30); err == nil {
+		t.Fatal("unknown session must fail")
+	}
+	if out, err := fixtureSnapshot(t, projects, "session", "fixture-0001", 100, 30); err != nil || !strings.Contains(out, "fixture-0001") {
+		t.Fatalf("exact id: %v", err)
+	}
+	// a load that fails exits non-zero: no python, or a missing projects dir
+	missing := &data.Runner{Root: "../..", Python: "definitely-not-python-xyz"}
+	if _, err := Snapshot(SnapshotOptions{Options: Options{Runner: missing}, View: "dashboard", W: 100, H: 30}); err == nil {
+		t.Fatal("missing python must fail the snapshot")
+	}
+	bad := &data.Runner{Root: "../..", ProjectsDir: filepath.Join(projects, "does-not-exist")}
+	if _, err := Snapshot(SnapshotOptions{Options: Options{Runner: bad}, View: "dashboard", W: 100, H: 30}); err == nil {
+		t.Fatal("an unreadable projects dir must fail the snapshot")
+	}
+}

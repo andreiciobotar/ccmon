@@ -1,0 +1,40 @@
+ ccmon [1 Dashboard] 2 Session  3 Agents                                                               24h  7d  30d [all]  ○ idle  00:00:00 
+ Sessions  1 in all · sorted by recent                                                                                                      
+▌ TOKENS             ▌ SUBAGENT SHARE    ▌ DISPATCHES        ▌ REPEATS           ▌ REVIEW LOOPS      ▌ RE-CHECK RATE     ▌ MODEL WARNINGS   
+▌ 670                ▌ 55.2%             ▌ 18                ▌ 1                 ▌ 3                 ▌ 67%               ▌ 1                
+▌ 1 sessions         ▌ ████████░░░░░░░   ▌ 18.0 per session  ▌ re-dispatches     ▌ reviewer → coder  ▌ claims re-read    ▌ wrong model used 
+                                                                                                                                            
+╭─ Sessions 1 ──────────────────────────────────────────────────────────────────────────────────────╮ ╭─ Agent mix ────────────────────────╮
+│    PROJECT                SESSION  ACTIVE       TOKENS MAIN│SUB DISP SIGNALS                      │ │ ● explorer        █████░░░░░░  47% │
+│ >· cwd                    fixture- 01-01 10:30     670 ████▓▓▓▓   18 [WARN 1] [repeat 1] [loop 3] │ │ ● main            █████░░░░░░  45% │
+│                                                                                                   │ │ ● reviewer        █░░░░░░░░░░   5% │
+│                                                                                                   │ │ ● coder           ░░░░░░░░░░░   3% │
+│                                                                                                   │ │ ● general-purpose ░░░░░░░░░░░   1% │
+│                                                                                                   │ ╰────────────────────────────────────╯
+│                                                                                                   │ ╭─ Model mix ────────────────────────╮
+│                                                                                                   │ │ ███████████████▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▒▒░░ │
+│                                                                                                   │ │ █ haiku-5-5               301  45% │
+│                                                                                                   │ │ ▓ fable-5-2               300  45% │
+│                                                                                                   │ │ ▒ opus-5-5                 36   5% │
+│                                                                                                   │ │ ░ sonnet-5-5               33   5% │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────╯ ╰────────────────────────────────────╯
+╭─ Now running ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ nothing running                                                                                                                          │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+                                                                                                                                            
+                                                                                                                                            
+                                                                                                                                            
+                                                                                                                                            
+                                                                                                                                            
+                                                                                                                                            
+                                                                                                                                            
+                                                                                                                                            
+                                                                                                                                            
+                                                                                                                                            
+                                                                                                                                            
+                                                                                                                                            
+                                                                                                                                            
+                                                                                                                                            
+                                                                                                                                            
+                                                                                                                                            
+ ↑↓/jk move  ·  enter open  ·  / filter  ·  s sort  ·  r range  ·  f follow  ·  tab next view  ·  ? help  ·  q quit                         

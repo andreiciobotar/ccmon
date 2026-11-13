@@ -10,6 +10,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 )
 
 // ErrPython means python3 could not be found.
@@ -18,14 +20,32 @@ var ErrPython = errors.New("python3 not found on PATH")
 // ErrPackage means the ccmon Python package could not be located.
 var ErrPackage = errors.New("ccmon Python package not found")
 
+// callTimeout bounds one python call when Runner.Timeout is unset.
+const callTimeout = 2 * time.Minute
+
 // Runner shells out to `python3 -m ccmon`.
 type Runner struct {
-	Root        string // repo root (working directory, contains ccmon/__init__.py)
-	Python      string // interpreter; default python3
-	ProjectsDir string // passed through when non-empty
-	AgentsDir   string // passed through when non-empty
-	Err         error  // set when the root could not be located; reported by Check
+	Root        string        // repo root (working directory, contains ccmon/__init__.py)
+	Python      string        // interpreter; default python3
+	ProjectsDir string        // absolute; passed through when non-empty
+	AgentsDir   string        // absolute; passed through when non-empty
+	Timeout     time.Duration // per call; default callTimeout
+	Err         error         // set when the root could not be located; reported by Check
+
+	calls sync.WaitGroup
 }
+
+// Projects is the transcripts root the CLI reads.
+func (r *Runner) Projects() string {
+	if r.ProjectsDir != "" {
+		return r.ProjectsDir
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".claude", "projects")
+}
+
+// Wait blocks until every call has returned; cancel their context first.
+func (r *Runner) Wait() { r.calls.Wait() }
 
 // LocateRoot finds the repo root: $CCMON_ROOT, else walking up from the executable
 // (bin/ccmon-tui -> ..), else walking up from the working directory.
@@ -86,6 +106,14 @@ func (r *Runner) python() string {
 }
 
 func (r *Runner) run(ctx context.Context, out any, args ...string) error {
+	r.calls.Add(1)
+	defer r.calls.Done()
+	timeout := r.Timeout
+	if timeout <= 0 {
+		timeout = callTimeout
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 	full := []string{"-m", "ccmon"}
 	full = append(full, args...)
 	full = append(full, "--json")
@@ -97,6 +125,7 @@ func (r *Runner) run(ctx context.Context, out any, args ...string) error {
 	}
 	cmd := exec.CommandContext(ctx, r.python(), full...)
 	cmd.Dir = r.Root
+	cmd.WaitDelay = time.Second
 	var so, se bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &so, &se
 	if err := cmd.Run(); err != nil {
@@ -104,6 +133,11 @@ func (r *Runner) run(ctx context.Context, out any, args ...string) error {
 			return ErrPython
 		}
 		msg := strings.TrimSpace(se.String())
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return fmt.Errorf("ccmon %s timed out after %s", args[0], timeout)
+		} else if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		if msg == "" {
 			msg = err.Error()
 		}
@@ -144,7 +178,6 @@ func (r *Runner) Session(ctx context.Context, id string) (*Session, error) {
 	if err := r.run(ctx, &out, "session", id); err != nil {
 		return nil, err
 	}
-	out.Detail = true
 	return &out, nil
 }
 
@@ -156,12 +189,4 @@ func (r *Runner) Agents(ctx context.Context, since string) (*Agents, error) {
 		return nil, err
 	}
 	return &out, nil
-}
-
-// StatMtime returns the transcript mtime of a session path, zero when missing.
-func StatMtime(path string) (t int64) {
-	if fi, err := os.Stat(path); err == nil {
-		return fi.ModTime().UnixNano()
-	}
-	return 0
 }

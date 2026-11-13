@@ -97,9 +97,9 @@ type Session struct {
 	Malformed       int               `json:"malformed"`
 	Dispatches      []Dispatch        `json:"dispatches"`
 
-	// Local, not from JSON.
-	Detail     bool      `json:"-"` // Dispatches was loaded
-	LastChange time.Time `json:"-"` // file mtime or last watcher event
+	// Local, not from JSON: the transcripts' newest mtime observed before this was read.
+	// A result with an older value never replaces one with a newer value.
+	LastChange time.Time `json:"-"`
 }
 
 // SessionsResult is `ccmon sessions --json`.

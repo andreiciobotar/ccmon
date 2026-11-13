@@ -35,37 +35,14 @@ func (m *model) agentsBody(p paint, w, h int) block {
 		}
 	}
 	// model strip on top
-	out := block{m.modelStrip(p, w)}
-	out = append(out, p.sp(w))
+	models, total := sortedUsage(m.agents.ByModel)
+	out := block{m.mixStrip(p, "models", models, total, th.ModelColor, shortModel, w), p.sp(w)}
 	per := (h - len(out)) / cardH
 	cur := min(m.acursor, len(rows)-1)
 	for i := m.atop; i < len(rows) && i < m.atop+per; i++ {
 		out = append(out, m.agentCard(p, rows[i], i == cur, w, maxTot, maxTok, maxDur)...)
 	}
 	return out
-}
-
-func (m *model) modelStrip(p paint, w int) string {
-	th := m.th
-	rows, total := sortedUsage(m.agents.ByModel)
-	var segs []seg
-	var leg []string
-	for _, r := range rows {
-		c := th.ModelColor(r.k)
-		segs = append(segs, seg{float64(r.v), c})
-		share := 0.0
-		if total > 0 {
-			share = float64(r.v) / float64(total) * 100
-		}
-		leg = append(leg, p.t("■ ", c)+p.t(shortModel(r.k)+" "+pct(share), th.Muted))
-	}
-	legend := strings.Join(leg, p.sp(2))
-	bw := max(10, w-2-width(legend)-2)
-	if width(legend) > w/2 {
-		bw = w - 2
-		return p.sp(1) + p.stack(bw, segs)
-	}
-	return p.sp(1) + p.t("models ", th.Faint) + p.stack(max(8, bw-7), segs) + p.sp(2) + legend
 }
 
 var classColors = func(th *Theme) [4]color.Color {
@@ -122,9 +99,12 @@ func (m *model) agentCard(p paint, a data.AgentRow, selected bool, w int, maxTot
 	bw := min(32, max(10, w/4))
 	segs := []seg{{float64(a.Usage.CacheRead), cc[3]}, {float64(a.Usage.CacheWrite), cc[2]}, {float64(a.Usage.Output), cc[1]}, {float64(a.Usage.Input), cc[0]}}
 	bar := q.stack(bw, segs)
+	cls := func(i int, name string, v int64) string {
+		return q.swatch(i, cc[3-i]) + q.t(" "+name+" ", th.Faint) + q.t(HumanInt(v), cc[3-i])
+	}
 	l2 := q.sp(4) + q.t("usage ", th.Faint) + bar + q.sp(2) +
-		q.t("in ", th.Faint) + q.t(HumanInt(a.Usage.Input), cc[0]) + q.t("  out ", th.Faint) + q.t(HumanInt(a.Usage.Output), cc[1]) +
-		q.t("  cw ", th.Faint) + q.t(HumanInt(a.Usage.CacheWrite), cc[2]) + q.t("  cr ", th.Faint) + q.t(HumanInt(a.Usage.CacheRead), cc[3]) +
+		cls(3, "in", a.Usage.Input) + q.sp(2) + cls(2, "out", a.Usage.Output) + q.sp(2) +
+		cls(1, "cw", a.Usage.CacheWrite) + q.sp(2) + cls(0, "cr", a.Usage.CacheRead) +
 		q.t("  = ", th.Faint) + q.b(HumanInt(a.Usage.Total), th.Text)
 
 	// line 3: percentiles
