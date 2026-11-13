@@ -2,7 +2,7 @@
 name: reviewer
 description: Strict review of a finished change against its plan. Use after the coder finishes and before reporting done. Give it the plan and tell it to read the actual diff.
 model: opus
-tools: Read, Grep, Glob, Bash
+tools: Read, Grep, Glob, Bash, Skill
 skills:
   - coding-taste
 ---

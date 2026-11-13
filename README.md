@@ -75,12 +75,14 @@ Install for development: `claude --plugin-dir factory`, or through the marketpla
 
 The `factory` command (the plugin's `bin/`, on the Bash tool's `PATH` while the plugin is loaded; Python 3.11+, run from inside a repo):
 ```
-factory new <slug> (--brief <text> | --brief-file <path>) --dispatcher <session-name>
+factory new <slug> (--brief <text> | --brief-file <path>) [--dispatcher <session-name>] [--base <slug>]
 factory status [--json]
 factory clean [--dry-run]
 ```
-`new` starts a lead in `.claude/worktrees/<slug>`; `status` shows one row per task with session, changes, distance from the default branch, pull request and staleness; `clean` removes only tasks that are clean and merged, and says why it kept the rest.
+`new` starts a lead in `.claude/worktrees/<slug>`; `--base` stacks it on another open task's branch. The calling session must be named `--dispatcher` (default `dispatcher-<repo directory name>`); name it with `/rename <name>`, or `new` refuses. `status` shows one row per task with session, changes, distance from the default branch, pull request and staleness; `clean` removes a task only on positive evidence (pull request merged into the default branch, nothing uncommitted, no live session, nothing stacked on it), removes nothing when sessions cannot be listed, and says why it kept the rest.
 
-Settings, all optional, in `~/.claude/factory/settings.json`: `worktree_cap` (default 5 per repo), `lead_model` (default `fable`), `lead_permission_mode` (default `auto`).
+Exit codes: 0 success, 2 usage or precondition error, 1 a `claude`, `git` or `gh` step failed.
+
+Settings, all optional, in `~/.claude/factory/settings.json`: `worktree_cap` (default 5 per repo), `lead_model` (default `fable`), `lead_permission_mode` (default `auto`), `task_time_limit_hours` (default 2). A settings file that is not valid JSON is an error.
 
 Tests: `make test-factory`.

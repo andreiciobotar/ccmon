@@ -54,10 +54,14 @@ class FakeRun:
         return any(c[:len(prefix)] == list(prefix) for c in self.calls)
 
 
-def invoke(argv, answers, settings=None):
+DISPATCHER = {"sessionId": "sid-d", "name": "dispatcher-repo", "cwd": ROOT, "kind": "interactive"}
+
+
+def invoke(argv, answers, settings=None, env=None):
     fake = FakeRun(answers)
     out, err = io.StringIO(), io.StringIO()
-    with tempfile.TemporaryDirectory() as home, mock.patch.dict(os.environ, {"HOME": home}):
+    environ = {"HOME": "", "CLAUDE_CODE_SESSION_ID": "sid-d", **(env or {})}
+    with tempfile.TemporaryDirectory() as home, mock.patch.dict(os.environ, {**environ, "HOME": home}):
         if settings is not None:
             Path(home, ".claude", "factory").mkdir(parents=True)
             Path(home, ".claude", "factory", "settings.json").write_text(settings)
@@ -100,9 +104,12 @@ class SettingsTests(unittest.TestCase):
         want = {"worktree_cap": 5, "lead_model": "fable", "lead_permission_mode": "auto",
                 "task_time_limit_hours": 2}
         self.assertEqual(self.load(), want)
-        self.assertEqual(self.load("not json"), want)
-        self.assertEqual(self.load("[1]"), want)
         self.assertEqual(self.load("{}"), want)
+
+    def test_unreadable_file_names_the_file(self):
+        for text in ("not json", "[1]"):
+            with self.assertRaisesRegex(factory.Fail, "settings.json"):
+                self.load(text)
 
     def test_overrides(self):
         got = self.load('{"worktree_cap": 2, "lead_model": "opus", "lead_permission_mode": "plan", '
@@ -126,11 +133,14 @@ class SettingsTests(unittest.TestCase):
 
 class NewTests(unittest.TestCase):
     ARGS = ["new", "demo-task", "--brief", "do it", "--dispatcher", "d1"]
+    OK = {("claude", "--bg"): (0, "backgrounded · 96dc4869 · demo-task\n", "")}
+
+    def answers(self, entries, sessions=(), *extras, dispatcher="d1"):
+        return repo_answers(entries, [dict(DISPATCHER, name=dispatcher), *sessions], *extras)
 
     def test_launch_argv(self):
-        ok = (0, "backgrounded · 96dc4869 · demo-task\n", "")
         with mock.patch.object(factory.time, "time", return_value=1794610677):
-            code, out, err, fake = invoke(self.ARGS, repo_answers([], (), {("claude", "--bg"): ok}))
+            code, out, err, fake = invoke(self.ARGS, self.answers([], (), self.OK))
         self.assertEqual(code, 0, err)
         self.assertIn("96dc4869", out)
         self.assertIn("demo-task", out)
@@ -139,14 +149,13 @@ class NewTests(unittest.TestCase):
         want = ["claude", "--bg", "--worktree", "demo-task", "-n", "demo-task", "--model", "fable",
                 "--permission-mode", "auto", "--plugin-dir", plugin, "--append-system-prompt", lead,
                 "Your task slug is demo-task. The dispatcher's session name is d1. "
-                "Your base branch is origin/main. You started at 2026-11-13T22:57:57Z. "
+                "Your base branch is main (remote origin). You started at 2026-11-13T22:57:57Z. "
                 "Your time limit is 2 hours. Your brief follows.\n\ndo it"]
         self.assertEqual(fake.calls[-1], want)
 
     def test_launch_argv_uses_settings(self):
-        ok = (0, "backgrounded · 1 · demo-task\n", "")
         settings = '{"lead_model": "opus", "lead_permission_mode": "plan"}'
-        _, _, _, fake = invoke(self.ARGS, repo_answers([], (), {("claude", "--bg"): ok}), settings)
+        _, _, _, fake = invoke(self.ARGS, self.answers([], (), self.OK), settings)
         argv = fake.calls[-1]
         self.assertEqual(argv[argv.index("--model") + 1], "opus")
         self.assertEqual(argv[argv.index("--permission-mode") + 1], "plan")
@@ -156,23 +165,31 @@ class NewTests(unittest.TestCase):
             f.write("from file")
             f.flush()
             args = ["new", "demo-task", "--brief-file", f.name, "--dispatcher", "d1"]
-            ok = (0, "backgrounded · 1 · demo-task\n", "")
-            code, _, _, fake = invoke(args, repo_answers([], (), {("claude", "--bg"): ok}))
+            code, _, _, fake = invoke(args, self.answers([], (), self.OK))
         self.assertEqual(code, 0)
         self.assertTrue(fake.calls[-1][-1].endswith("\n\nfrom file"))
 
+    def test_dispatcher_defaults_to_the_repo_directory_name(self):
+        args = ["new", "demo-task", "--brief", "x"]
+        code, _, err, fake = invoke(args, self.answers([], (), self.OK, dispatcher="dispatcher-repo"))
+        self.assertEqual(code, 0, err)
+        self.assertIn("The dispatcher's session name is dispatcher-repo.", fake.calls[-1][-1])
+
     def test_precondition_errors_exit_2_and_start_nothing(self):
-        bg = {("claude", "--bg"): (0, "backgrounded · 1 · demo-task\n", "")}
         cases = {
-            "bad slug": (["new", "Bad", "--brief", "x", "--dispatcher", "d"], repo_answers([], (), bg), "invalid slug"),
-            "agent prefix": (["new", "agent-abc", "--brief", "x", "--dispatcher", "d"], repo_answers([], (), bg), "agent-"),
-            "empty brief": (["new", "demo-task", "--brief", "  ", "--dispatcher", "d"], repo_answers([], (), bg), "empty"),
-            "worktree exists": (self.ARGS, repo_answers([task_entry("demo-task")], (), bg), "worktree already exists"),
-            "branch exists": (self.ARGS, repo_answers([], (), bg, {("git", "rev-parse"): (0, "sha\n", "")}), "branch already exists"),
-            "session exists": (self.ARGS, repo_answers([], [{"name": "demo-task", "cwd": "/elsewhere"}], bg), "session named"),
-            "cap": (self.ARGS, repo_answers([task_entry(s) for s in "abcde"], (), bg), "cap of 5.*a, b, c, d, e"),
+            "bad slug": (["new", "Bad", "--brief", "x", "--dispatcher", "d1"], self.answers([], (), self.OK), "invalid slug"),
+            "agent prefix": (["new", "agent-abc", "--brief", "x", "--dispatcher", "d1"], self.answers([], (), self.OK), "agent-"),
+            "empty brief": (["new", "demo-task", "--brief", "  ", "--dispatcher", "d1"], self.answers([], (), self.OK), "empty"),
+            "worktree exists": (self.ARGS, self.answers([task_entry("demo-task")], (), self.OK), "worktree already exists"),
+            "branch exists": (self.ARGS, self.answers([], (), self.OK, {("git", "rev-parse"): (0, "sha\n", "")}), "branch already exists"),
+            "session exists": (self.ARGS, self.answers([], [{"name": "demo-task", "cwd": "/elsewhere"}], self.OK), "session named"),
+            "session inside the worktree": (self.ARGS, self.answers([], [{"cwd": f"{WT}/demo-task/sub"}], self.OK), "session named"),
+            "cap": (self.ARGS, self.answers([task_entry(s) for s in "abcde"], (), self.OK), "cap of 5.*a, b, c, d, e"),
             "no repo": (self.ARGS, {("git",): (128, "", "not a repo")}, "not inside a git repository"),
-            "agents unlistable": (self.ARGS, repo_answers([], (), bg, {("claude", "agents"): (1, "", "boom")}), "cannot list sessions"),
+            "agents unlistable": (self.ARGS, self.answers([], (), self.OK, {("claude", "agents"): (1, "", "boom")}), "cannot list sessions"),
+            "wrong dispatcher name": (self.ARGS, self.answers([], (), self.OK, dispatcher="other"), "/rename d1"),
+            "unnamed dispatcher": (self.ARGS, repo_answers([], [{"sessionId": "sid-d"}], self.OK), "/rename d1"),
+            "caller not listed": (self.ARGS, repo_answers([], [], self.OK), "not listed"),
         }
         for name, (argv, answers, pattern) in cases.items():
             with self.subTest(name):
@@ -182,11 +199,23 @@ class NewTests(unittest.TestCase):
                 self.assertEqual(len(err.strip().splitlines()), 1)
                 self.assertFalse(fake.ran("claude", "--bg"))
 
+    def test_dispatcher_session_id_unset_is_refused(self):
+        for value in ("", "sid-other"):
+            with self.subTest(value):
+                code, _, err, fake = invoke(self.ARGS, self.answers([], (), self.OK),
+                                            env={"CLAUDE_CODE_SESSION_ID": value})
+                self.assertEqual(code, 2)
+                self.assertRegex(err, "CLAUDE_CODE_SESSION_ID|not listed")
+                self.assertFalse(fake.ran("claude", "--bg"))
+
+    def stacked(self, extra, base_entry=None):
+        answers = self.answers([base_entry or task_entry("alpha")], (), {
+            ("git", "worktree", "add"): (0, "", ""), ("git", "config"): (0, "", ""),
+            ("git", "worktree", "remove"): (0, "", ""), ("git", "branch"): (0, "", "")}, extra)
+        return invoke(self.ARGS + ["--base", "alpha"], answers)
+
     def test_base_creates_worktree_records_base_and_launches(self):
-        ok = {("claude", "--bg"): (0, "backgrounded · 1 · demo-task\n", ""),
-              ("git", "worktree", "add"): (0, "", ""), ("git", "config"): (0, "", "")}
-        code, _, err, fake = invoke(self.ARGS + ["--base", "alpha"],
-                                    repo_answers([task_entry("alpha")], (), ok))
+        code, _, err, fake = self.stacked(self.OK)
         self.assertEqual(code, 0, err)
         add = ["git", "worktree", "add", "-b", "worktree-demo-task", f"{WT}/demo-task", "worktree-alpha"]
         cfg = ["git", "config", "branch.worktree-demo-task.factoryBase", "worktree-alpha"]
@@ -194,54 +223,84 @@ class NewTests(unittest.TestCase):
         self.assertLess(fake.calls.index(cfg), len(fake.calls) - 1)
         launch = fake.calls[-1]
         self.assertEqual(launch[:6], ["claude", "--bg", "--worktree", "demo-task", "-n", "demo-task"])
-        self.assertIn("Your base branch is worktree-alpha.", launch[-1])
+        self.assertIn("Your base branch is worktree-alpha (remote origin).", launch[-1])
         self.assertFalse(fake.ran("git", "worktree", "remove"))
 
+    def test_base_uses_the_base_tasks_actual_branch(self):
+        code, _, err, fake = self.stacked(self.OK, (f"{WT}/alpha", "feature/odd", False))
+        self.assertEqual(code, 0, err)
+        self.assertIn(["git", "worktree", "add", "-b", "worktree-demo-task", f"{WT}/demo-task", "feature/odd"],
+                      fake.calls)
+        self.assertIn(["git", "config", "branch.worktree-demo-task.factoryBase", "feature/odd"], fake.calls)
+        self.assertIn("Your base branch is feature/odd (remote origin).", fake.calls[-1][-1])
+
+    def test_detached_base_refused(self):
+        code, _, err, fake = self.stacked(self.OK, (f"{WT}/alpha", None, False))
+        self.assertEqual(code, 2)
+        self.assertIn("detached", err)
+        self.assertFalse(fake.ran("git", "worktree", "add"))
+
     def test_unknown_base_refused_before_anything_is_created(self):
-        code, _, err, fake = invoke(self.ARGS + ["--base", "ghost"], repo_answers([task_entry("alpha")]))
+        code, _, err, fake = invoke(self.ARGS + ["--base", "ghost"], self.answers([task_entry("alpha")]))
         self.assertEqual(code, 2)
         self.assertIn("ghost", err)
         self.assertFalse(fake.ran("git", "worktree", "add"))
         self.assertFalse(fake.ran("claude", "--bg"))
 
-    def test_failed_launch_with_base_removes_worktree_and_branch(self):
-        answers = repo_answers([task_entry("alpha")], (), {
-            ("claude", "--bg"): (1, "", "boom"), ("git", "worktree"): (0, porcelain((ROOT, "main", False)), ""),
-            ("git", "config"): (0, "", ""), ("git", "branch"): (0, "", "")})
-        answers[("git", "worktree", "list")] = (0, porcelain((ROOT, "main", False), task_entry("alpha")), "")
-        answers[("git", "worktree", "add")] = (0, "", "")
-        answers[("git", "worktree", "remove")] = (0, "", "")
-        code, _, err, fake = invoke(self.ARGS + ["--base", "alpha"], answers)
+    def test_launch_exit_nonzero_with_base_removes_worktree_and_branch(self):
+        code, _, err, fake = self.stacked({("claude", "--bg"): (1, "", "boom")})
         self.assertEqual(code, 1)
         self.assertIn("boom", err)
         self.assertIn(["git", "worktree", "remove", "--force", f"{WT}/demo-task"], fake.calls)
         self.assertIn(["git", "branch", "-D", "worktree-demo-task"], fake.calls)
 
-    def test_failed_launch_without_base_creates_nothing_to_undo(self):
-        _, _, _, fake = invoke(self.ARGS, repo_answers([], (), {("claude", "--bg"): (1, "", "boom")}))
+    def test_launch_exit_zero_without_line_removes_nothing(self):
+        code, _, err, fake = self.stacked({("claude", "--bg"): (0, "something odd\n", "")})
+        self.assertEqual(code, 1)
+        self.assertIn("something odd", err)
+        self.assertFalse(fake.ran("git", "worktree", "remove"))
+        self.assertFalse(fake.ran("git", "branch"))
+
+    def test_config_failure_removes_worktree_and_branch_and_exits_1(self):
+        code, _, err, fake = self.stacked({("git", "config"): (1, "", "cannot lock")})
+        self.assertEqual(code, 1)
+        self.assertIn("cannot lock", err)
+        self.assertIn(["git", "worktree", "remove", "--force", f"{WT}/demo-task"], fake.calls)
+        self.assertIn(["git", "branch", "-D", "worktree-demo-task"], fake.calls)
+        self.assertFalse(fake.ran("claude", "--bg"))
+
+    def test_worktree_add_failure_exits_1(self):
+        code, _, err, fake = self.stacked({("git", "worktree", "add"): (128, "", "bad ref")})
+        self.assertEqual((code, "bad ref" in err), (1, True))
+        self.assertFalse(fake.ran("claude", "--bg"))
+
+    def test_launch_failure_without_base_creates_nothing_to_undo(self):
+        code, _, _, fake = invoke(self.ARGS, self.answers([], (), {("claude", "--bg"): (1, "", "boom")}))
+        self.assertEqual(code, 1)
         self.assertFalse(fake.ran("git", "worktree", "remove"))
 
     def test_cap_from_settings(self):
-        bg = {("claude", "--bg"): (0, "backgrounded · 1 · demo-task\n", "")}
-        code, _, err, _ = invoke(self.ARGS, repo_answers([task_entry("a")], (), bg), '{"worktree_cap": 1}')
+        code, _, err, _ = invoke(self.ARGS, self.answers([task_entry("a")], (), self.OK), '{"worktree_cap": 1}')
         self.assertEqual(code, 2)
         self.assertIn("cap of 1", err)
 
     def test_invalid_settings_exit_2(self):
-        code, _, err, _ = invoke(self.ARGS, repo_answers([]), '{"worktree_cap": 0}')
+        code, _, err, _ = invoke(self.ARGS, self.answers([]), '{"worktree_cap": 0}')
         self.assertEqual((code, "worktree_cap" in err), (2, True))
+        code, _, err, _ = invoke(self.ARGS, self.answers([]), "not json")
+        self.assertEqual((code, "settings.json" in err), (2, True))
 
     def test_claude_failure_passes_stderr(self):
         for result in ((1, "", "model not found\n"), (0, "no marker line\n", "")):
             with self.subTest(result=result):
-                code, _, err, _ = invoke(self.ARGS, repo_answers([], (), {("claude", "--bg"): result}))
+                code, _, err, _ = invoke(self.ARGS, self.answers([], (), {("claude", "--bg"): result}))
                 self.assertEqual(code, 1)
-                self.assertIn("did not start", err)
-        _, _, err, _ = invoke(self.ARGS, repo_answers([], (), {("claude", "--bg"): (1, "", "model not found\n")}))
+                self.assertRegex(err, "did not start|without a `backgrounded` line")
+        _, _, err, _ = invoke(self.ARGS, self.answers([], (), {("claude", "--bg"): (1, "", "model not found\n")}))
         self.assertIn("model not found", err)
 
     def test_no_remote_defaults_to_main(self):
-        answers = repo_answers([], (), {("claude", "--bg"): (0, "backgrounded · 1 · demo-task\n", "")})
+        answers = self.answers([], (), self.OK)
         answers[("git", "symbolic-ref")] = (128, "", "no such ref")
         self.assertEqual(invoke(self.ARGS, answers)[0], 0)
 
@@ -279,6 +338,22 @@ class StatusTests(unittest.TestCase):
         self.assertEqual((row["dirty"], row["behind"], row["ahead"]), (True, 3, 1))
         self.assertEqual((row["pr_state"], row["pr_url"]), ("open", "http://pr/1"))
         self.assertFalse(row["stale"])
+
+    def test_session_matching_is_by_worktree_path_prefix(self):
+        inside = {"id": "in1", "cwd": f"{WT}/alpha/sub/dir", "kind": "background", "status": "idle", "state": "done"}
+        sibling = {"id": "sib", "cwd": f"{WT}/alpha-two", "kind": "background", "status": "idle", "state": "done"}
+        no_cwd = {"id": "nocwd", "kind": "background", "status": "idle", "state": "done"}
+        empty_cwd = {"id": "empty", "cwd": "", "kind": "background", "status": "idle", "state": "done"}
+        doc, _ = self.status([task_entry("alpha")], [sibling, no_cwd, empty_cwd])
+        self.assertEqual((doc["rows"][0]["session"], doc["rows"][0]["session_id"]), ("none", None))
+        doc, _ = self.status([task_entry("alpha")], [sibling, no_cwd, inside])
+        self.assertEqual(doc["rows"][0]["session_id"], "in1")
+
+    def test_table_shows_the_session_id(self):
+        s = {"id": "96dc4869", "cwd": f"{WT}/alpha", "kind": "background", "status": "idle", "state": "done"}
+        out, _ = self.status([task_entry("alpha")], [s], as_json=False)
+        lines = out.splitlines()
+        self.assertEqual(lines[1].index("96dc4869"), lines[0].index("ID"))
 
     def test_no_session_and_no_pr(self):
         doc, fake = self.status([task_entry("alpha")])
@@ -374,48 +449,84 @@ class StatusTests(unittest.TestCase):
 
 
 class CleanTests(unittest.TestCase):
-    def clean(self, *, dirty="", merged=True, pr=None, session=None, dry=False, extra=None):
-        answers = repo_answers([task_entry("x")], [session] if session else [],
+    HEAD = "sha-x"
+
+    def clean(self, *, dirty="", pr=None, sessions=(), dry=False, extra=None, entries=None):
+        if pr is None:
+            pr = [{"state": "MERGED", "url": "u", "headRefOid": self.HEAD, "baseRefName": "main"}]
+        answers = repo_answers(entries or [task_entry("x")], list(sessions),
                                git_task_answers("x", time.time(), dirty=dirty, pr=pr))
-        answers[("git", "merge-base")] = (0 if merged else 1, "", "")
         answers.update({("git", "worktree", "remove"): (0, "", ""), ("git", "branch"): (0, "", ""),
                         ("claude", "rm"): (0, "", "")})
         answers.update(extra or {})
-        code, out, err, fake = invoke(["clean"] + (["--dry-run"] if dry else []), answers)
-        return code, out, err, fake
+        return invoke(["clean"] + (["--dry-run"] if dry else []), answers)
+
+    @staticmethod
+    def removed_anything(fake):
+        return any(c[:2] in (["git", "branch"], ["claude", "rm"]) or c[:3] == ["git", "worktree", "remove"]
+                   for c in fake.calls)
+
+    def pr(self, state="MERGED", base="main", head=HEAD):
+        return [{"state": state, "url": "u", "headRefOid": head, "baseRefName": base}]
 
     def test_keep_reasons(self):
-        open_pr = [{"state": "OPEN", "url": "u", "headRefOid": "sha-x"}]
-        merged_pr = [{"state": "MERGED", "url": "u", "headRefOid": "other"}]
-        busy = {"id": "ab", "cwd": f"{WT}/x", "kind": "background", "status": "busy", "state": "working"}
+        def bg(**kw):
+            return dict({"id": "ab", "cwd": f"{WT}/x", "kind": "background", "status": "idle", "state": "done"}, **kw)
         cases = {
             "uncommitted": (dict(dirty=" M a\n"), "uncommitted changes"),
-            "unmerged open pr": (dict(merged=False, pr=open_pr), "no merged pull request \\(open\\)"),
-            "unmerged no pr": (dict(merged=False), "no merged pull request \\(none\\)"),
-            "unmerged gh missing": (dict(merged=False, pr="missing"), "pull request state is unknown"),
-            "merged pr but newer commits": (dict(merged=False, pr=merged_pr), "newer than its merged pull request"),
-            "busy session": (dict(session=busy), "session is busy"),
+            "unreadable status": (dict(extra={("git", "status"): (128, "", "bad")}), "cannot read git status"),
+            "detached head": (dict(entries=[(f"{WT}/x", None, False)]), "detached HEAD"),
+            "fresh task, no pr": (dict(pr=[]), "no merged pull request \\(none\\)"),
+            "open pr": (dict(pr=self.pr("OPEN")), "no merged pull request \\(open\\)"),
+            "closed pr": (dict(pr=self.pr("CLOSED")), "no merged pull request \\(closed\\)"),
+            "gh missing": (dict(pr="missing"), "pull request state is unknown"),
+            "merged into another task's branch": (dict(pr=self.pr(base="worktree-y")), "merged into worktree-y, not main"),
+            "merged, base missing": (dict(pr=self.pr(base="")), "unknown branch"),
+            "newer commits": (dict(pr=self.pr(head="other")), "newer than its merged pull request"),
+            "empty head": (dict(pr=self.pr(head=""), extra={("git", "log"): (0, "", "")}), "cannot compare its head"),
+            "empty head on both sides": (dict(pr=self.pr(head=""), extra={("git", "log"): (1, "", "")}),
+                                         "cannot compare its head"),
+            "busy session": (dict(sessions=[bg(status="busy", state="working")]), "busy or waiting"),
+            "waiting session": (dict(sessions=[bg(status="waiting")]), "busy or waiting"),
+            "interactive session": (dict(sessions=[{"sessionId": "i1", "cwd": f"{WT}/x", "kind": "interactive"}]),
+                                    "interactive session"),
+            "interactive session in a subdirectory": (
+                dict(sessions=[{"sessionId": "i1", "cwd": f"{WT}/x/src/deep", "kind": "interactive"}]),
+                "interactive session"),
         }
         for name, (kw, pattern) in cases.items():
             with self.subTest(name):
                 code, out, _, fake = self.clean(**kw)
                 self.assertEqual(code, 0)
                 self.assertRegex(out, f"^kept x: .*{pattern}")
-                self.assertFalse(any(c[:2] in (["git", "branch"], ["claude", "rm"]) or c[:3] == ["git", "worktree", "remove"]
-                                     for c in fake.calls))
+                self.assertFalse(self.removed_anything(fake))
+
+    def test_sessions_that_do_not_belong_to_the_task_do_not_protect_it(self):
+        elsewhere = [{"sessionId": "i1", "cwd": f"{WT}/x-other", "kind": "interactive"},
+                     {"sessionId": "i2", "cwd": ROOT, "kind": "interactive"},
+                     {"sessionId": "i3", "kind": "interactive"},
+                     {"sessionId": "i4", "cwd": "", "kind": "interactive"}]
+        code, out, _, _ = self.clean(sessions=elsewhere)
+        self.assertEqual(out.strip(), "removed x")
+
+    def test_sessions_unlistable_removes_nothing(self):
+        for name, result in (("missing claude", (127, "", "no claude")), ("bad json", (0, "not json", "")),
+                             ("not a list", (0, "{}", "")), ("nonzero exit", (1, "[]", "boom"))):
+            with self.subTest(name):
+                for dry in (False, True):
+                    code, out, err, fake = self.clean(dry=dry, extra={("claude", "agents"): result})
+                    self.assertEqual(code, 2)
+                    self.assertIn("cannot list sessions", err)
+                    self.assertEqual(out, "")
+                    self.assertFalse(self.removed_anything(fake))
 
     def test_kept_when_another_task_is_stacked_on_it(self):
-        entries = [task_entry("x"), task_entry("y")]
-        answers = repo_answers(entries, (), git_task_answers("x", time.time()),
-                               {("git", "merge-base"): (0, "", ""),
-                                ("git", "config", "--get", "branch.worktree-y.factoryBase"): (0, "worktree-x\n", "")})
+        answers = repo_answers([task_entry("x"), task_entry("y")], (),
+                               git_task_answers("x", time.time(), pr=self.pr()),
+                               {("git", "config", "--get", "branch.worktree-y.factoryBase"): (0, "worktree-x\n", "")})
         code, out, _, fake = invoke(["clean"], answers)
         self.assertIn("kept x: y is stacked on it", out)
         self.assertFalse(fake.ran("git", "worktree", "remove", f"{WT}/x"))
-
-    def test_merged_means_into_the_default_branch_only(self):
-        _, _, _, fake = self.clean()
-        self.assertIn(["git", "merge-base", "--is-ancestor", "worktree-x", "origin/main"], fake.calls)
 
     def test_remove_without_session_uses_git(self):
         code, out, _, fake = self.clean()
@@ -427,22 +538,16 @@ class CleanTests(unittest.TestCase):
 
     def test_remove_with_session_uses_claude_rm(self):
         idle = {"id": "ab12", "cwd": f"{WT}/x", "kind": "background", "status": "idle", "state": "done"}
-        code, out, _, fake = self.clean(session=idle)
+        code, out, _, fake = self.clean(sessions=[idle])
         self.assertEqual((code, out.strip()), (0, "removed x"))
         self.assertIn(["claude", "rm", "ab12"], fake.calls)
         self.assertFalse(fake.ran("git", "worktree", "remove"))
         self.assertFalse(fake.ran("git", "branch"))
 
-    def test_merged_pull_request_at_same_head_is_removed(self):
-        pr = [{"state": "MERGED", "url": "u", "headRefOid": "sha-x"}]
-        code, out, _, _ = self.clean(merged=False, pr=pr)
-        self.assertEqual(out.strip(), "removed x")
-
     def test_dry_run_changes_nothing(self):
         code, out, _, fake = self.clean(dry=True)
         self.assertEqual(out.strip(), "would remove x")
-        mutating = [c for c in fake.calls if c[:3] == ["git", "worktree", "remove"] or c[:2] in (["git", "branch"], ["claude", "rm"])]
-        self.assertEqual(mutating, [])
+        self.assertFalse(self.removed_anything(fake))
 
     def test_failed_removal_exits_1_and_says_why(self):
         code, out, err, _ = self.clean(extra={("git", "worktree", "remove"): (1, "", "locked")})
@@ -450,17 +555,28 @@ class CleanTests(unittest.TestCase):
         self.assertIn("locked", err)
         self.assertNotIn("removed", out)
 
+    def test_failed_branch_delete_names_the_branch(self):
+        code, out, err, fake = self.clean(extra={("git", "branch"): (1, "", "not fully merged")})
+        self.assertEqual(code, 1)
+        self.assertRegex(err, "branch worktree-x")
+        self.assertIn("not fully merged", err)
+        self.assertIn(["git", "worktree", "remove", f"{WT}/x"], fake.calls)
+
 
 class EndToEndTests(unittest.TestCase):
     FAKE_CLAUDE = """#!/usr/bin/env python3
 import json, os, sys
 if sys.argv[1:2] == ["agents"]:
-    print(os.environ.get("FAKE_AGENTS", "[]"))
+    print(os.environ["FAKE_AGENTS"])
 elif sys.argv[1:2] == ["--bg"]:
     json.dump(sys.argv, open(os.environ["FAKE_ARGV"], "w"))
     print("backgrounded · 96dc4869 · " + sys.argv[sys.argv.index("-n") + 1])
 else:
     sys.exit(3)
+"""
+    FAKE_GH = """#!/usr/bin/env python3
+import os
+print(os.environ["FAKE_PR"])
 """
 
     def setUp(self):
@@ -470,13 +586,17 @@ else:
         self.repo, self.home, bindir = tmp / "repo", tmp / "home", tmp / "bin"
         for d in (self.repo, self.home, bindir):
             d.mkdir()
-        claude = bindir / "claude"
-        claude.write_text(self.FAKE_CLAUDE)
-        claude.chmod(claude.stat().st_mode | stat.S_IXUSR)
+        for name, text in (("claude", self.FAKE_CLAUDE), ("gh", self.FAKE_GH)):
+            tool = bindir / name
+            tool.write_text(text)
+            tool.chmod(tool.stat().st_mode | stat.S_IXUSR)
         self.argv_file = tmp / "argv.json"
+        self.dispatcher = {"sessionId": "sid-d", "name": "dispatcher-repo", "kind": "interactive",
+                           "cwd": str(self.repo)}
         self.env = {**os.environ, "HOME": str(self.home), "PATH": f"{bindir}{os.pathsep}{os.environ['PATH']}",
-                    "FAKE_ARGV": str(self.argv_file), "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
-                    "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+                    "FAKE_ARGV": str(self.argv_file), "FAKE_AGENTS": json.dumps([self.dispatcher]),
+                    "FAKE_PR": "[]", "CLAUDE_CODE_SESSION_ID": "sid-d", "GIT_AUTHOR_NAME": "t",
+                    "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
         self.git("init", "-q", "-b", "main")
         self.git("commit", "-q", "--allow-empty", "-m", "init")
 
@@ -488,35 +608,53 @@ else:
                               capture_output=True, text=True)
 
     def test_new_status_clean(self):
-        p = self.factory("new", "demo-task", "--brief", "build it", "--dispatcher", "d1")
+        p = self.factory("new", "demo-task", "--brief", "build it")
         self.assertEqual((p.returncode, p.stderr), (0, ""))
         self.assertIn("96dc4869", p.stdout)
         argv = json.loads(self.argv_file.read_text())
         self.assertEqual(argv[1:6], ["--bg", "--worktree", "demo-task", "-n", "demo-task"])
         self.assertIn("build it", argv[-1])
-        self.assertIn("d1", argv[-1])
+        self.assertIn("dispatcher-repo", argv[-1])
 
         # the fake does not make worktrees; create the one claude would have made
         self.git("worktree", "add", "-q", "-b", "worktree-demo-task", ".claude/worktrees/demo-task")
-        agents = json.dumps([{"id": "96dc4869", "cwd": str(self.repo / ".claude/worktrees/demo-task"),
-                              "kind": "background", "name": "demo-task", "status": "idle", "state": "done",
-                              "startedAt": int(time.time() * 1000)}])
+        task_dir = self.repo / ".claude/worktrees/demo-task"
+        session = {"id": "96dc4869", "cwd": str(task_dir), "kind": "background", "name": "demo-task",
+                   "status": "idle", "state": "done", "startedAt": int(time.time() * 1000)}
+        agents = json.dumps([self.dispatcher, session])
         p = self.factory("status", "--json", env={"FAKE_AGENTS": agents})
         self.assertEqual(p.returncode, 0, p.stderr)
         doc = json.loads(p.stdout)
         (row,) = doc["rows"]
         self.assertEqual((row["slug"], row["session"], row["session_id"], row["ahead"], row["behind"]),
                          ("demo-task", "done", "96dc4869", 0, 0))
-        self.assertIn(row["pr_state"], ("unknown", "none"))
+        self.assertEqual(row["pr_state"], "none")
         self.assertEqual((doc["open"], doc["leftover_agent_worktrees"], doc["outside_worktrees"]), (1, 0, 0))
 
-        p = self.factory("new", "demo-task", "--brief", "again", "--dispatcher", "d1")
+        p = self.factory("new", "demo-task", "--brief", "again", env={"FAKE_AGENTS": agents})
         self.assertEqual(p.returncode, 2)
 
-        # nothing committed on the branch, so it is merged into main: clean removes it via claude rm
-        p = self.factory("clean", "--dry-run", env={"FAKE_AGENTS": agents})
+        # a fresh task with no pull request is kept, even though its tip sits on main
+        p = self.factory("clean", env={"FAKE_AGENTS": agents})
+        self.assertEqual((p.returncode, p.stdout.split(":")[0]), (0, "kept demo-task"))
+        self.assertTrue(task_dir.is_dir())
+
+        # sessions that cannot be listed: nothing removed
+        p = self.factory("clean", env={"FAKE_AGENTS": "not json"})
+        self.assertEqual(p.returncode, 2)
+        self.assertTrue(task_dir.is_dir())
+
+        # merged pull request at the same head: --dry-run changes nothing, a real clean removes it
+        head = self.git("-C", str(task_dir), "rev-parse", "HEAD").strip()
+        merged = json.dumps([{"state": "MERGED", "url": "u", "headRefOid": head, "baseRefName": "main"}])
+        no_session = {"FAKE_AGENTS": json.dumps([self.dispatcher]), "FAKE_PR": merged}
+        p = self.factory("clean", "--dry-run", env=no_session)
         self.assertEqual(p.stdout.strip(), "would remove demo-task")
-        self.assertTrue((self.repo / ".claude/worktrees/demo-task").is_dir())
+        self.assertTrue(task_dir.is_dir())
+        p = self.factory("clean", env=no_session)
+        self.assertEqual((p.returncode, p.stdout.strip(), p.stderr), (0, "removed demo-task", ""))
+        self.assertFalse(task_dir.exists())
+        self.assertEqual(self.git("branch", "--list", "worktree-demo-task"), "")
 
 
 if __name__ == "__main__":
