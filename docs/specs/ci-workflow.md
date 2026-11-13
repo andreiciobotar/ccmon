@@ -47,11 +47,11 @@ Checked 2026-11-13.
 
 ## Known limits
 
-- A skipped Go test does not fail the run, and `go test` without `-v` does not print skips. If `python3` ever went missing on the runner, the fixture and golden tests would skip and the run would stay green.
+- A skipped Go test does not fail the run, and `go test` without `-v` does not print skips. If `python3` ever went missing on the runner, the fixture and golden tests would skip and the run would stay green. Checked once on the runner with `go test -v` (run 43529562590): no test skipped.
 - Golden TUI output depends on the locale through go-runewidth (East Asian width). It passes under `C` locally and must pass on the runner (`C.UTF-8`); CJK locales are not tested.
 
 ## Done when
 
 - The workflow has run green on this task's pull request.
-- A deliberately failing test makes the run fail (checked once on a throwaway commit or by reading the step's exit status; not left in the branch).
+- A deliberately failing test makes the run fail. Checked on a throwaway commit, reverted in the branch: run 43529562590 failed at `make test`.
 - The pull request body states how long a run takes.
