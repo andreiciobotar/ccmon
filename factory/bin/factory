@@ -138,7 +138,19 @@ def list_sessions():
         data = json.loads(out)
     except ValueError:
         return None
-    return data if rc == 0 and isinstance(data, list) else None
+    if rc != 0 or not isinstance(data, list) or not all(isinstance(s, dict) for s in data):
+        return None
+    return data
+
+
+def unplaced_block(sessions):
+    """Why `clean` must stop: an unfinished session has no cwd, so it could be using any task."""
+    for s in sessions:
+        cwd = s.get("cwd")
+        finished = (s.get("kind"), s.get("status"), s.get("state")) == ("background", "idle", "done")
+        if not (isinstance(cwd, str) and cwd) and not finished:
+            return f"session {s.get('id') or s.get('sessionId')} has no working directory and is not finished"
+    return None
 
 
 def sessions_in(sessions, path):
@@ -278,7 +290,7 @@ def cmd_new(args):
                 raise Fail(f"git {' '.join(argv)} failed: {err.strip()}", code=1)
     rc, out, err = run(build_launch_argv(args.slug, dispatcher, brief, settings, base, repo.remote, time.time()),
                        cwd=repo.root)
-    match = BACKGROUNDED_RE.search(out)
+    match = BACKGROUNDED_RE.search(f"{out}\n{err}")
     if rc != 0 and not match:
         if args.base:
             remove_stacked(repo, path, branch)
@@ -369,6 +381,8 @@ def cmd_clean(args):
     sessions = list_sessions()
     if sessions is None:
         raise Fail("cannot list sessions with `claude agents --json --all`; nothing removed")
+    if unplaced_block(sessions):
+        raise Fail(f"{unplaced_block(sessions)}; cannot tell which task it uses, nothing removed")
     failed = False
     rows = collect(repo, sessions, load_settings()["task_time_limit_hours"])
     for row in rows:
@@ -381,7 +395,7 @@ def cmd_clean(args):
             sessions = list_sessions()
             if sessions is None:
                 raise Fail(f"cannot list sessions again before removing {row['slug']}; nothing further removed")
-            reason = session_block(sessions_in(sessions, row["path"]))
+            reason = unplaced_block(sessions) or session_block(sessions_in(sessions, row["path"]))
             if reason:
                 print(f"kept {row['slug']}: {reason}")
                 continue

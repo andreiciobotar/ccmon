@@ -288,6 +288,13 @@ class NewTests(unittest.TestCase):
         self.assertFalse(fake.ran("git", "worktree", "remove"))
         self.assertFalse(fake.ran("git", "branch"))
 
+    def test_launch_exit_nonzero_with_backgrounded_line_on_stderr_removes_nothing(self):
+        code, _, err, fake = self.stacked({("claude", "--bg"): (1, "", "backgrounded · 96dc4869 · demo-task\n")})
+        self.assertEqual(code, 1)
+        self.assertIn("exited 1 after printing a `backgrounded` line", err)
+        self.assertFalse(fake.ran("git", "worktree", "remove"))
+        self.assertFalse(fake.ran("git", "branch"))
+
     def test_launch_exit_zero_without_line_removes_nothing(self):
         code, _, err, fake = self.stacked({("claude", "--bg"): (0, "something odd\n", "")})
         self.assertEqual(code, 1)
@@ -562,9 +569,7 @@ class CleanTests(unittest.TestCase):
 
     def test_sessions_that_do_not_belong_to_the_task_do_not_protect_it(self):
         elsewhere = [{"sessionId": "i1", "cwd": f"{WT}/x-other", "kind": "interactive"},
-                     {"sessionId": "i2", "cwd": ROOT, "kind": "interactive"},
-                     {"sessionId": "i3", "kind": "interactive"},
-                     {"sessionId": "i4", "cwd": "", "kind": "interactive"}]
+                     {"sessionId": "i2", "cwd": ROOT, "kind": "interactive"}]
         code, out, _, _ = self.clean(sessions=elsewhere)
         self.assertEqual(out.strip(), "removed x")
 
@@ -579,7 +584,8 @@ class CleanTests(unittest.TestCase):
 
     def test_sessions_unlistable_removes_nothing(self):
         for name, result in (("missing claude", (127, "", "no claude")), ("bad json", (0, "not json", "")),
-                             ("not a list", (0, "{}", "")), ("nonzero exit", (1, "[]", "boom"))):
+                             ("not a list", (0, "{}", "")), ("nonzero exit", (1, "[]", "boom")),
+                             ("entry not an object", (0, '["junk"]', ""))):
             with self.subTest(name):
                 for dry in (False, True):
                     code, out, err, fake = self.clean(dry=dry, extra={("claude", "agents"): result})
@@ -587,6 +593,24 @@ class CleanTests(unittest.TestCase):
                     self.assertIn("cannot list sessions", err)
                     self.assertEqual(out, "")
                     self.assertFalse(self.removed_anything(fake))
+
+    def test_unfinished_session_without_cwd_removes_nothing(self):
+        for name, session in (("busy background", {"kind": "background", "id": "ab", "status": "busy",
+                                                   "state": "working"}),
+                              ("interactive", {"kind": "interactive", "sessionId": "s9", "status": "idle"}),
+                              ("empty cwd", {"kind": "background", "id": "ab", "status": "busy", "cwd": ""})):
+            with self.subTest(name):
+                for dry in (False, True):
+                    code, out, err, fake = self.clean(dry=dry, sessions=[session])
+                    self.assertEqual(code, 2)
+                    self.assertIn("has no working directory and is not finished", err)
+                    self.assertEqual(out, "")
+                    self.assertFalse(self.removed_anything(fake))
+
+    def test_finished_session_without_cwd_does_not_block(self):
+        session = {"kind": "background", "id": "ab", "status": "idle", "state": "done"}
+        code, out, _, _ = self.clean(sessions=[session])
+        self.assertEqual((code, out.strip()), (0, "removed x"))
 
     def test_kept_when_another_task_is_stacked_on_it(self):
         answers = repo_answers([task_entry("x"), task_entry("y")], (),
