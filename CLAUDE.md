@@ -9,6 +9,9 @@ You (the main session, on Fable) own planning, cross-cutting reasoning, and the 
 All three roles share one standard: the `insane-hexagon-coder` skill. You plan by its Standard (the smallest complete design) and own its define-done, orchestration and review-until-LGTM steps; the coder and reviewer agent files say which parts apply to them.
 
 Rules:
+- Write the spec once, to a file under `docs/specs/`, before the first coder dispatch. Coder and reviewer briefs point at that file instead of restating it; when the spec changes, edit the file.
+- The spec lists the facts it depends on. Any fact that rests on a sample gets a full count from the explorer before coding starts ("how does every one of these end?", not "what do these few look like?").
+- For anything visual, the coder and reviewer look at rendered output (`make screenshot`), not only at structure.
 - Do not delegate tiny steps. A subagent starts from zero context, so only hand off separable chunks.
 - When you dispatch, put the goal, scope, and expected output in the prompt. Subagents cannot see this conversation.
 - If the reviewer returns CHANGES_NEEDED, send the coder the specific issues, not "fix it".

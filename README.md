@@ -58,6 +58,8 @@ Keys: `tab`/`shift+tab` or `1 2 3` views, `j k g G` or arrows and wheel to move,
 latest session, `s` sort, `/` filter, `?` help, `q` quit. `NO_COLOR` or
 `--no-color` gives a plain rendering.
 
+`make screenshot VIEW=session ARGS="--session <id>"` renders a colored frame to `shots/` as a PNG (needs Chrome).
+
 Snapshot mode renders one settled frame without a TTY:
 `bin/ccmon-tui --snapshot dashboard|session|agents|help --size 140x40
 [--session <id-prefix>] [--range 7d] [--no-color]`.
