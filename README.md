@@ -75,10 +75,8 @@ Optionally a site manager watches the factory for you: `factory schedule install
 
 ## More
 
-- [docs/specs/factory.md](docs/specs/factory.md): the factory's rules, commands, states and settings
-- [docs/specs/factory-events.md](docs/specs/factory-events.md): the log formats
-- [docs/specs/site-manager.md](docs/specs/site-manager.md): the site manager: criteria, the watch tick, the schedule, the firing log
-- [docs/specs/tui.md](docs/specs/tui.md) and [docs/specs/task-grouping.md](docs/specs/task-grouping.md): the dashboard and how sessions map to tasks
+- [docs/factory.md](docs/factory.md): the factory's commands, states, settings and log formats, and the site manager's criteria
+- [docs/ccmon.md](docs/ccmon.md): the monitor's options, the dashboard's keys and how sessions map to tasks
 - `make test` runs everything
 
 ## Status

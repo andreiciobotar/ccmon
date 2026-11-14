@@ -1,4 +1,4 @@
-"""A plugin's agents (<plugin>:<name>) count as their role; see docs/specs/plugin-agent-names.md."""
+"""A plugin's agents (<plugin>:<name>) count as their role; see docs/ccmon.md."""
 import os
 import tempfile
 import unittest
