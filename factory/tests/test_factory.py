@@ -62,16 +62,26 @@ class FakeRun:
 DISPATCHER = {"sessionId": "sid-d", "name": "dispatcher-repo", "cwd": ROOT, "kind": "interactive"}
 
 
-def invoke(argv, answers, settings=None, env=None):
+def task_rec(slug, state, deliverable=None, repo=ROOT):
+    return {"repo": repo, "slug": slug, "state": state, **({"deliverable": deliverable} if deliverable else {})}
+
+
+def invoke(argv, answers, settings=None, env=None, tasks=(), cwd=None):
+    """`tasks` seeds tasks.jsonl (records, or raw lines); the records written are returned as `fake.tasks`."""
     fake = FakeRun(answers)
     out, err = io.StringIO(), io.StringIO()
     environ = {"HOME": "", "CLAUDE_CODE_SESSION_ID": "sid-d", **(env or {})}
     with tempfile.TemporaryDirectory() as home, mock.patch.dict(os.environ, {**environ, "HOME": home}):
+        store = Path(home, ".claude", "factory")
+        store.mkdir(parents=True)
         if settings is not None:
-            Path(home, ".claude", "factory").mkdir(parents=True)
-            Path(home, ".claude", "factory", "settings.json").write_text(settings)
-        with mock.patch.object(factory, "run", fake), redirect_stdout(out), redirect_stderr(err):
+            (store / "settings.json").write_text(settings)
+        (store / "tasks.jsonl").write_text("".join((t if isinstance(t, str) else json.dumps(t)) + "\n" for t in tasks))
+        seeded = (store / "tasks.jsonl").read_text().splitlines()
+        with mock.patch.object(factory, "run", fake), redirect_stdout(out), redirect_stderr(err), \
+                mock.patch.object(os, "getcwd", return_value=cwd or ROOT):
             code = factory.main(argv)
+        fake.tasks = [json.loads(line) for line in (store / "tasks.jsonl").read_text().splitlines()[len(seeded):]]
     return code, out.getvalue(), err.getvalue(), fake
 
 
@@ -95,6 +105,150 @@ class SlugTests(unittest.TestCase):
         for slug in ("ab", "x" * 41, "Abc", "a_b", "a--b", "-ab", "ab-", "a b", "agent-12ab", "ünï"):
             with self.assertRaises(factory.Fail, msg=slug):
                 factory.validate_slug(slug)
+
+
+BUSY = [{"id": "s1", "cwd": f"{WT}/x", "kind": "background", "status": "busy", "state": "working"}]
+
+
+class PhaseTests(unittest.TestCase):
+    def test_every_row_of_the_table(self):
+        want = {  # state -> pull request state -> phase, with no session unfinished
+            None: dict(none="motion", closed="motion", unknown="motion", open="review", merged="merged"),
+            "working": dict(none="motion", closed="motion", unknown="motion", open="motion", merged="motion"),
+            "blocked": dict(none="blocked", closed="blocked", unknown="blocked", open="blocked", merged="blocked"),
+            "handed-over": dict(none="review", closed="review", unknown="review", open="review", merged="merged"),
+            "acknowledged": dict(none="settled", closed="settled", unknown="settled", open="settled", merged="merged"),
+            "dismissed": dict(none="settled", closed="settled", unknown="settled", open="settled", merged="merged"),
+        }
+        for state, by_pr in want.items():
+            for pr, expected in by_pr.items():
+                with self.subTest(state=state, pr=pr):
+                    self.assertEqual(factory.phase(pr, [], state), expected)
+
+    def test_an_unfinished_or_unplaced_session_is_always_motion(self):
+        for state in (None, *factory.STATES):
+            for pr in ("none", "open", "merged"):
+                for mine in (BUSY, [{"kind": "interactive"}], None):
+                    with self.subTest(state=state, pr=pr, mine=mine):
+                        self.assertEqual(factory.phase(pr, mine, state), "motion")
+
+    def test_a_finished_session_lets_go(self):
+        done = [{"kind": "background", "status": "idle", "state": "done"}]
+        self.assertEqual(factory.phase("open", done), "review")
+        self.assertEqual(factory.phase("none", done, "handed-over"), "review")
+
+    def test_state_defaults_to_undeclared(self):
+        self.assertEqual(factory.phase("open", []), "review")
+        self.assertEqual(factory.phase("none", []), "motion")
+
+
+class StoreTests(unittest.TestCase):
+    def read(self, lines=None):
+        with tempfile.TemporaryDirectory() as home, mock.patch.dict(os.environ, {"HOME": home}):
+            if lines is not None:
+                Path(home, ".claude", "factory").mkdir(parents=True)
+                Path(home, ".claude", "factory", "tasks.jsonl").write_text("\n".join(lines) + "\n")
+            return {slug: r["state"] for slug, r in factory.read_tasks(ROOT).items()}
+
+    def test_last_record_wins(self):
+        lines = [json.dumps(task_rec("a", "working")), json.dumps(task_rec("a", "blocked")),
+                 json.dumps(task_rec("b", "working"))]
+        self.assertEqual(self.read(lines), {"a": "blocked", "b": "working"})
+
+    def test_other_repos_are_ignored(self):
+        lines = [json.dumps(task_rec("a", "working")), json.dumps(task_rec("a", "blocked", repo="/other"))]
+        self.assertEqual(self.read(lines), {"a": "working"})
+
+    def test_garbage_lines_are_skipped(self):
+        lines = [json.dumps(task_rec("a", "working")), "not json", "[1]", '{"repo": "/repo"}', ""]
+        self.assertEqual(self.read(lines), {"a": "working"})
+
+    def test_unknown_last_state_is_undeclared(self):
+        lines = [json.dumps(task_rec("a", "working")), json.dumps(task_rec("a", "nonsense")),
+                 json.dumps(task_rec("b", None))]
+        self.assertEqual(self.read(lines), {})
+
+    def test_missing_file(self):
+        self.assertEqual(self.read(), {})
+
+
+class StateTests(unittest.TestCase):
+    CWD = f"{WT}/x/sub"
+
+    def state(self, *args, cwd=CWD, tasks=()):
+        return invoke(["state", *args], repo_answers([task_entry("x")]), cwd=cwd, tasks=tasks)
+
+    def test_each_state_is_written_with_the_repo_root_and_slug(self):
+        for state in ("working", "blocked"):
+            with self.subTest(state):
+                code, out, err, fake = self.state(state)
+                self.assertEqual((code, out, err), (0, f"x: {state}\n", ""))
+                (rec,) = fake.tasks
+                self.assertEqual((rec["repo"], rec["slug"], rec["state"], rec["role"], rec["model"]),
+                                 (ROOT, "x", state, "lead", None))
+                self.assertEqual(rec["session"], "sid-d")
+                self.assertNotIn("deliverable", rec)
+
+    def test_handed_over_stores_a_link_as_given(self):
+        code, out, _, fake = self.state("handed-over", "https://github.com/o/r/pull/9")
+        self.assertEqual((code, out), (0, "x: handed-over\n"))
+        self.assertEqual(fake.tasks[0]["deliverable"], "https://github.com/o/r/pull/9")
+
+    def test_handed_over_resolves_a_file(self):
+        with tempfile.NamedTemporaryFile() as f:
+            code, _, err, fake = self.state("handed-over", f.name)
+            self.assertEqual(code, 0, err)
+            self.assertEqual(fake.tasks[0]["deliverable"], os.path.realpath(f.name))
+
+    def test_refusals_write_nothing(self):
+        cases = {
+            "outside any task worktree": (("working",), ROOT, "inside a task worktree"),
+            "the main checkout's subdirectory": (("working",), f"{ROOT}/src", "inside a task worktree"),
+            "a sibling of a task": (("working",), f"{WT}/x-other", "inside a task worktree"),
+            "handed-over without a deliverable": (("handed-over",), self.CWD, "needs a deliverable"),
+            "working with a deliverable": (("working", "https://x/y"), self.CWD, "take none"),
+            "blocked with a deliverable": (("blocked", "https://x/y"), self.CWD, "take none"),
+            "a missing file": (("handed-over", "/no/such/file"), self.CWD, "does not exist"),
+        }
+        for name, (args, cwd, pattern) in cases.items():
+            with self.subTest(name):
+                code, out, err, fake = self.state(*args, cwd=cwd)
+                self.assertEqual((code, out, fake.tasks), (2, "", []))
+                self.assertRegex(err, pattern)
+
+    def test_from_the_worktree_root_and_a_subdirectory(self):
+        for cwd in (f"{WT}/x", self.CWD):
+            self.assertEqual(self.state("working", cwd=cwd)[0], 0)
+
+
+class AckTests(unittest.TestCase):
+    def ack(self, slug, state, tasks=()):
+        return invoke(["ack", slug, state], repo_answers([task_entry("x")]), tasks=tasks)
+
+    def test_refused_unless_handed_over(self):
+        cases = {"unknown slug": ("ghost", [task_rec("ghost", "handed-over")]), "undeclared": ("x", []),
+                 "working": ("x", [task_rec("x", "working")]), "blocked": ("x", [task_rec("x", "blocked")]),
+                 "another repo's record": ("x", [task_rec("x", "handed-over", repo="/other")])}
+        for name, (slug, tasks) in cases.items():
+            with self.subTest(name):
+                code, out, err, fake = self.ack(slug, "acknowledged", tasks)
+                self.assertEqual((code, out, fake.tasks), (2, "", []))
+                self.assertEqual(len(err.strip().splitlines()), 1)
+
+    def test_accepted_after_handed_over_and_copies_the_deliverable(self):
+        for state in ("acknowledged", "dismissed"):
+            with self.subTest(state):
+                code, out, err, fake = self.ack("x", state, [task_rec("x", "handed-over", "https://x/y")])
+                self.assertEqual((code, out, err), (0, f"x: {state}\n", ""))
+                (rec,) = fake.tasks
+                self.assertEqual((rec["state"], rec["deliverable"], rec["role"], rec["slug"], rec["repo"]),
+                                 (state, "https://x/y", "dispatcher", "x", ROOT))
+
+    def test_a_settled_task_can_be_settled_again_and_working_voids_it(self):
+        code, _, _, fake = self.ack("x", "dismissed", [task_rec("x", "acknowledged", "/f")])
+        self.assertEqual((code, fake.tasks[0]["deliverable"]), (0, "/f"))
+        code, _, err, _ = self.ack("x", "acknowledged", [task_rec("x", "acknowledged", "/f"), task_rec("x", "working")])
+        self.assertEqual(code, 2, err)
 
 
 class SettingsTests(unittest.TestCase):
@@ -320,16 +474,30 @@ class NewTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertFalse(fake.ran("git", "worktree", "remove"))
 
+    def test_new_declares_working(self):
+        code, _, err, fake = invoke(self.ARGS, self.answers([], (), self.OK))
+        self.assertEqual(code, 0, err)
+        (rec,) = fake.tasks
+        self.assertEqual((rec["repo"], rec["slug"], rec["state"], rec["role"]), (ROOT, "demo-task", "working", "dispatcher"))
+
+    def test_a_failed_launch_declares_nothing(self):
+        _, _, _, fake = invoke(self.ARGS, self.answers([], (), {("claude", "--bg"): (1, "", "boom")}))
+        self.assertEqual(fake.tasks, [])
+
+    def test_a_reused_slug_starts_clean(self):
+        code, _, _, fake = invoke(self.ARGS, self.answers([], (), self.OK), tasks=[task_rec("demo-task", "acknowledged")])
+        self.assertEqual((code, fake.tasks[0]["state"]), (0, "working"))
+
     def test_cap_from_settings(self):
         code, _, err, _ = invoke(self.ARGS, self.answers([task_entry("a")], (), self.OK), '{"worktree_cap": 1}')
         self.assertEqual(code, 2)
         self.assertIn("cap of 1", err)
 
-    def at_cap(self, pr, sessions=()):
+    def at_cap(self, pr, sessions=(), tasks=()):
         """`new` with a cap of 2 and tasks a and b; b has no pull request, a's pull requests are `pr`."""
         answers = self.answers([task_entry("a"), task_entry("b")], sessions, self.OK, {
             ("gh",): (0, "[]", ""), ("gh", "pr", "list", "--head", "worktree-a"): (0, json.dumps(pr), "")})
-        code, _, err, fake = invoke(self.ARGS, answers, '{"worktree_cap": 2}')
+        code, _, err, fake = invoke(self.ARGS, answers, '{"worktree_cap": 2}', tasks=tasks)
         return code, err, fake
 
     def test_cap_counts_only_tasks_in_motion(self):
@@ -360,6 +528,26 @@ class NewTests(unittest.TestCase):
                 self.assertEqual(code, 2, err)
                 self.assertRegex(err, "cap of 2 tasks in motion: a, b$")
                 self.assertFalse(fake.ran("claude", "--bg"))
+
+    def test_cap_counts_declared_states(self):
+        busy = [{"cwd": f"{WT}/a", "kind": "background", "id": "s1", "status": "busy", "state": "working"}]
+        link = "https://x/y"
+        code, err, fake = self.at_cap([{"state": "OPEN"}], tasks=[task_rec("a", "blocked")])
+        self.assertEqual(code, 2)
+        self.assertRegex(err, "cap of 2 tasks in motion: a \\(blocked\\), b$")
+        self.assertFalse(fake.ran("claude", "--bg"))
+        code, err, _ = self.at_cap([{"state": "OPEN"}], tasks=[task_rec("a", "working")])
+        self.assertRegex(err, "in motion: a, b$")
+        for name, pr in (("no pull request", []), ("closed", [{"state": "CLOSED"}])):
+            with self.subTest(name):
+                code, err, fake = self.at_cap(pr, tasks=[task_rec("a", "handed-over", link)])
+                self.assertEqual(code, 0, err)
+                self.assertTrue(fake.ran("claude", "--bg"))
+        code, err, _ = self.at_cap([], busy, tasks=[task_rec("a", "handed-over", link)])
+        self.assertEqual(code, 2)
+        self.assertRegex(err, "in motion: a, b$")
+        code, err, _ = self.at_cap([{"state": "OPEN"}], tasks=[task_rec("a", "acknowledged", link)])
+        self.assertEqual(code, 0, err)
 
     def test_cap_lists_only_the_tasks_in_motion(self):
         answers = self.answers([task_entry(s) for s in "abc"], (), self.OK, {
@@ -449,7 +637,46 @@ class StatusTests(unittest.TestCase):
         _, out, _, _ = invoke(["status"], answers)
         lines = out.splitlines()
         self.assertEqual(lines[3].index("review", 6), lines[0].index("PHASE"))
-        self.assertTrue(lines[-1].startswith("in motion 2/5; waiting for review 1; merged, not cleaned 1; "))
+        self.assertTrue(next(l for l in lines if l.startswith("in motion")).startswith(
+            "in motion 2/5 (0 blocked); waiting for review 1; merged, not cleaned 1; settled, not cleaned 0; "))
+        self.assertEqual(lines[-1], "waiting on the human: review -")
+
+    def test_declared_state_deliverable_phases_and_five_counts(self):
+        slugs = ("moving", "asking", "handed", "merged", "settled")
+        tasks = [task_rec("asking", "blocked"), task_rec("handed", "handed-over", "/out/video.mp4"),
+                 task_rec("merged", "handed-over", "https://x/y"), task_rec("settled", "dismissed", "https://x/z")]
+        prs = {("gh", "pr", "list", "--head", "worktree-merged"): (0, json.dumps([{"state": "MERGED"}]), "")}
+        answers = repo_answers([task_entry(s) for s in slugs], (), git_task_answers("x", time.time()), prs)
+        code, out, err, _ = invoke(["status", "--json"], answers, tasks=tasks)
+        self.assertEqual(code, 0, err)
+        doc = json.loads(out)
+        self.assertEqual([(r["phase"], r["state"], r["deliverable"]) for r in doc["rows"]],
+                         [("motion", None, None), ("blocked", "blocked", None),
+                          ("review", "handed-over", "/out/video.mp4"), ("merged", "handed-over", "https://x/y"),
+                          ("settled", "dismissed", "https://x/z")])
+        self.assertEqual((doc["in_motion"], doc["blocked"], doc["in_review"], doc["merged"], doc["settled"]),
+                         (2, 1, 1, 1, 1))
+
+    def test_table_shows_state_count_line_and_what_waits_on_the_human(self):
+        slugs = ("moving", "asking", "handed", "pr-only")
+        tasks = [task_rec("asking", "blocked"), task_rec("handed", "handed-over", "/out/video.mp4"),
+                 task_rec("pr-only", "handed-over")]
+        prs = {("gh", "pr", "list", "--head", "worktree-pr-only"): (0, json.dumps([{"state": "OPEN", "url": "http://pr/7"}]), "")}
+        answers = repo_answers([task_entry(s) for s in slugs], (), git_task_answers("x", time.time()), prs)
+        _, out, _, _ = invoke(["status"], answers, tasks=tasks)
+        lines = out.splitlines()
+        self.assertEqual(lines[0].split()[:3], ["SLUG", "PHASE", "STATE"])
+        for line, state in zip(lines[1:5], ("-", "blocked", "handed-over", "handed-over")):
+            self.assertTrue(line[lines[0].index("STATE"):].startswith(state), line)
+        self.assertEqual(lines[5:], [
+            "in motion 2/5 (1 blocked); waiting for review 2; merged, not cleaned 0; settled, not cleaned 0; "
+            "leftover agent worktrees 0; worktrees outside .claude/worktrees 0",
+            "waiting on the human: handed /out/video.mp4", "waiting on the human: pr-only http://pr/7"])
+
+    def test_a_review_task_without_deliverable_or_pull_request_waits_with_a_dash(self):
+        answers = repo_answers([task_entry("handed")], (), git_task_answers("x", time.time()))
+        _, out, _, _ = invoke(["status"], answers, tasks=[task_rec("handed", "handed-over")])
+        self.assertEqual(out.splitlines()[-1], "waiting on the human: handed -")
 
     def test_sessions_unlistable_counts_as_in_motion(self):
         doc, _ = self.status([task_entry("alpha")], pr=[{"state": "OPEN"}])
@@ -563,13 +790,15 @@ class StatusTests(unittest.TestCase):
         self.assertTrue(lines[1].startswith("alpha"))
         self.assertEqual(lines[1].index("worktree-alpha"), lines[0].index("BRANCH"))
         self.assertEqual(lines[1].index("origin/main"), lines[0].index("BASE"))
-        self.assertEqual(lines[-1], "in motion 1/5; waiting for review 0; merged, not cleaned 0; "
-                                    "leftover agent worktrees 1; worktrees outside .claude/worktrees 1")
+        self.assertEqual(lines[-1], "in motion 1/5 (0 blocked); waiting for review 0; merged, not cleaned 0; "
+                                    "settled, not cleaned 0; leftover agent worktrees 1; "
+                                    "worktrees outside .claude/worktrees 1")
 
     def test_empty_table(self):
         out, _ = self.status([], as_json=False)
-        self.assertEqual(out.strip(), "in motion 0/5; waiting for review 0; merged, not cleaned 0; "
-                                      "leftover agent worktrees 0; worktrees outside .claude/worktrees 0")
+        self.assertEqual(out.strip(), "in motion 0/5 (0 blocked); waiting for review 0; merged, not cleaned 0; "
+                                      "settled, not cleaned 0; leftover agent worktrees 0; "
+                                      "worktrees outside .claude/worktrees 0")
 
 
 class MalformedGhTests(unittest.TestCase):
@@ -586,19 +815,19 @@ class MalformedGhTests(unittest.TestCase):
 class CleanTests(unittest.TestCase):
     HEAD = "sha-x"
 
-    def clean(self, *, dirty="", pr=None, sessions=(), dry=False, extra=None, entries=None):
+    def clean(self, *, dirty="", pr=None, sessions=(), dry=False, extra=None, entries=None, tasks=()):
         if pr is None:
             pr = [{"state": "MERGED", "url": "u", "headRefOid": self.HEAD, "baseRefName": "main"}]
         answers = repo_answers(entries or [task_entry("x")], list(sessions),
                                git_task_answers("x", time.time(), dirty=dirty, pr=pr))
         answers.update({("git", "worktree", "remove"): (0, "", ""), ("git", "branch"): (0, "", ""),
-                        ("claude", "rm"): (0, "", "")})
+                        ("git", "branch", "-r"): (0, "  origin/worktree-x\n", ""), ("claude", "rm"): (0, "", "")})
         answers.update(extra or {})
-        return invoke(["clean"] + (["--dry-run"] if dry else []), answers)
+        return invoke(["clean"] + (["--dry-run"] if dry else []), answers, tasks=tasks)
 
     @staticmethod
     def removed_anything(fake):
-        return any(c[:2] in (["git", "branch"], ["claude", "rm"]) or c[:3] == ["git", "worktree", "remove"]
+        return any(c[:3] in (["git", "branch", "-d"], ["git", "worktree", "remove"]) or c[:2] == ["claude", "rm"]
                    for c in fake.calls)
 
     def pr(self, state="MERGED", base="main", head=HEAD):
@@ -649,6 +878,55 @@ class CleanTests(unittest.TestCase):
                 self.assertEqual(code, 0)
                 self.assertRegex(out, f"^kept x: .*{pattern}")
                 self.assertFalse(self.removed_anything(fake))
+
+    def settled(self, state="acknowledged", deliverable="https://x/y", **kw):
+        kw.setdefault("pr", [])
+        return self.clean(tasks=[task_rec("x", state, deliverable)], **kw)
+
+    def test_settled_task_is_removed_when_every_check_holds(self):
+        for state in ("acknowledged", "dismissed"):
+            for deliverable in ("https://x/y", "/out/video.mp4"):
+                with self.subTest(state=state, deliverable=deliverable):
+                    code, out, _, fake = self.settled(state, deliverable)
+                    self.assertEqual((code, out.strip()), (0, "removed x"))
+                    self.assertIn(["git", "branch", "-r", "--contains", "HEAD"], fake.calls)
+        code, out, _, _ = self.settled(pr=self.pr("CLOSED"))
+        self.assertEqual(out.strip(), "removed x")
+
+    def test_settled_task_is_kept_when_a_check_fails(self):
+        bg = {"id": "ab", "cwd": f"{WT}/x", "kind": "background", "status": "busy", "state": "working"}
+        cases = {
+            "merely handed over": (dict(state="handed-over"), "no merged pull request \\(none\\)"),
+            "working": (dict(state="working"), "no merged pull request \\(none\\)"),
+            "pull request open": (dict(pr=self.pr("OPEN")), "settled, but its pull request is open"),
+            "pull request unknown": (dict(extra={("gh",): (1, "", "no gh")}), "settled, but its pull request is unknown"),
+            "no deliverable": (dict(deliverable=None), "no deliverable is recorded"),
+            "deliverable is the worktree": (dict(deliverable=f"{WT}/x"), "deliverable is inside the worktree"),
+            "deliverable inside the worktree": (dict(deliverable=f"{WT}/x/out/video.mp4"),
+                                                "deliverable is inside the worktree"),
+            "head on no remote": (dict(extra={("git", "branch", "-r"): (0, "\n", "")}), "on no remote-tracking branch"),
+            "git branch -r fails": (dict(extra={("git", "branch", "-r"): (128, "", "bad")}), "cannot tell whether"),
+            "dirty tree": (dict(dirty=" M a\n"), "uncommitted changes"),
+            "unfinished session": (dict(sessions=[bg]), "not finished"),
+        }
+        for name, (kw, pattern) in cases.items():
+            with self.subTest(name):
+                code, out, _, fake = self.settled(**kw)
+                self.assertEqual(code, 0)
+                self.assertRegex(out, f"^kept x: .*{pattern}")
+                self.assertFalse(self.removed_anything(fake))
+
+    def test_a_sibling_directory_of_the_worktree_is_not_inside_it(self):
+        code, out, _, _ = self.settled(deliverable=f"{WT}/x-out/video.mp4")
+        self.assertEqual(out.strip(), "removed x")
+
+    def test_rule_1_ignores_the_declared_state(self):
+        for tasks in ([], [task_rec("x", "working")], [task_rec("x", "blocked")], [task_rec("x", "handed-over")],
+                      [task_rec("x", "acknowledged")]):
+            with self.subTest(tasks=tasks):
+                code, out, _, fake = self.clean(tasks=tasks, extra={("git", "branch", "-r"): (128, "", "bad")})
+                self.assertEqual(out.strip(), "removed x")
+                self.assertFalse(fake.ran("git", "branch", "-r"))
 
     def test_sessions_that_do_not_belong_to_the_task_do_not_protect_it(self):
         elsewhere = [{"sessionId": "i1", "cwd": f"{WT}/x-other", "kind": "interactive"},
@@ -794,8 +1072,8 @@ print(os.environ["FAKE_PR"])
     def git(self, *args):
         return subprocess.run(["git", *args], cwd=self.repo, env=self.env, check=True, capture_output=True, text=True).stdout
 
-    def factory(self, *args, env=None):
-        return subprocess.run([sys.executable, str(BIN), *args], cwd=self.repo, env={**self.env, **(env or {})},
+    def factory(self, *args, env=None, cwd=None):
+        return subprocess.run([sys.executable, str(BIN), *args], cwd=cwd or self.repo, env={**self.env, **(env or {})},
                               capture_output=True, text=True)
 
     def test_new_status_clean(self):
@@ -847,6 +1125,38 @@ print(os.environ["FAKE_PR"])
         self.assertEqual((p.returncode, p.stdout.strip(), p.stderr), (0, "removed demo-task", ""))
         self.assertFalse(task_dir.exists())
         self.assertEqual(self.git("branch", "--list", "worktree-demo-task"), "")
+
+    def test_state_from_inside_a_worktree_shows_in_status(self):
+        self.git("worktree", "add", "-q", "-b", "worktree-demo-task", ".claude/worktrees/demo-task")
+        task_dir = self.repo / ".claude/worktrees/demo-task"
+        (task_dir / "sub").mkdir()
+        p = self.factory("state", "working", cwd=task_dir / "sub")
+        self.assertEqual((p.returncode, p.stdout, p.stderr), (0, "demo-task: working\n", ""))
+        p = self.factory("state", "handed-over", "https://x/y", cwd=task_dir)
+        self.assertEqual((p.returncode, p.stderr), (0, ""))
+        (rec,) = [json.loads(line) for line in (self.home / ".claude/factory/tasks.jsonl").read_text().splitlines()][1:]
+        self.assertEqual((rec["repo"], rec["slug"], rec["state"]), (str(self.repo), "demo-task", "handed-over"))
+        row = json.loads(self.factory("status", "--json").stdout)["rows"][0]
+        self.assertEqual((row["state"], row["deliverable"], row["phase"]), ("handed-over", "https://x/y", "review"))
+        p = self.factory("state", "working", cwd=self.repo)
+        self.assertEqual(p.returncode, 2)
+
+    def test_a_file_inside_the_worktree_is_refused(self):
+        self.git("worktree", "add", "-q", "-b", "worktree-demo-task", ".claude/worktrees/demo-task")
+        task_dir = self.repo / ".claude/worktrees/demo-task"
+        (task_dir / "out.mp4").write_text("x")
+        p = self.factory("state", "handed-over", str(task_dir / "out.mp4"), cwd=task_dir)
+        self.assertEqual((p.returncode, p.stdout), (2, ""))
+        self.assertIn("inside the worktree", p.stderr)
+        outside = self.home / "out.mp4"
+        outside.write_text("x")
+        (self.home / "rel.mp4").write_text("x")
+        rel = os.path.relpath(self.home / "rel.mp4", task_dir)
+        for given, stored in ((str(outside), outside), ("~/out.mp4", outside), (rel, self.home / "rel.mp4")):
+            p = self.factory("state", "handed-over", given, cwd=task_dir)
+            self.assertEqual((p.returncode, p.stderr), (0, ""))
+            last = json.loads((self.home / ".claude/factory/tasks.jsonl").read_text().splitlines()[-1])
+            self.assertEqual(last["deliverable"], os.path.realpath(stored))
 
     def test_default_dispatcher_name_comes_from_the_main_checkout_inside_a_worktree(self):
         self.git("worktree", "add", "-q", "-b", "worktree-first", ".claude/worktrees/first")
