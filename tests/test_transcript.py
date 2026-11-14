@@ -2,7 +2,7 @@ import os
 import tempfile
 import unittest
 
-from tests.support import PROJECTS, SESSION, by_desc, load
+from tests.support import PRICES, PROJECTS, SESSION, by_desc, load
 from isshoni import transcript
 from isshoni.transcript import SessionError
 
@@ -16,10 +16,12 @@ class TranscriptTests(unittest.TestCase):
         s = self.s
         main = s.main_usage_by_model["claude-fable-5-2"]
         # msg_m1 appears on two lines (and in a nested agent file) but counts once: (10,20,30,40) + 20 * (1,2,3,4)
-        self.assertEqual(main.to_dict(), {"input": 30, "output": 60, "cache_write": 90, "cache_read": 120, "total": 300})
+        self.assertEqual(main.to_dict(), {"input": 30, "output": 60, "cache_write": 90, "cache_read": 120, "total": 300,
+                                          "cost": 0.00432, "unpriced": 0})
         e1 = by_desc(s, "Find config loader")
         # msg_a2 repeated on two lines counts once
-        self.assertEqual(e1.usage.to_dict(), {"input": 11, "output": 21, "cache_write": 1, "cache_read": 220, "total": 253})
+        self.assertEqual(e1.usage.to_dict(), {"input": 11, "output": 21, "cache_write": 1, "cache_read": 220, "total": 253,
+                                                 "cost": 0.00078, "unpriced": 0})
 
     def test_synthetic_skipped(self):
         e2 = by_desc(self.s, "Find config loader again")
@@ -70,7 +72,8 @@ class TranscriptTests(unittest.TestCase):
     def test_cross_file_dedupe(self):
         nested = by_desc(self.s, "Nested lookup")
         # the agent file repeats main's msg_m1 (10,20,30,40); only its own msg_a10 (1,1,1,1) counts
-        self.assertEqual(nested.usage.to_dict(), {"input": 1, "output": 1, "cache_write": 1, "cache_read": 1, "total": 4})
+        self.assertEqual(nested.usage.to_dict(), {"input": 1, "output": 1, "cache_write": 1, "cache_read": 1, "total": 4,
+                                                           "cost": 6e-06, "unpriced": 0})
         self.assertNotIn("claude-fable-5-2", nested.usage_by_model)
 
     def test_nested_dispatch_depth_and_link(self):
@@ -121,7 +124,7 @@ class TranscriptTests(unittest.TestCase):
                 f.write(json.dumps({"toolUseId": "t1"}))
             with open(base + ".jsonl", "w") as f:
                 f.write(json.dumps({"type": "assistant", "timestamp": "2026-01-01T00:00:10Z", "message": {"id": "b", "model": "m", "content": [{"type": "text", "text": "wip"}], "stop_reason": "tool_use"}}) + "\n")
-            s = transcript.load_session(main)
+            s = transcript.load_session(main, PRICES)
         d = s.dispatches[0]
         self.assertEqual((d.status, d.duration_ms), ("completed", 5))
         self.assertEqual([t for _, t in d.results], ["from notification"])
@@ -135,7 +138,7 @@ class TranscriptTests(unittest.TestCase):
             for fp in (os.path.join(td, "p", "s", "subagents", "agent-a1.jsonl"), path):
                 with open(fp, "w") as f:
                     f.write("\n".join(lines) + "\n")
-            s = transcript.load_session(path)  # must not raise
+            s = transcript.load_session(path, PRICES)  # must not raise
         self.assertEqual(s.malformed, 0)
 
     def test_queued_command_notification_only(self):
@@ -189,7 +192,7 @@ class TranscriptTests(unittest.TestCase):
             path = os.path.join(td, "p", "s1.jsonl")
             with open(path, "w") as f:
                 f.write("\n".join(lines) + "\n")
-            s = transcript.load_session(path)
+            s = transcript.load_session(path, PRICES)
         self.assertEqual(s.malformed, 2)
         self.assertEqual(s.dispatches, [])
 

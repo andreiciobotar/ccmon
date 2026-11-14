@@ -2,12 +2,12 @@ import json
 import os
 import unittest
 
-from tests.support import AGENTS, HERE, PROJECTS
+from tests.support import AGENTS, HERE, PRICES_PATH, PROJECTS
 from tests.test_cli import run
 from isshoni import transcript
 
 GROUPING = os.path.join(HERE, "fixtures", "grouping")
-BASE = ["--projects-dir", GROUPING, "--agents-dir", AGENTS]
+BASE = ["--projects-dir", GROUPING, "--agents-dir", AGENTS, "--prices", PRICES_PATH]
 TOTAL_KEYS = ("start", "end", "tokens", "by_model", "by_agent", "dispatch_count", "repeats",
               "review_loops", "recheck", "warn_count", "malformed")
 ALPHA = "/r/alpha"
@@ -29,6 +29,11 @@ def add(into, other):
             add(into.setdefault(k, {}), v)
         else:
             into[k] = into.get(k, 0) + v
+
+
+def near(d):
+    """Costs are rounded to 6 decimals per object, so sums of rounded parts differ in the last digit."""
+    return {k: near(v) if isinstance(v, dict) else round(v, 4) if isinstance(v, float) else v for k, v in d.items()}
 
 
 class AttributionTests(unittest.TestCase):
@@ -77,11 +82,14 @@ class RepoTotalsTests(unittest.TestCase):
             want = {}
             for r in rows:
                 add(want, r[k])
-            self.assertEqual(group[k], want, k)
+            self.assertEqual(near(group[k]), near(want), k)
         for k in ("dispatch_count", "repeats", "review_loops", "warn_count", "malformed"):
             self.assertEqual(group[k], sum(r[k] for r in rows), k)
         for k in ("total", "main", "subagents"):
             self.assertEqual(group["tokens"][k], sum(r["tokens"][k] for r in rows), k)
+        self.assertAlmostEqual(group["cost"]["total"], sum(r["cost"]["total"] for r in rows), places=5)
+        self.assertEqual(group["cost"]["unpriced_tokens"], sum(r["cost"]["unpriced_tokens"] for r in rows))
+        self.assertEqual(group["cost"]["unpriced_models"], sorted({m for r in rows for m in r["cost"]["unpriced_models"]}))
         self.assertEqual(group["start"], min(r["start"] for r in rows))
         self.assertEqual(group["end"], max(r["end"] for r in rows))
         rc = group["recheck"]
@@ -130,12 +138,13 @@ class CliTests(unittest.TestCase):
         self.assertEqual(rc, 0)
         lines = out.splitlines()
         self.assertTrue(lines[0].startswith("repo / task / session"))
-        first = [ln.split()[0] for ln in lines[1:-2]]
+        end = lines.index("3 repositories, 4 tasks, 9 sessions, 0 malformed lines")
+        first = [ln.split()[0] for ln in lines[1:end - 1]]
         self.assertEqual(first, ["-no-cwd", "c1000001", "alpha", "a1000001", "a1000006", "ci", "a1000002", "a1000003",
                                  "cwdonly", "a1000007", "inwt", "a1000005", "y", "a1000004", "beta", "b1000001"])
-        indent = {ln.split()[0]: len(ln) - len(ln.lstrip()) for ln in lines[1:-2]}
+        indent = {ln.split()[0]: len(ln) - len(ln.lstrip()) for ln in lines[1:end - 1]}
         self.assertEqual((indent["alpha"], indent["a1000001"], indent["ci"], indent["a1000002"]), (0, 2, 2, 4))
-        self.assertEqual(lines[-1], "3 repositories, 4 tasks, 9 sessions, 0 malformed lines")
+        self.assertTrue(lines[end + 1].startswith("prices: USD as of 2026-01-01"))
 
     def test_session_text(self):
         rc, out, _ = run("session", "a1000004", *BASE)

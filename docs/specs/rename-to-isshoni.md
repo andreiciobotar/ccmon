@@ -2,7 +2,7 @@
 
 The project is Isshoni; the monitor's commands were still `ccmon` and `ccmon-tui`, and the README had to explain that. After this task there is one name.
 
-## Facts (counted on main at e2aa114)
+## Facts (counted on main at e2aa114; the script ran again after main at ae16ff4 was merged in)
 - `git grep -i ccmon`: 134 lines in 50 tracked files; 9 tracked paths contain `ccmon`.
 - The only spellings are `ccmon` and `CCMON` (in `CCMON_ROOT`).
 - Nothing under `factory/` runs the monitor: its two mentions are prose in `factory/skills/dispatch/SKILL.md`. No hook calls it. The user's shell profile and `~/.claude/settings.json` do not mention it. So no compatibility alias is needed.
@@ -22,12 +22,12 @@ Unchanged: the `factory` plugin and its agent names, the local folder name, disp
 
 ## What the dashboard shows (the human's addition: "rebrand the terminal app itself")
 The command stays lowercase (`isshoni`, `isshoni-tui`, error prefixes, `ISSHONI_ROOT` hints). The name on screen is the brand:
-- Header: `Isshoni` in the existing gradient, then `一緒に` in the muted colour, from 110 columns. Below that the kanji is left out: it is six cells wide, and at 100 to 103 columns it would push the clock out of the bar whenever sessions are live during a reload. Counted: left part 50 cells, right part up to 53 with `3 live`, `reloading` and the clock.
+- Header: `Isshoni` in the existing gradient, then `一緒に` in the muted colour, from 120 columns. Below that the kanji is left out: it takes seven cells with its space, and it must never push the clock out of the bar. Counted with every part showing (four tabs, `3 live`, `reloading`, the clock): left part 61 cells, right part 53, one between, so 115; 120 leaves room for a longer live count.
 - Help overlay: `Isshoni 一緒に  keys`. Loading screen: `I s s h o n i  一緒に`. Too-small screen: `Isshoni`. Window title: `Isshoni`.
 - Toasts and the error screens carry no brand name; the fatal screen names the commands.
 - Palette and layout are unchanged.
 - `tools/ansi2html.py` gives a double-width character exactly two cells, so `make screenshot` lines up whatever font the browser falls back to.
-- `TestHeaderBrand` checks, in colour and without, at 60, 80, 100, 109, 110 and 140 columns: the header is exactly as wide as the window, the kanji appears from 110, and there nothing on the right is dropped with every part showing.
+- `TestHeaderBrand` checks, in colour and without, at 60, 80, 100, 119, 120 and 140 columns: the header is exactly as wide as the window, the kanji appears from 120, and there nothing on the right is dropped with every part showing.
 
 ## Method
 A script kept outside the repository does all of it, and can be run again after main is merged in:
@@ -45,7 +45,7 @@ The on-screen wording above is a hand edit on top, which the script does not und
 
 ## Done
 - The check passes; `make install`, `make test`, `go test -race ./...`, `make snapshot` and `make screenshot` work.
-- `bin/isshoni sessions --json` on the real transcripts is byte-identical to `bin/ccmon sessions --json` from main (same `--projects-dir`, taken back to back).
+- `bin/isshoni sessions --json` on the real transcripts matches `bin/ccmon sessions --json` from main on the same frozen copy of real transcripts, except the path of the price file.
 - Rendered screenshots (dashboard at 140x40, 100x30 and 80x24, help at 140x40) show the name, the kanji aligned, and the bar full width.
 - The golden diff is the title line and the spacing it displaces, nothing else.
 

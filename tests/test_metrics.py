@@ -122,6 +122,39 @@ class MetricsTests(unittest.TestCase):
         self.assertEqual(x["tokens"]["main"], 300)
         self.assertEqual(x["dispatch_count"], 18)
 
+    def test_cost_split_and_unpriced(self):
+        s = load()
+        x = metrics.session_summary(s, detail=True)
+        self.assertEqual(x["cost"], {"total": 0.005437, "main": 0.00432, "subagents": 0.001118,
+                                     "main_pct": 79.4, "subagent_pct": 20.6,
+                                     "unpriced_tokens": 33, "unpriced_models": ["claude-sonnet-5-5"]})
+        self.assertEqual(x["by_model"]["claude-sonnet-5-5"]["cost"], 0)
+        self.assertEqual(x["by_model"]["claude-sonnet-5-5"]["unpriced"], 33)
+        self.assertEqual(x["by_model"]["claude-haiku-5-5"]["unpriced"], 0)
+        # totals are the sum of the priced parts
+        self.assertAlmostEqual(x["cost"]["total"], sum(u["cost"] for u in x["by_model"].values()), places=5)
+        self.assertAlmostEqual(x["cost"]["total"], sum(u["cost"] for u in x["by_agent"].values()), places=5)
+
+    def test_cost_per_dispatch_and_model(self):
+        s = load()
+        long_haiku = by_desc(s, "Find config loader")  # prompt 232 > 100: long rates
+        self.assertAlmostEqual(long_haiku.usage.cost, 0.00078)
+        review = by_desc(s, "Review change")
+        self.assertAlmostEqual(review.usage.cost, 0.0001025)  # opus 14 tokens, round rates
+        coder = by_desc(s, "Apply fixes")  # only sonnet: no price
+        self.assertEqual((coder.usage.cost, coder.usage.unpriced), (0, 18))
+        d = metrics.dispatch_dict(coder)
+        self.assertEqual((d["usage"]["cost"], d["usage"]["unpriced"]), (0, 18))
+        self.assertEqual(d["usage_by_model"]["claude-sonnet-5-5"]["unpriced"], 18)
+
+    def test_agents_cost_percentiles_and_unpriced_models(self):
+        agg = metrics.aggregate_agents([load()])
+        row = next(a for a in agg["agents"] if a["agent"] == "reviewer")
+        # reviewer dispatches cost 0.0001025, 0.0001025, 0.0000305, 0.0000305
+        self.assertAlmostEqual(row["cost_p50"], 6.65e-05, delta=1e-6)
+        self.assertEqual(row["cost_p50"], round(row["cost_p50"], 6))
+        self.assertEqual(agg["unpriced_models"], ["claude-sonnet-5-5"])
+
 
 if __name__ == "__main__":
     unittest.main()

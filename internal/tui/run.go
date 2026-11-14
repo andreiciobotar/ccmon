@@ -31,7 +31,7 @@ func runProgram(o Options, popts ...tea.ProgramOption) error {
 // SnapshotOptions selects what Snapshot renders.
 type SnapshotOptions struct {
 	Options
-	View    string // dashboard, session, agents, help
+	View    string // dashboard, session, agents, factory, help
 	Session string // id prefix for the session view
 	W, H    int
 }
@@ -56,6 +56,7 @@ func Snapshot(so SnapshotOptions) (string, error) {
 		return "", err
 	}
 	m.seen = seen
+	m.prices = res.Prices
 	for i := range res.Sessions {
 		s := &res.Sessions[i]
 		s.LastChange = seen[s.ID]
@@ -97,6 +98,9 @@ func Snapshot(so SnapshotOptions) (string, error) {
 		}
 	case "agents":
 		m.view = viewAgents
+	case "factory":
+		m.view = viewFactory
+		m.applyFactory(m.factoryJob()())
 	case "help":
 		m.help = true
 	default:

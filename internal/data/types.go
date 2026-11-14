@@ -3,13 +3,16 @@ package data
 
 import "time"
 
-// Usage is one set of token counts.
+// Usage is one set of token counts and what they cost. Unpriced counts the tokens of
+// models with no price; their cost is not in Cost.
 type Usage struct {
-	Input      int64 `json:"input"`
-	Output     int64 `json:"output"`
-	CacheWrite int64 `json:"cache_write"`
-	CacheRead  int64 `json:"cache_read"`
-	Total      int64 `json:"total"`
+	Input      int64   `json:"input"`
+	Output     int64   `json:"output"`
+	CacheWrite int64   `json:"cache_write"`
+	CacheRead  int64   `json:"cache_read"`
+	Total      int64   `json:"total"`
+	Cost       float64 `json:"cost"`
+	Unpriced   int64   `json:"unpriced"`
 }
 
 // Add accumulates o into u.
@@ -19,6 +22,8 @@ func (u *Usage) Add(o Usage) {
 	u.CacheWrite += o.CacheWrite
 	u.CacheRead += o.CacheRead
 	u.Total += o.Total
+	u.Cost += o.Cost
+	u.Unpriced += o.Unpriced
 }
 
 // Tokens is the main/subagent split of a session.
@@ -28,6 +33,24 @@ type Tokens struct {
 	Subagents   int64   `json:"subagents"`
 	MainPct     float64 `json:"main_pct"`
 	SubagentPct float64 `json:"subagent_pct"`
+}
+
+// Cost is the main/subagent split of a session by money; percentages are of priced cost.
+type Cost struct {
+	Total          float64  `json:"total"`
+	Main           float64  `json:"main"`
+	Subagents      float64  `json:"subagents"`
+	MainPct        float64  `json:"main_pct"`
+	SubagentPct    float64  `json:"subagent_pct"`
+	UnpricedTokens int64    `json:"unpriced_tokens"`
+	UnpricedModels []string `json:"unpriced_models"`
+}
+
+// Prices says which price file the costs came from.
+type Prices struct {
+	Currency string `json:"currency"`
+	AsOf     string `json:"as_of"`
+	Path     string `json:"path"`
 }
 
 // Recheck is the explorer re-check signal.
@@ -88,6 +111,7 @@ type Session struct {
 	Start           *time.Time        `json:"start"`
 	End             *time.Time        `json:"end"`
 	Tokens          Tokens            `json:"tokens"`
+	Cost            Cost              `json:"cost"`
 	ByModel         map[string]Usage  `json:"by_model"`
 	ByAgent         map[string]Usage  `json:"by_agent"`
 	DispatchCount   int               `json:"dispatch_count"`
@@ -117,6 +141,7 @@ func (s *Session) Label() string {
 type SessionsResult struct {
 	Sessions  []Session `json:"sessions"`
 	Malformed int       `json:"malformed"`
+	Prices    Prices    `json:"prices"`
 }
 
 // AgentRow is one element of `isshoni agents --json`.
@@ -128,6 +153,8 @@ type AgentRow struct {
 	UsageByModel map[string]Usage `json:"usage_by_model"`
 	TokensP50    *float64         `json:"tokens_p50"`
 	TokensP90    *float64         `json:"tokens_p90"`
+	CostP50      *float64         `json:"cost_p50"`
+	CostP90      *float64         `json:"cost_p90"`
 	DurationP50  *float64         `json:"duration_ms_p50"`
 	DurationP90  *float64         `json:"duration_ms_p90"`
 	Repeats      int              `json:"repeats"`
@@ -141,6 +168,7 @@ type Agents struct {
 	ByModel   map[string]Usage `json:"by_model"`
 	Sessions  int              `json:"sessions"`
 	Malformed int              `json:"malformed"`
+	Prices    Prices           `json:"prices"`
 }
 
 // Duration returns the dispatch duration, estimating running ones from now.

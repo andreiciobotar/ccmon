@@ -25,6 +25,39 @@ func Human(n float64) string {
 // HumanInt is Human for int64.
 func HumanInt(n int64) string { return Human(float64(n)) }
 
+// Money renders an amount the way the Python CLI does: 0, <$0.0001, $0.0012, $12.34, $1234, $12.3k, $1.5M.
+// USD (or no price file yet) gets "$"; any other currency its code and a space.
+func Money(x float64, currency string) string {
+	prefix := "$"
+	if currency != "" && currency != "USD" {
+		prefix = currency + " "
+	}
+	switch {
+	case x <= 0:
+		return prefix + "0"
+	case x < 0.00005:
+		return "<" + prefix + "0.0001"
+	case x < 0.00995: // each limit is where the next format's rounding takes over
+		return prefix + fmt.Sprintf("%.4f", x)
+	case x < 99.995:
+		return prefix + fmt.Sprintf("%.2f", x)
+	case x < 9999.5:
+		return prefix + fmt.Sprintf("%.0f", x)
+	case x < 999950:
+		return prefix + fmt.Sprintf("%.1fk", x/1e3)
+	}
+	return prefix + fmt.Sprintf("%.1fM", x/1e6)
+}
+
+// money is Money in the loaded price file's currency; a figure with unpriced tokens carries a "*".
+func (m *model) money(x float64, unpriced int64) string {
+	s := Money(x, m.prices.Currency)
+	if unpriced > 0 {
+		s += "*"
+	}
+	return s
+}
+
 // FmtDuration renders 42s, 3m05s, 1h02m.
 func FmtDuration(d time.Duration) string {
 	s := int(math.Round(d.Seconds()))

@@ -27,11 +27,11 @@ func (m *model) agentsBody(p paint, w, h int) block {
 	if len(rows) == 0 {
 		return p.center(block{p.b("No agent activity in this range", th.Text), p.t("press r to widen the range", th.Muted)}, w, h)
 	}
-	var maxTot, maxTok, maxDur float64
+	var maxTot, maxCost, maxDur float64
 	for _, a := range rows {
 		maxTot = max(maxTot, float64(a.Usage.Total))
-		if a.TokensP90 != nil {
-			maxTok = max(maxTok, *a.TokensP90)
+		if a.CostP90 != nil {
+			maxCost = max(maxCost, *a.CostP90)
 		}
 		if a.DurationP90 != nil {
 			maxDur = max(maxDur, *a.DurationP90)
@@ -44,7 +44,7 @@ func (m *model) agentsBody(p paint, w, h int) block {
 	cur := min(m.acursor, len(rows)-1)
 	shown := 0
 	for i := m.atop; i < len(rows) && i < m.atop+per; i++ {
-		out = append(out, m.agentCard(p, rows[i], i == cur, w, maxTot, maxTok, maxDur)...)
+		out = append(out, m.agentCard(p, rows[i], i == cur, w, maxTot, maxCost, maxDur)...)
 		shown++
 	}
 	if more := len(rows) - m.atop - shown; more > 0 && len(out) > 0 {
@@ -58,7 +58,7 @@ var classColors = func(th *Theme) [4]color.Color {
 	return [4]color.Color{th.Teal, th.Pink, th.Orange, th.Blue}
 }
 
-func (m *model) agentCard(p paint, a data.AgentRow, selected bool, w int, maxTot, maxTok, maxDur float64) block {
+func (m *model) agentCard(p paint, a data.AgentRow, selected bool, w int, maxTot, maxCost, maxDur float64) block {
 	th := m.th
 	bg := th.Bg
 	if selected {
@@ -105,16 +105,16 @@ func (m *model) agentCard(p paint, a data.AgentRow, selected bool, w int, maxTot
 
 	// line 2: token classes
 	cc := classColors(th)
-	bw := min(32, max(10, w/4))
 	segs := []seg{{float64(a.Usage.CacheRead), cc[3]}, {float64(a.Usage.CacheWrite), cc[2]}, {float64(a.Usage.Output), cc[1]}, {float64(a.Usage.Input), cc[0]}}
-	bar := q.stack(bw, segs)
 	cls := func(i int, name string, v int64) string {
 		return q.swatch(i, cc[3-i]) + q.t(" "+name+" ", th.Faint) + q.t(HumanInt(v), cc[3-i])
 	}
-	l2 := q.sp(4) + q.t("usage ", th.Faint) + bar + q.sp(2) +
-		cls(3, "in", a.Usage.Input) + q.sp(2) + cls(2, "out", a.Usage.Output) + q.sp(2) +
-		cls(1, "cw", a.Usage.CacheWrite) + q.sp(2) + cls(0, "cr", a.Usage.CacheRead) +
-		q.t("  = ", th.Faint) + q.b(HumanInt(a.Usage.Total), th.Text)
+	total := q.t("= ", th.Faint) + q.t(HumanInt(a.Usage.Total), th.Muted) + q.t(" · ", th.Faint) + q.b(m.money(a.Usage.Cost, a.Usage.Unpriced), th.Text)
+	tail := cls(3, "in", a.Usage.Input) + q.sp(2) + cls(2, "out", a.Usage.Output) + q.sp(2) +
+		cls(1, "cw", a.Usage.CacheWrite) + q.sp(2) + cls(0, "cr", a.Usage.CacheRead)
+	// the bar takes what the total and classes leave; when even that is too little, the classes are what gets cut, not the cost
+	bw := max(4, min(min(32, max(10, w/4)), w-4-6-2-width(total)-2-width(tail)-1))
+	l2 := q.sp(4) + q.t("usage ", th.Faint) + q.stack(bw, segs) + q.sp(2) + total + q.sp(2) + tail
 
 	// line 3: percentiles
 	mini := min(12, max(3, (w-68)/4))
@@ -128,9 +128,9 @@ func (m *model) agentCard(p paint, a data.AgentRow, selected bool, w int, maxTot
 		}
 		return q.t(label+" ", th.Faint) + q.bar(mini, frac, c, false) + q.sp(1) + q.t(f(*v), th.Text)
 	}
-	tokF := func(v float64) string { return Human(v) }
+	costF := func(v float64) string { return m.money(v, a.Usage.Unpriced) }
 	durF := func(v float64) string { return FmtDurationMS(&v) }
-	l3 := q.sp(4) + mk("tok p50", a.TokensP50, maxTok, tokF, th.Purple) + q.sp(2) + mk("p90", a.TokensP90, maxTok, tokF, th.Pink) +
+	l3 := q.sp(4) + mk("cost p50", a.CostP50, maxCost, costF, th.Purple) + q.sp(2) + mk("p90", a.CostP90, maxCost, costF, th.Pink) +
 		q.sp(4) + mk("time p50", a.DurationP50, maxDur, durF, th.Teal) + q.sp(2) + mk("p90", a.DurationP90, maxDur, durF, th.Blue)
 	if a.Agent == "main" {
 		l3 = q.sp(4) + q.t("the orchestrating session itself · no dispatches", th.Faint)

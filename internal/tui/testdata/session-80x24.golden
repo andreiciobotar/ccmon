@@ -1,10 +1,10 @@
- Isshoni  1 Dash [2 Sess] 3 Agents         24h  7d  30d [all]  ○ idle  00:00:00 
+ Isshoni  1 Dash [2 Sess] 3 Agents  4 Factory        24h  7d  30d [all]  ○ idle 
  Dashboard › cwd › fixture-                                                     
  ○ fixture-0001  cwd  Jan 01 10:00 → 10:11 · 11m40s                             
- 670 tokens   main 300 45%   subagents 370 55%                                  
+ $0.0054* cost   670 tokens   main $0.0043 79%   subagents $0.0011* 21%         
  repeats 1  ·  review loops 3  ·  warnings 1  ·  re-check 67% (2/3)  ·  malform…
- ███████████████████████████████████▓▓▒▒▒▒░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░# 
- █ main 45% 300   ▓ coder 3% 18   ▒ reviewer 5% 36   ░ explorer 47% 312   # gen…
+ ██████████████████████████████████████████████████████████████▒▒▒▒░░░░░░░░░░░░ 
+ █ main 79% $0.0043   ▓ coder 0% $0*   ▒ reviewer 5% $0.0003   +2               
 ╭─ Timeline ───────────────────────────────────────────────────────────────────╮
 │ ● coder           ┈┈┈┈┈┈┈┈┈████┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈░┈┈┈┈┈┈┈┈┈┈┈┈┈┈░┈┈┈┈┈┈┈ │
 │ ● reviewer        ┈┈┈┈█████┈┈┈┈┈████┈┈┈┈┈┈┈┈┈┈┈████┈┈┈┈┈┈┈███┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈ │
@@ -14,11 +14,11 @@
 │                   10:00                                                10:11 │
 ╰──────────────────────────────────────────────────────────────────────────────╯
 ╭─ Dispatches 18 ──────────────────────────────────────────────────────────────╮
-│   TIME     AGENT             TOTAL    DUR FLAGS            DESCRIPTION       ┃
-│ > 10:00:10 explorer            253    30s [rechecked]      Find config load… │
-│   10:00:15   explorer            4      - [unfinished]     Nested lookup     │
-│   10:00:20 explorer             20      - [unfinished] +1  Find config load… │
-│   10:00:30 explorer             15    20s [WARN]           Map database mig… │
-│   10:01:00 reviewer             14    45s                  Review change     │
+│   TIME     AGENT                COST   TOTAL    DUR DESCRIPTION              ┃
+│ > 10:00:10 explorer          $0.0008     253    30s Find config loader       │
+│   10:00:15   explorer       <$0.0001       4      - Nested lookup            │
+│   10:00:20 explorer         <$0.0001      20      - Find config loader again │
+│   10:00:30 explorer              $0*      15    20s Map database migrations  │
+│   10:01:00 reviewer          $0.0001      14    45s Review change            │
 ╰──────────────────────────────────────────────────────────────────────────────╯
  ↑↓/jk move  ·  enter open  ·  esc back  ·  f follow  ·  ? help  ·  q quit      

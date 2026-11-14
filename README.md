@@ -24,23 +24,23 @@ Isshoni is two tools for people who run [Claude Code](https://claude.com/claude-
 
 | | What it does | You run |
 |---|---|---|
-| **Monitor** | Shows where the tokens went: per repository, task, session, agent and model | `isshoni`, `isshoni-tui` |
+| **Monitor** | Shows where the money and tokens went: per repository, task, session, agent and model | `isshoni`, `isshoni-tui` |
 | **Factory** | Builds several tasks in parallel, each in its own git worktree, each ending in a draft pull request | `/factory:dispatch`, from the `factory` plugin |
 
 ## Monitor
 
-`isshoni` reads the transcripts Claude Code already keeps in `~/.claude/projects` and never writes there. It reports tokens by model and agent, the share spent in subagents, and the signs of wasted work: repeated dispatches, review loops, and agents running on a model other than the one pinned for them.
+`isshoni` reads the transcripts Claude Code already keeps in `~/.claude/projects` and never writes there. It reports cost and tokens by model and agent, the share spent in subagents, and the signs of wasted work: repeated dispatches, review loops, and agents running on a model other than the one pinned for them.
 
 ```sh
 git clone https://github.com/andreiciobotar/isshoni && cd isshoni
 bin/isshoni sessions --since 7d    # sessions by repository and task, with totals
 bin/isshoni session <id-prefix>    # one session: models, agents, dispatch timeline
-bin/isshoni agents --since 7d      # per agent type: tokens, p50/p90, repeats
+bin/isshoni agents --since 7d      # per agent type: cost, tokens, p50/p90, repeats
 ```
 
-Python 3.11+, no dependencies. Add `--json` for machine-readable output; [docs/isshoni.md](docs/isshoni.md) has the rest.
+Cost is the API list price, from [isshoni/prices.toml](isshoni/prices.toml); edit it when prices change. Python 3.11+, no dependencies. Add `--json` for machine-readable output; [docs/isshoni.md](docs/isshoni.md) has the rest.
 
-`isshoni-tui` is the same data as a live terminal dashboard: sessions grouped by repository and task, a timeline per session, and what is running now.
+`isshoni-tui` is the same data as a live terminal dashboard: sessions grouped by repository and task, a timeline per session, and what is running now. Its factory view (`4`) lists each repository's factory tasks with their phase and how many hold a slot against the cap, and `c` there changes the cap: the one thing the dashboard writes (`worktree_cap` in `~/.claude/factory/settings.json`).
 
 ```sh
 make install    # needs Go 1.27+ and Python 3.11+; builds bin/isshoni-tui
@@ -67,12 +67,15 @@ Describe a task, then ask for progress whenever you like: the dispatcher answers
 
 It needs `git`, an authenticated [`gh`](https://cli.github.com) and Python 3.11+. By default leads run unattended on Fable in `auto` permission mode, and five tasks may be in motion per repository. Every session event, lead retrospective and decision a lead took without asking is logged under `~/.claude/factory/` (events for 12 months); `factory feedback` lists the decisions and what agents reported about the factory itself.
 
+Optionally a site manager watches the factory for you: `factory schedule install` (macOS, run in the repository's main checkout; `factory schedule remove` undoes it) checks every 30 minutes for stuck, blocked or over-limit tasks, red CI and the like without running a model, and only when something new turns up starts a short Sonnet run that tells the dispatcher or drops it as noise with a reason.
+
 <!-- screenshot: factory status with several tasks -->
 
 ## More
 
 - [docs/specs/factory.md](docs/specs/factory.md): the factory's rules, commands, states and settings
 - [docs/specs/factory-events.md](docs/specs/factory-events.md): the log formats
+- [docs/specs/site-manager.md](docs/specs/site-manager.md): the site manager: criteria, the watch tick, the schedule, the firing log
 - [docs/specs/tui.md](docs/specs/tui.md) and [docs/specs/task-grouping.md](docs/specs/task-grouping.md): the dashboard and how sessions map to tasks
 - `make test` runs everything
 

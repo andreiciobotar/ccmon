@@ -8,7 +8,7 @@ import re
 import sys
 from datetime import datetime, timedelta, timezone
 
-from . import metrics, transcript
+from . import metrics, prices as price_file, transcript
 from .transcript import SessionError
 
 DEFAULT_PROJECTS = "~/.claude/projects"
@@ -24,6 +24,26 @@ def human(n):
         if abs(n) >= lim:
             return "%.1f%s" % (n / lim, suf)
     return "%d" % round(n)
+
+
+def money(x, currency, unpriced=0):
+    """`$` for USD, else the code and a space; a trailing `*` when some tokens had no price."""
+    prefix = "$" if currency == "USD" else currency + " "
+    if x <= 0:
+        s = "0"
+    elif x < 0.00005:
+        prefix, s = "<" + prefix, "0.0001"
+    elif x < 0.00995:
+        s = "%.4f" % x
+    elif round(x, 2) < 100:
+        s = "%.2f" % x
+    elif round(x) < 1e4:
+        s = "%.0f" % x
+    elif round(x / 1e3, 1) < 1e3:
+        s = "%.1fk" % (x / 1e3)
+    else:
+        s = "%.1fM" % (x / 1e6)
+    return prefix + s + ("*" if unpriced else "")
 
 
 def fmt_duration(ms):
@@ -84,7 +104,14 @@ def parse_since(text, now=None):
     return d
 
 
-def load_all(args):
+def footer(prices, models, tokens):
+    """The prices line, plus the unpriced line when some tokens had no price."""
+    print("prices: %s as of %s (%s)" % (prices.currency, prices.as_of, prices.path))
+    if models:
+        print("* no price for: %s (%s tokens); cost excludes them" % (", ".join(models), human(tokens)))
+
+
+def load_all(args, prices):
     paths = transcript.discover_sessions(args.projects_dir)
     cutoff = parse_since(args.since) if getattr(args, "since", None) else None
     sessions = []
@@ -95,7 +122,7 @@ def load_all(args):
                     continue
             except OSError:
                 continue
-        s = transcript.load_session(p)
+        s = transcript.load_session(p, prices)
         if cutoff is not None and s.last_ts is not None and s.last_ts < cutoff:
             continue
         if getattr(args, "repo", None) not in (None, s.repo) or getattr(args, "task", None) not in (None, s.task):
@@ -109,21 +136,23 @@ def load_all(args):
 # ---- commands -----------------------------------------------------------------
 
 def cmd_sessions(args):
-    sessions = load_all(args)
+    prices = price_file.load(args.prices)
+    sessions = load_all(args, prices)
     sums = [metrics.session_summary(s) for s in sessions]
     repos = metrics.group_repos(sessions)
     malformed = sum(x["malformed"] for x in sums)
     if args.json:
-        emit_json({"sessions": sums, "repos": repos, "malformed": malformed})
+        emit_json({"sessions": sums, "repos": repos, "malformed": malformed, "prices": prices.to_dict()})
         return 0
-    headers = ["repo / task / session", "start (UTC)", "total", "main%", "sub%", "disp", "repeat",
+    headers = ["repo / task / session", "start (UTC)", "cost", "main%", "sub%", "tokens", "disp", "repeat",
                "loops", "recheck", "warn", "malformed"]
     by_id = {x["id"]: x for x in sums}
 
     def row(label, x):
-        t = x["tokens"]
+        t, c = x["tokens"], x["cost"]
         return [label, x["start"] and fmt_dt(datetime.fromisoformat(x["start"])) or "-",
-                human(t["total"]), "%.0f" % t["main_pct"], "%.0f" % t["subagent_pct"],
+                money(c["total"], prices.currency, x["cost"]["unpriced_tokens"]),
+                "%.0f" % c["main_pct"], "%.0f" % c["subagent_pct"], human(t["total"]),
                 x["dispatch_count"], x["repeats"], x["review_loops"],
                 fmt_rate(x["recheck"]["rate"]), x["warn_count"], x["malformed"]]
 
@@ -138,39 +167,49 @@ def cmd_sessions(args):
     print(table(headers, rows, left=("repo / task / session", "start (UTC)")))
     print("\n%d repositories, %d tasks, %d sessions, %d malformed lines" % (
         len(repos), sum(len(r["tasks"]) for r in repos), len(sums), malformed))
+    footer(prices, sorted({m for x in sums for m in x["cost"]["unpriced_models"]}), sum(x["cost"]["unpriced_tokens"] for x in sums))
     return 0
 
 
-def usage_rows(mapping):
-    return [[k, human(v["input"]), human(v["output"]), human(v["cache_write"]),
-             human(v["cache_read"]), human(v["total"])] for k, v in mapping.items()]
+def usage_rows(mapping, currency):
+    """One row per key; an entry with only unpriced tokens shows `unpriced` as its cost."""
+    return [[k, human(v["input"]), human(v["output"]), human(v["cache_write"]), human(v["cache_read"]),
+             human(v["total"]),
+             "unpriced" if v["unpriced"] and not v["cost"] else money(v["cost"], currency, v["unpriced"])]
+            for k, v in mapping.items()]
 
 
 def cmd_session(args):
+    prices = price_file.load(args.prices)
     path = transcript.find_session(args.projects_dir, args.id)
-    s = transcript.load_session(path)
+    s = transcript.load_session(path, prices)
     metrics.analyze(s, args.agents_dir, args.repeat_threshold)
     x = metrics.session_summary(s, detail=True)
+    x["prices"] = prices.to_dict()
     if args.json:
         emit_json(x)
         return 0
-    t = x["tokens"]
+    t, c, cur = x["tokens"], x["cost"], prices.currency
+    main_un = x["by_agent"]["main"]["unpriced"]
     print("session   %s" % x["id"])
     others = [w for w in x["worktrees"] if w != x["task"]]
     print("repo      %s (%s)" % (x["repo"], x["repo_path"] or x["project_dir"]))
     print("task      %s%s" % (x["task"] or "-", " (also entered: %s)" % ", ".join(others) if others else ""))
     print("span      %s .. %s UTC" % (fmt_dt(s.first_ts), fmt_dt(s.last_ts)))
+    print("cost      total %s, main %s (%.1f%%), subagents %s (%.1f%%)" % (
+        money(c["total"], cur, x["cost"]["unpriced_tokens"]), money(c["main"], cur, main_un), c["main_pct"],
+        money(c["subagents"], cur, x["cost"]["unpriced_tokens"] - main_un), c["subagent_pct"]))
     print("tokens    total %s, main %s (%.1f%%), subagents %s (%.1f%%)" % (
         human(t["total"]), human(t["main"]), t["main_pct"], human(t["subagents"]), t["subagent_pct"]))
     rr = x["recheck"]
     print("signals   dispatches %d, repeats %d, review loops %d, re-check rate %s (%d/%d), malformed lines %d" % (
         x["dispatch_count"], x["repeats"], x["review_loops"], fmt_rate(rr["rate"]),
         rr["rechecked"], rr["explorer_with_citations"], x["malformed"]))
-    uh = ["", "input", "output", "cache-w", "cache-r", "total"]
+    uh = ["input", "output", "cache-w", "cache-r", "total", "cost"]
     print("\nBy model")
-    print(table(["model"] + uh[1:], usage_rows(x["by_model"]), left=("model",)))
+    print(table(["model"] + uh, usage_rows(x["by_model"], cur), left=("model",)))
     print("\nBy agent")
-    print(table(["agent"] + uh[1:], usage_rows(x["by_agent"]), left=("agent",)))
+    print(table(["agent"] + uh, usage_rows(x["by_agent"], cur), left=("agent",)))
     if x["warnings"]:
         print("\nWarnings")
         for w in x["warnings"]:
@@ -178,6 +217,7 @@ def cmd_session(args):
     print("\nDispatches")
     if not s.dispatches:
         print("  (none)")
+        footer(prices, x["cost"]["unpriced_models"], x["cost"]["unpriced_tokens"])
         return 0
     rows = []
     for d in s.dispatches:
@@ -188,31 +228,38 @@ def cmd_session(args):
         desc = (d.description.strip().splitlines() or [""])[0]
         rows.append([fmt_dt(d.start, False), ("  " * (d.depth - 1) if d.depth > 1 else "") + d.agent_type,
                      ",".join(m.replace("claude-", "") for m in d.models) or "-",
-                     human(u.input), human(u.output), human(u.total), fmt_duration(d.duration_ms),
-                     ",".join(flags) or "-", desc[:60]])
-    print(table(["time", "agent", "model", "in", "out", "total", "duration", "flags", "description"],
+                     human(u.input), human(u.output), human(u.total), money(u.cost, cur, u.unpriced),
+                     fmt_duration(d.duration_ms), ",".join(flags) or "-", desc[:60]])
+    print(table(["time", "agent", "model", "in", "out", "total", "cost", "duration", "flags", "description"],
                 rows, left=("time", "agent", "model", "flags", "description")))
+    footer(prices, x["cost"]["unpriced_models"], x["cost"]["unpriced_tokens"])
     return 0
 
 
 def cmd_agents(args):
-    sessions = load_all(args)
+    prices = price_file.load(args.prices)
+    sessions = load_all(args, prices)
     agg = metrics.aggregate_agents(sessions)
+    agg["prices"] = prices.to_dict()
     if args.json:
         emit_json(agg)
         return 0
+    cur = prices.currency
     rows = []
     for a in agg["agents"]:
         u = a["usage"]
         rows.append([a["agent"], a["dispatches"], ",".join(m.replace("claude-", "") for m in a["models"]) or "-",
+                     money(u["cost"], cur, u["unpriced"]),
+                     *("-" if a[k] is None else money(a[k], cur, u["unpriced"]) for k in ("cost_p50", "cost_p90")),
                      human(u["input"]), human(u["output"]), human(u["cache_write"]), human(u["cache_read"]),
                      human(a["tokens_p50"]), human(a["tokens_p90"]),
                      fmt_duration(a["duration_ms_p50"]), fmt_duration(a["duration_ms_p90"]),
                      a["repeats"], a["warn_count"]])
-    print(table(["agent", "disp", "models", "input", "output", "cache-w", "cache-r",
+    print(table(["agent", "disp", "models", "cost", "cost p50", "cost p90", "input", "output", "cache-w", "cache-r",
                  "tok p50", "tok p90", "dur p50", "dur p90", "repeat", "warn"], rows,
                 left=("agent", "models")))
     print("\n%d sessions, %d malformed lines" % (agg["sessions"], agg["malformed"]))
+    footer(prices, agg["unpriced_models"], sum(a["usage"]["unpriced"] for a in agg["agents"]))
     return 0
 
 
@@ -229,6 +276,7 @@ def _common(suppress):
     p.add_argument("--projects-dir", default=d or DEFAULT_PROJECTS, help="transcripts root (default %s)" % DEFAULT_PROJECTS)
     p.add_argument("--agents-dir", default=d, help="agent definitions dir (overrides cwd/.claude/agents and ~/.claude/agents)")
     p.add_argument("--repeat-threshold", type=float, default=d or 0.5, help="Jaccard threshold for repeat flag (default 0.5)")
+    p.add_argument("--prices", default=d, help="price file (default isshoni/prices.toml)")
     p.add_argument("--json", action="store_true", default=d or False, help="emit one JSON document")
     return p
 

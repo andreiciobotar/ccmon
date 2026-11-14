@@ -1,24 +1,24 @@
        ╭─ help ─────────────────────────────────────────────────────────╮       
        │ Isshoni 一緒に  keys                                           │       
-       │                                                                │       
+       │ Prices: tests/fixtures/prices.toml (USD, as of 2026-01-01)     │       
        │ ↑↓/jk         move                                             │       
        │ g G           first · last                                     │       
        │ pgdn pgup     page                                             │       
        │ enter         open                                             │       
        │ esc           back                                             │       
-       │                                                                │       
        │ tab           next view                                        │       
        │ shift+tab     previous view                                    │       
-       │ 1 2 3         dashboard · session · agents                     │       
-       │                                                                │       
+       │ 1 2 3 4       dashboard · session · agents · factory           │       
        │ r             range                                            │       
        │ s             sort                                             │       
        │ /             filter                                           │       
        │ f             follow                                           │       
-       │                                                                │       
+       │ c             edit cap                                         │       
        │ ?             help                                             │       
        │ q             quit                                             │       
-       │                                                                │       
        │ r cycles 24h · 7d · 30d · all; on the error screen it retries. │       
-       │ s sorts by recent · tokens · subagent share.                   │       
+       │ s sorts by recent · cost · subagent share.                     │       
+       │ A dot pulses on sessions written in the last 30 seconds.       │       
+       │ The factory view refreshes every 30 s while shown.             │       
        ╰────────────────────────────────────────────────────────────────╯       
+                                                                                

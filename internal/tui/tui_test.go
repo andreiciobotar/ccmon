@@ -24,20 +24,25 @@ var t0 = time.Date(2026, 11, 13, 10, 0, 0, 0, time.UTC)
 
 func ptr[T any](v T) *T { return &v }
 
+// usage prices the tokens at 8 / 40 / 10 / 0.20 dollars per million (input, output, cache write, cache read).
 func usage(in, out, cw, cr int64) data.Usage {
-	return data.Usage{Input: in, Output: out, CacheWrite: cw, CacheRead: cr, Total: in + out + cw + cr}
+	cost := float64(in)*8e-6 + float64(out)*40e-6 + float64(cw)*10e-6 + float64(cr)*0.2e-6
+	return data.Usage{Input: in, Output: out, CacheWrite: cw, CacheRead: cr, Total: in + out + cw + cr, Cost: cost}
 }
 
 func fakeSession(id, project string, startMin int, main, sub int64) *data.Session {
 	st := t0.Add(time.Duration(startMin) * time.Minute)
 	en := st.Add(30 * time.Minute)
 	tot := main + sub
+	mc, sc := float64(main)*1e-6, float64(sub)*1.5e-6 // main and subagent tokens at different rates
+	priced := func(u data.Usage, cost float64) data.Usage { u.Cost = cost; return u }
 	return &data.Session{
 		ID: id, Project: project, Repo: project, Path: "/nonexistent/" + id + ".jsonl", Start: &st, End: &en,
 		Tokens: data.Tokens{Total: tot, Main: main, Subagents: sub,
 			MainPct: 100 * float64(main) / float64(tot), SubagentPct: 100 * float64(sub) / float64(tot)},
-		ByModel:       map[string]data.Usage{"claude-fable-5-2": usage(1, 2, 3, main), "claude-haiku-5-5": usage(1, 2, 3, sub)},
-		ByAgent:       map[string]data.Usage{"main": usage(1, 2, 3, main), "explorer": usage(1, 2, 3, sub/2), "coder": usage(1, 2, 3, sub/2)},
+		Cost:          data.Cost{Total: mc + sc, Main: mc, Subagents: sc, MainPct: 100 * mc / (mc + sc), SubagentPct: 100 * sc / (mc + sc)},
+		ByModel:       map[string]data.Usage{"claude-fable-5-2": priced(usage(1, 2, 3, main), mc), "claude-haiku-5-5": priced(usage(1, 2, 3, sub), sc)},
+		ByAgent:       map[string]data.Usage{"main": priced(usage(1, 2, 3, main), mc), "explorer": priced(usage(1, 2, 3, sub/2), sc/2), "coder": priced(usage(1, 2, 3, sub/2), sc/2)},
 		DispatchCount: 3, Repeats: 1, ReviewLoops: 1, WarnCount: 1, Malformed: 2,
 		Recheck:    data.Recheck{ExplorersWithCitations: 2, Rechecked: 1, Rate: ptr(0.5)},
 		LastChange: en,
@@ -71,6 +76,7 @@ func fakeDetail(s *data.Session) *data.Session {
 		mk(4, "my-custom-agent", "running", 20, 0),
 		mk(5, "general-purpose", "no-run", 22, 0),
 	}
+	d.Dispatches[4].Usage.Unpriced, d.Dispatches[4].Usage.Cost = d.Dispatches[4].Usage.Total, 0 // a model with no price
 	rep := "toolu_1"
 	d.Dispatches[1].RepeatOf, d.Dispatches[1].RepeatScore = &rep, ptr(0.62)
 	d.ReviewLoopEvent = []data.ReviewLoopEvent{{VerdictAt: &st0, Via: "dispatch", CoderAgentID: "a2"}}
@@ -82,10 +88,13 @@ var st0 = t0.Add(10 * time.Minute)
 func fakeAgents() *data.Agents {
 	row := func(name string, n int) data.AgentRow {
 		return data.AgentRow{Agent: name, Dispatches: n, Models: []string{"claude-haiku-5-5"}, Usage: usage(1, 2, 3, int64(1000*(n+1))),
-			TokensP50: ptr(1000.0), TokensP90: ptr(5000.0), DurationP50: ptr(60000.0), DurationP90: ptr(300000.0), Repeats: n % 2, WarnCount: n % 3}
+			TokensP50: ptr(1000.0), TokensP90: ptr(5000.0), CostP50: ptr(0.0123), CostP90: ptr(4.5), DurationP50: ptr(60000.0), DurationP90: ptr(300000.0), Repeats: n % 2, WarnCount: n % 3}
 	}
-	return &data.Agents{Agents: []data.AgentRow{row("main", 0), row("explorer", 4), row("coder", 2), row("odd-one", 1)},
-		ByModel: map[string]data.Usage{"claude-haiku-5-5": usage(1, 2, 3, 4000), "claude-fable-5-2": usage(1, 2, 3, 9000)}, Sessions: 3}
+	rows := []data.AgentRow{row("main", 0), row("explorer", 4), row("coder", 2), row("odd-one", 1)}
+	rows[3].Usage.Unpriced, rows[3].Usage.Cost = rows[3].Usage.Total, 0
+	nova := data.Usage{Input: 5, Total: 5, Unpriced: 5}
+	return &data.Agents{Agents: rows, Sessions: 3,
+		ByModel: map[string]data.Usage{"claude-haiku-5-5": usage(1, 2, 3, 4000000), "claude-fable-5-2": usage(1, 2, 3, 9000000), "claude-nova-9": nova}}
 }
 
 func fakeModel(noColor bool, w, h int) *model {
@@ -98,7 +107,10 @@ func newFake(o Options, w, h int) *model {
 	o.Now = func() time.Time { return t0.Add(time.Hour) }
 	m := New(o)
 	m.w, m.h = w, h
+	m.prices = data.Prices{Currency: "USD", AsOf: "2026-11-14", Path: "/p/prices.toml"}
 	a, b, c := fakeSession("aaaaaaaa-0001", "alpha", 0, 800000, 2000000), fakeSession("bbbbbbbb-0002", "beta-é", 5, 100, 50), fakeSession("cccccccc-0003", "gamma", 10, 9000000, 1000)
+	b.ByModel["claude-nova-9"] = data.Usage{Input: 5, Total: 5, Unpriced: 5} // a model with no price
+	b.Cost.UnpricedTokens, b.Cost.UnpricedModels = 5, []string{"claude-nova-9"}
 	m.preload([]*data.Session{a, b, c}, []*data.Session{fakeDetail(a)}, fakeAgents())
 	return m
 }
@@ -140,6 +152,52 @@ func TestHuman(t *testing.T) {
 		if got := Human(in); got != want {
 			t.Errorf("Human(%v) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestMoney(t *testing.T) {
+	cases := []struct {
+		in   float64
+		cur  string
+		want string
+	}{
+		{0, "USD", "$0"}, {0.0012, "USD", "$0.0012"}, {0.000176, "USD", "$0.0002"}, {0.00001, "USD", "<$0.0001"}, {0.00001, "EUR", "<EUR 0.0001"}, {0.00005, "USD", "$0.0001"}, {0.01, "USD", "$0.01"}, {12.345, "USD", "$12.35"},
+		{99.99, "USD", "$99.99"}, {100, "USD", "$100"}, {1234.5, "USD", "$1234"}, {12345, "USD", "$12.3k"}, {1.5e6, "USD", "$1.5M"},
+		{3.5, "EUR", "EUR 3.50"}, {3.5, "", "$3.50"},
+		{0.00999, "USD", "$0.01"}, {99.996, "USD", "$100"}, {9999.6, "USD", "$10.0k"}, {999960, "USD", "$1.0M"},
+	}
+	for _, c := range cases {
+		if got := Money(c.in, c.cur); got != c.want {
+			t.Errorf("Money(%v, %q) = %q, want %q", c.in, c.cur, got, c.want)
+		}
+	}
+}
+
+func TestUnpricedIsMarked(t *testing.T) {
+	m := fakeModel(true, 140, 40)
+	out := plain(m)
+	for _, want := range []string{"$12.80*", "no price for nova-9: excluded from cost", "unpriced"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("dashboard lacks %q", want)
+		}
+	}
+	m.sessions = map[string]*data.Session{sidA: m.sessions[sidA]} // nothing unpriced in range
+	if out := plain(m); strings.Contains(out, "no price for") || strings.Contains(out, "*") {
+		t.Errorf("a fully priced range shows no warning or marker:\n%s", out)
+	}
+}
+
+func TestHelpSaysWherePricesComeFrom(t *testing.T) {
+	m := fakeModel(true, 140, 40)
+	m.help = true
+	if out := plain(m); !strings.Contains(out, "Prices: /p/prices.toml (USD, as of 2026-11-14)") {
+		t.Fatalf("help lacks the price source:\n%s", out)
+	}
+	m = fakeModel(true, 80, 24)
+	m.help = true
+	m.prices.Path = "/home/someone/a/very/long/path/to/the/project/config/isshoni/prices.toml"
+	if out := plain(m); !strings.Contains(out, "/isshoni/prices.toml (USD, as of 2026-11-14)") || !strings.Contains(out, "Prices: …") {
+		t.Fatalf("a long path is cut from the left and still shown at 80x24:\n%s", out)
 	}
 }
 
@@ -214,11 +272,15 @@ func TestViewSwitching(t *testing.T) {
 		t.Fatalf("tab -> %v", m.view)
 	}
 	send(m, "tab")
+	if m.view != viewFactory {
+		t.Fatalf("tab -> %v", m.view)
+	}
+	send(m, "tab")
 	if m.view != viewDashboard {
 		t.Fatalf("tab wraps -> %v", m.view)
 	}
 	send(m, "shift+tab")
-	if m.view != viewAgents {
+	if m.view != viewFactory {
 		t.Fatalf("shift+tab -> %v", m.view)
 	}
 	send(m, "1")
@@ -345,8 +407,8 @@ func TestSortCycle(t *testing.T) {
 		t.Fatalf("recent first, got %s", m.visible()[0].ID)
 	}
 	send(m, "s")
-	if m.sortBy != sortTokens || m.visible()[0].ID != "cccccccc-0003" {
-		t.Fatalf("tokens sort: %v %s", m.sortBy, m.visible()[0].ID)
+	if m.sortBy != sortCost || m.visible()[0].ID != "cccccccc-0003" {
+		t.Fatalf("cost sort: %v %s", m.sortBy, m.visible()[0].ID)
 	}
 	send(m, "s")
 	if m.sortBy != sortShare || m.visible()[0].ID != "aaaaaaaa-0001" && m.visible()[0].ID != "bbbbbbbb-0002" {
@@ -524,13 +586,15 @@ func checkFrame(t *testing.T, name string, m *model, noColor bool) {
 func TestRenderAllViewsAllSizes(t *testing.T) {
 	for _, sz := range sizes {
 		for _, nc := range []bool{false, true} {
-			for _, view := range []string{"dashboard", "session", "agents", "help", "detail", "filter", "follow"} {
+			for _, view := range []string{"dashboard", "session", "agents", "factory", "help", "detail", "filter", "follow"} {
 				m := fakeModel(nc, sz[0], sz[1])
 				switch view {
 				case "session":
 					m.view = viewSession
 				case "agents":
 					m.view = viewAgents
+				case "factory":
+					setFactory(m, fakeFactoryRepos()...)
 				case "help":
 					m.help = true
 				case "detail":
@@ -552,7 +616,7 @@ func TestRenderAllViewsAllSizes(t *testing.T) {
 
 func TestRenderEmptyAndStates(t *testing.T) {
 	for _, sz := range sizes {
-		for _, v := range []viewID{viewDashboard, viewSession, viewAgents} {
+		for _, v := range []viewID{viewDashboard, viewSession, viewAgents, viewFactory} {
 			// empty data
 			m := New(Options{Static: true})
 			m.w, m.h = sz[0], sz[1]
@@ -742,6 +806,38 @@ func rowNames(m *model) string {
 	return strings.Join(out, ",")
 }
 
+// priced sets a session's cost directly, apart from its tokens.
+func priced(s *data.Session, total, sub float64) *data.Session {
+	s.Cost.Total, s.Cost.Subagents, s.Cost.Main = total, sub, total-sub
+	return s
+}
+
+func TestSortsFollowCostNotTokens(t *testing.T) {
+	// x has more tokens but costs less; q has the smaller token share of subagents but the larger cost share
+	x := priced(fakeSession("xxxxxxxx-0001", "r", 0, 1000, 0), 0.0010, 0)
+	y := priced(fakeSession("yyyyyyyy-0002", "r", 5, 800, 0), 0.0012, 0)
+	p := priced(fakeSession("pppppppp-0003", "r", 10, 500, 500), 0.0020, 0.0002)
+	q := priced(fakeSession("qqqqqqqq-0004", "r", 15, 900, 100), 0.0020, 0.0012)
+	for _, c := range []struct {
+		sort sortMode
+		ss   []*data.Session
+		want string
+	}{
+		{sortCost, []*data.Session{x, y}, "yyyyyyyy-0002,xxxxxxxx-0001"},
+		{sortShare, []*data.Session{p, q}, "qqqqqqqq-0004,pppppppp-0003"},
+	} {
+		m := modelOf(120, 40, c.ss...)
+		m.sortBy = c.sort
+		var got []string
+		for _, s := range m.visible() {
+			got = append(got, s.ID)
+		}
+		if strings.Join(got, ",") != c.want {
+			t.Errorf("sort %v: got %v, want %s", c.sort, got, c.want)
+		}
+	}
+}
+
 func TestTreeOrderUnderEachSort(t *testing.T) {
 	m := groupedModel(120, 40)
 	for _, c := range []struct {
@@ -750,8 +846,8 @@ func TestTreeOrderUnderEachSort(t *testing.T) {
 	}{
 		// recent: beta ends last; in alpha the sessions without a task come first, then tasks by latest activity
 		{sortRecent, "beta b1000000,alpha ×4,  a1000000,  zz a4000000,  ci ×2,    a3000000,    a2000000"},
-		// tokens: alpha 5.4k before beta 300; tasks by summed tokens, zz 5000 before ci 400
-		{sortTokens, "alpha ×4,  a1000000,  zz a4000000,  ci ×2,    a3000000,    a2000000,beta b1000000"},
+		// cost (the fakes price every token alike, so it follows tokens): alpha before beta; zz before ci
+		{sortCost, "alpha ×4,  a1000000,  zz a4000000,  ci ×2,    a3000000,    a2000000,beta b1000000"},
 		// subagent share: ci 50% first among tasks; repositories by summed share (alpha ~3.6%, beta 0)
 		{sortShare, "alpha ×4,  a1000000,  ci ×2,    a3000000,    a2000000,  zz a4000000,beta b1000000"},
 	} {
@@ -764,7 +860,7 @@ func TestTreeOrderUnderEachSort(t *testing.T) {
 
 func TestCursorSkipsGroupRows(t *testing.T) {
 	m := groupedModel(120, 40)
-	m.sortBy = sortTokens
+	m.sortBy = sortCost
 	send(m, "g")
 	var seen []string
 	for i := 0; i < 6; i++ {
@@ -786,7 +882,7 @@ func TestCursorSkipsGroupRows(t *testing.T) {
 
 func TestScrollKeepsGroupRowsAboveTheFirstSession(t *testing.T) {
 	m := groupedModel(120, 15)
-	m.sortBy = sortTokens
+	m.sortBy = sortCost
 	if rows := m.dashRows(); rows >= len(m.rows()) {
 		t.Fatalf("table shows all %d of %d rows; the test needs scrolling", rows, len(m.rows()))
 	}
@@ -831,7 +927,7 @@ func TestSortUsesGroupSums(t *testing.T) {
 		groupSession("p1000000", "r", "/r", "p", 10, 300, 0),
 		groupSession("p2000000", "r", "/r", "p", 20, 300, 0),
 		groupSession("q1000000", "r", "/r", "q", 30, 500, 0))
-	m.sortBy = sortTokens
+	m.sortBy = sortCost
 	if got, want := rowNames(m), "r ×3,  p ×2,    p2000000,    p1000000,  q q1000000"; got != want {
 		t.Fatalf("got %s, want %s", got, want)
 	}
@@ -863,7 +959,7 @@ func TestHiddenSelectionNeverSelectsAGroupRow(t *testing.T) {
 
 func TestScrollPullsBackWhenTheWindowGrows(t *testing.T) {
 	m := groupedModel(120, 15)
-	m.sortBy = sortTokens
+	m.sortBy = sortCost
 	send(m, "G")
 	if m.top == 0 {
 		t.Fatal("the test needs a scrolled table")

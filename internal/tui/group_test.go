@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"math"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -108,8 +110,8 @@ func TestGroupRatesComeFromSummedCounts(t *testing.T) {
 	b.Recheck = data.Recheck{ExplorersWithCitations: 3, Rechecked: 0}
 	m := modelOf(140, 40, a, b)
 	row := tableLine(t, m, "t ×2")
-	// sub 300 of 500 tokens, 1 of 4 claims; the means of the sessions' rates would be 38% and 50%
-	if !strings.Contains(row, "60%") || !strings.Contains(row, "25%") || strings.Contains(row, "38%") || strings.Contains(row, "50%") {
+	// subagents $0.00045 of $0.00065, 1 of 4 claims; the means of the sessions' rates would be 41% and 50%
+	if !strings.Contains(row, "69%") || !strings.Contains(row, "25%") || strings.Contains(row, "41%") || strings.Contains(row, "50%") {
 		t.Fatalf("group row: %s", row)
 	}
 }
@@ -130,7 +132,7 @@ func TestColumnsDropInOrder(t *testing.T) {
 		for _, f := range []struct {
 			on   bool
 			name string
-		}{{c.sig, "sig"}, {c.subPct, "sub%"}, {c.bad, "bad"}} {
+		}{{c.sig, "sig"}, {c.showTok, "tok"}, {c.subPct, "sub%"}, {c.bad, "bad"}} {
 			if f.on {
 				state += f.name + " "
 			}
@@ -138,12 +140,18 @@ func TestColumnsDropInOrder(t *testing.T) {
 		if len(seen) == 0 || seen[len(seen)-1] != state {
 			seen = append(seen, state)
 		}
-		if prev.sig && !c.sig || prev.subPct && !c.subPct || prev.showStart && !c.showStart || prev.bad && !c.bad {
+		if prev.sig && !c.sig || prev.showTok && !c.showTok || prev.subPct && !c.subPct || prev.showStart && !c.showStart || prev.bad && !c.bad {
 			t.Fatalf("iw %d: columns not monotonic: %+v after %+v", iw, c, prev)
+		}
+		if !strings.Contains(c.header("ACTIVE"), "COST") {
+			t.Fatalf("iw %d: no COST column", iw)
 		}
 		prev = c
 	}
-	if got, want := strings.Join(seen, "|"), "|sig |sig sub% |sig sub% bad "; got != want {
+	if c := m.tableCols(56); !c.sig || c.showStart { // a 60-column terminal
+		t.Fatalf("the minimum terminal keeps the signals and drops the time: %+v", c)
+	}
+	if got, want := strings.Join(seen, "|"), "|sig |sig tok |sig tok sub% |sig tok sub% bad "; got != want {
 		t.Fatalf("columns appear as %q, want %q", got, want)
 	}
 	if c := m.tableCols(200); c.split != 16 || c.name != maxName {
@@ -213,6 +221,7 @@ func TestGroupLiveDot(t *testing.T) {
 type totalsJSON struct {
 	Sessions      []string     `json:"sessions"`
 	Tokens        data.Tokens  `json:"tokens"`
+	Cost          data.Cost    `json:"cost"`
 	DispatchCount int          `json:"dispatch_count"`
 	Repeats       int          `json:"repeats"`
 	ReviewLoops   int          `json:"review_loops"`
@@ -224,7 +233,8 @@ type totalsJSON struct {
 func TestGroupTotalsMatchTheJSON(t *testing.T) {
 	root, _ := filepath.Abs("../..")
 	for _, fx := range []string{"projects", "grouping"} {
-		cmd := exec.Command("python3", "-m", "isshoni", "sessions", "--json", "--projects-dir", filepath.Join(root, "tests", "fixtures", fx))
+		cmd := exec.Command("python3", "-m", "isshoni", "sessions", "--json", "--projects-dir", filepath.Join(root, "tests", "fixtures", fx),
+			"--prices", filepath.Join(root, "tests", "fixtures", "prices.toml"))
 		cmd.Dir = root
 		var so bytes.Buffer
 		cmd.Stdout = &so
@@ -257,19 +267,21 @@ func TestGroupTotalsMatchTheJSON(t *testing.T) {
 				ss = append(ss, byID[id])
 			}
 			g := sumTotals(ss)
-			if g.tokens != j.Tokens.Total || g.main != j.Tokens.Main || g.sub != j.Tokens.Subagents ||
+			near := func(a, b float64) bool { return math.Abs(a-b) < 1e-5 } // the JSON rounds money to 6 decimals
+			if g.tokens != j.Tokens.Total || !near(g.cost, j.Cost.Total) || !near(g.mainCost, j.Cost.Main) || !near(g.subCost, j.Cost.Subagents) ||
+				g.unpriced != j.Cost.UnpricedTokens || !slices.Equal(g.unpricedModels, j.Cost.UnpricedModels) ||
 				g.dispatches != j.DispatchCount || g.repeats != j.Repeats || g.loops != j.ReviewLoops ||
 				g.rechecked != j.Recheck.Rechecked || g.candidates != j.Recheck.ExplorersWithCitations ||
 				g.warns != j.WarnCount || g.malformed != j.Malformed {
 				t.Errorf("%s/%s: go sums %+v, json %+v", fx, name, g, j)
 			}
-			if g.tokens > 0 {
-				if got := share(g.sub, g.tokens); got != pct(j.Tokens.SubagentPct) {
-					t.Errorf("%s/%s: SUB%% %s, json %s", fx, name, got, pct(j.Tokens.SubagentPct))
+			if g.cost > 0 {
+				if got := share(g.subCost, g.cost); got != pct(j.Cost.SubagentPct) {
+					t.Errorf("%s/%s: SUB%% %s, json %s", fx, name, got, pct(j.Cost.SubagentPct))
 				}
 			}
 			if j.Recheck.Rate != nil {
-				if got := share(int64(g.rechecked), int64(g.candidates)); got != pct(100**j.Recheck.Rate) {
+				if got := share(float64(g.rechecked), float64(g.candidates)); got != pct(100**j.Recheck.Rate) {
 					t.Errorf("%s/%s: RCHK %s, json %s", fx, name, got, pct(100**j.Recheck.Rate))
 				}
 			} else if g.candidates != 0 {
