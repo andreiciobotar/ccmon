@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """factory: start, list and clean task worktrees run by lead sessions."""
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -15,6 +16,20 @@ PERMISSION_MODES = ("acceptEdits", "auto", "bypassPermissions", "manual", "dontA
 STALE_SECONDS = 7 * 24 * 3600
 SLUG_RE = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*")
 BACKGROUNDED_RE = re.compile(r"backgrounded\s*·\s*(\S+)\s*·\s*(.+)")
+STORE = Path("~/.claude/factory")
+WORKTREE_RE = re.compile(r"(.*?)/\.claude/worktrees/([^/]+)(?:/|$)")
+MODEL_RE = re.compile(rb'"model"\s*:\s*"([^"]+)"')
+ITEM_RE = re.compile(r"(?:[-*]|\d+\.)\s+")
+KINDS = ("QUESTION", "BLOCKED", "OVERTIME", "SPLIT", "DONE")
+STATUSES = ("open", "accepted", "rejected", "done")
+CAUGHT_BY = ("tests", "reviewer", "lead", "ci", "human")
+RETRO_LISTS = ("slowed", "rules_missing", "rules_dead_weight", "brief_questions")
+COPIED = {"SessionStart": ("source",), "SessionEnd": ("reason",), "SubagentStart": ("agent_id",),
+          "SubagentStop": ("agent_id",), "Notification": ("notification_type", "message"),
+          "PermissionRequest": ("tool_name",), "PermissionDenied": ("tool_name", "reason"),
+          "PostToolUse": ("tool_name", "agent_id")}
+PROMPT_FROM = (("<agent-message", "subagent"), ("<cross-session-message", "session"),
+               ("<task-notification", "notification"))
 
 
 class Fail(Exception):
@@ -226,6 +241,135 @@ def collect(repo, sessions, limit_hours):
     return rows
 
 
+# ---- telemetry --------------------------------------------------------------
+
+def now():
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def append(name, record):
+    """One JSON line to <store>/<name>.jsonl in a single O_APPEND write. Raises OSError."""
+    directory = STORE.expanduser()
+    directory.mkdir(parents=True, exist_ok=True)
+    fd = os.open(directory / f"{name}.jsonl", os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+    try:
+        os.write(fd, (json.dumps(record) + "\n").encode())
+    finally:
+        os.close(fd)
+
+
+def record(repo, slug, role, model, session):
+    version = json.loads((PLUGIN_ROOT / ".claude-plugin" / "plugin.json").read_text())["version"]
+    return {"ts": now(), "repo": repo, "slug": slug, "role": role, "model": model,
+            "version": version, "session": session}
+
+
+def transcript_model(path):
+    """The last model named in the final 64 KiB of a transcript, or None."""
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, 2)
+            f.seek(max(0, f.tell() - 65536))
+            data = f.read()
+    except (OSError, TypeError):
+        return None
+    models = [m.group(1).decode(errors="replace") for m in MODEL_RE.finditer(data)]
+    return next((m for m in reversed(models) if m != "<synthetic>"), None)
+
+
+def tags(payload=None):
+    """The record tags for a hook payload, or for the calling session when there is none."""
+    p = payload or {}
+    repo, slug = os.environ.get("CLAUDE_PROJECT_DIR") or p.get("cwd") or os.getcwd(), None
+    match = WORKTREE_RE.match(repo)
+    if match:
+        repo = match.group(1)
+        slug = None if match.group(2).startswith("agent-") else match.group(2)
+    role = str(p.get("agent_type") or "").removeprefix("factory:") or ("lead" if slug else "other")
+    session = p.get("session_id") or os.environ.get("CLAUDE_CODE_SESSION_ID")
+    model, transcript = p.get("model"), p.get("transcript_path")
+    if not model:
+        if p.get("agent_transcript_path"):
+            transcript = p["agent_transcript_path"]
+        elif transcript and p.get("agent_id"):
+            transcript = f"{transcript.removesuffix('.jsonl')}/subagents/agent-{p['agent_id']}.jsonl"
+        elif not transcript and session:
+            transcript = next(Path("~/.claude/projects").expanduser().glob(f"*/{session}.jsonl"), None)
+        model = transcript_model(transcript)
+    return record(repo, slug, role, model, session)
+
+
+def feedback_section(text):
+    """Lines after the last 'Factory feedback' heading up to the next '#' line, or None without a heading."""
+    lines = text.splitlines()
+    heads = [i for i, line in enumerate(lines) if line.strip().strip("#*: ").lower() == "factory feedback"]
+    if not heads:
+        return None
+    section = []
+    for line in lines[heads[-1] + 1:]:
+        if line.startswith("#"):
+            break
+        section.append(line)
+    return section
+
+
+def feedback_items(lines):
+    items = []
+    for line in lines:
+        marker = ITEM_RE.match(line)
+        if marker:
+            items.append(line[marker.end():])
+        elif items:
+            items[-1] += "\n" + line
+    items = [i.strip() for i in items] or ["\n".join(lines).strip()]
+    return [i for i in items if i.lower().strip("\"'`.!:; ") not in ("", "none")]
+
+
+def file_feedback(lines, tag):
+    ids = []
+    for text in feedback_items(lines):
+        key = "\0".join([tag["repo"] or "", tag["slug"] or "", tag["role"], text])
+        fid = hashlib.sha256(key.encode()).hexdigest()[:12]
+        append("feedback", {**tag, "id": fid, "text": text, "status": "open"})
+        ids.append(fid)
+    return ids
+
+
+def read_feedback():
+    """Entries with their folded status, in filing order."""
+    try:
+        lines = (STORE.expanduser() / "feedback.jsonl").read_text().splitlines()
+    except FileNotFoundError:
+        return []
+    entries, changes = {}, {}
+    for line in lines:
+        try:
+            r = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(r, dict) and "id" in r:
+            if "text" in r:
+                entries.setdefault(r["id"], dict(r))
+            else:
+                changes[r["id"]] = r
+    for fid, entry in entries.items():
+        change = changes.get(fid, {})
+        entry["status"] = change.get("status", "open")
+        entry.pop("pr", None)
+        if "pr" in change:
+            entry["pr"] = change["pr"]
+    return list(entries.values())
+
+
+def task_event(event, repo, slug, **extra):
+    """TaskStarted / TaskRemoved, from the dispatcher; a failed write is ignored."""
+    try:
+        append("events", {**record(repo.root, slug, "dispatcher", None, os.environ.get("CLAUDE_CODE_SESSION_ID")),
+                          "event": event, **extra})
+    except (OSError, ValueError, KeyError):
+        pass
+
+
 # ---- commands ---------------------------------------------------------------
 
 def cmd_new(args):
@@ -301,6 +445,7 @@ def cmd_new(args):
         what = "without a `backgrounded` line" if not match else "after printing a `backgrounded` line"
         raise Fail(f"claude exited {rc} {what}; the session may be running, nothing was removed", code=1)
     print(f"started {match.group(2).strip()} (session {match.group(1)})")
+    task_event("TaskStarted", repo, args.slug, base=base, lead_model=settings["lead_model"])
     return 0
 
 
@@ -413,7 +558,85 @@ def cmd_clean(args):
                     break
             else:
                 print(f"removed {row['slug']}")
+                task_event("TaskRemoved", repo, row["slug"])
     return 1 if failed else 0
+
+
+def cmd_hook(args):
+    """Record one hook payload. Prints nothing and exits 0 whatever happens."""
+    try:
+        p = json.loads(sys.stdin.read())
+        event, tool_input = p["hook_event_name"], p.get("tool_input") or {}
+        fields = {k: p[k] for k in COPIED.get(event, ()) if k in p}
+        text = None
+        if event == "UserPromptSubmit":
+            prompt = p.get("prompt") or ""
+            fields["from"] = next((v for start, v in PROMPT_FROM if prompt.startswith(start)), "human")
+        elif event == "Stop" and isinstance(p.get("background_tasks"), list):
+            fields["background_tasks"] = len(p["background_tasks"])
+        elif event == "SubagentStop":
+            text = p.get("last_assistant_message")
+        elif event == "PostToolUse" and p.get("tool_name") == "SubagentHandback":
+            text = tool_input.get("message")
+        elif event == "PostToolUse" and p.get("tool_name") == "SendMessage":
+            message = tool_input.get("message") or ""
+            fields["to"] = tool_input.get("to")
+            fields["kind"] = next((k for k in KINDS if message.startswith(k + ":")), None)
+            text = message if fields["kind"] == "DONE" else None
+        tag = tags(p)
+        append("events", {**tag, "event": event, **fields})
+        if isinstance(text, str) and (lines := feedback_section(text)) is not None:
+            file_feedback(lines, tag)
+    except Exception:
+        pass
+    return 0
+
+
+def cmd_retro(args):
+    tag = tags()
+    if not tag["slug"]:
+        raise Fail("retro: run it from inside a task worktree")
+    try:
+        doc = json.loads(sys.stdin.read())
+    except ValueError as e:
+        raise Fail(f"retro: stdin is not JSON: {e}")
+    if not isinstance(doc, dict) or set(doc) != {"defects", *RETRO_LISTS}:
+        raise Fail(f"retro: the object needs exactly the keys defects, {', '.join(RETRO_LISTS)}")
+    for key in RETRO_LISTS:
+        if not isinstance(doc[key], list) or not all(isinstance(s, str) and s.strip() for s in doc[key]):
+            raise Fail(f"retro: {key} must be a list of non-empty strings")
+    defects = doc["defects"]
+    if not isinstance(defects, list) or not all(
+            isinstance(d, dict) and set(d) == {"caught_by", "what"} and d["caught_by"] in CAUGHT_BY
+            and isinstance(d["what"], str) and d["what"].strip() for d in defects):
+        raise Fail(f"retro: defects must be a list of objects with caught_by ({'|'.join(CAUGHT_BY)}) and a non-empty what")
+    append("retros", {**tag, **doc})
+    return 0
+
+
+def cmd_feedback(args):
+    if args.action == "add":
+        tag = tags()
+        tag["role"] = args.role
+        tag["slug"] = args.slug or tag["slug"]
+        tag["model"] = args.model or tag["model"]
+        text = sys.stdin.read()
+        section = feedback_section(text)
+        ids = file_feedback(text.splitlines() if section is None else section, tag)
+        print(" ".join(ids) or "no items")
+    elif args.action == "set":
+        found = [e["id"] for e in read_feedback() if e["id"].startswith(args.id)]
+        if len(found) != 1:
+            raise Fail(f"feedback: {'no entry' if not found else 'several entries'} matches {args.id!r}")
+        append("feedback", {"id": found[0], "ts": now(), "status": args.status, **({"pr": args.pr} if args.pr else {})})
+    else:
+        entries = [e for e in read_feedback() if not args.status or e["status"] == args.status]
+        if args.json:
+            print(json.dumps(entries, indent=2))
+        else:
+            for e in entries:
+                print(f"{e['id']}  {e['status']}  {e['slug'] or '-'}  {e['role']}  {' '.join(e['text'].split())[:100]}")
+    return 0
 
 
 def parse_args(argv):
@@ -430,16 +653,34 @@ def parse_args(argv):
     status.add_argument("--json", action="store_true")
     clean = sub.add_parser("clean", help="remove finished tasks")
     clean.add_argument("--dry-run", action="store_true")
+    sub.add_parser("hook", help="record one hook payload read from stdin (run by the plugin's hooks)")
+    sub.add_parser("retro", help="store a lead retrospective (a JSON object on stdin)")
+    feedback = sub.add_parser("feedback", help="list or change the factory feedback outbox")
+    feedback.add_argument("--json", action="store_true")
+    feedback.add_argument("--status", choices=STATUSES)
+    actions = feedback.add_subparsers(dest="action")
+    add = actions.add_parser("add", help="file feedback items read from stdin")
+    add.add_argument("--role", required=True)
+    add.add_argument("--slug")
+    add.add_argument("--model")
+    change = actions.add_parser("set", help="set the status of an entry")
+    change.add_argument("id")
+    change.add_argument("status", choices=STATUSES)
+    change.add_argument("--pr")
     return parser.parse_args(argv)
 
 
 def main(argv=None):
     args = parse_args(sys.argv[1:] if argv is None else argv)
     try:
-        return {"new": cmd_new, "status": cmd_status, "clean": cmd_clean}[args.cmd](args)
+        return {"new": cmd_new, "status": cmd_status, "clean": cmd_clean, "hook": cmd_hook,
+                "retro": cmd_retro, "feedback": cmd_feedback}[args.cmd](args)
     except Fail as e:
         print(f"factory: {e}", file=sys.stderr)
         return e.code
+    except OSError as e:
+        print(f"factory: {e}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

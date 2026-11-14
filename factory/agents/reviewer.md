@@ -29,3 +29,6 @@ APPROVE or CHANGES_NEEDED
 
 ## Checked
 - What you actually verified (commands run, files read).
+
+## Factory feedback
+- At most three things about the brief, the rules, the tools or permissions that cost you time or forced a guess, not about the task. Each: what happened, what it cost, a suggested change. Write "none" otherwise. It is filed automatically.
