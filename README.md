@@ -27,6 +27,19 @@ Isshoni is two tools for people who run [Claude Code](https://claude.com/claude-
 | **Monitor** | Shows where the money and tokens went: per repository, task, session, agent and model | `isshoni`, `isshoni-tui` |
 | **Factory** | Builds several tasks in parallel, each in its own git worktree, each ending in a draft pull request | `/factory:dispatch`, from the `factory` plugin |
 
+## Kaizen (改善), built in
+
+Most agent setups run on day 100 the way they ran on day 1. Isshoni's factory learns from every task:
+
+- Every agent reports what slowed it down.
+- Every lead records the key calls it made without asking, and why.
+- Every finished task leaves a retrospective and, in the monitor, its cost.
+- Every site manager alert is marked acted-on or noise, so its precision and recall are measured.
+
+The dispatcher reads it all and proposes edits to the factory's own rules; you decide.
+
+On day one, agents reported the same shell friction eleven times and counting. It became a rule that day ([#8](https://github.com/andreiciobotar/isshoni/pull/8)).
+
 ## Monitor
 
 `isshoni` reads the transcripts Claude Code already keeps in `~/.claude/projects` and never writes there. It reports cost and tokens by model and agent, the share spent in subagents, and the signs of wasted work: repeated dispatches, review loops, and agents running on a model other than the one pinned for them.
@@ -67,7 +80,7 @@ Describe a task, then ask for progress whenever you like: the dispatcher answers
 
 It needs `git`, an authenticated [`gh`](https://cli.github.com) and Python 3.11+. By default leads run unattended on Fable in `auto` permission mode, and five tasks may be in motion per repository. Every session event, lead retrospective and decision a lead took without asking is logged under `~/.claude/factory/` (events for 12 months); `factory feedback` lists the decisions and what agents reported about the factory itself.
 
-Optionally a site manager watches the factory for you: `factory schedule install` (macOS, run in the repository's main checkout; `factory schedule remove` undoes it) checks every 30 minutes for stuck, blocked or over-limit tasks, red CI and the like without running a model, and only when something new turns up starts a short Sonnet run that tells the dispatcher or drops it as noise with a reason.
+Optionally a site manager watches the factory for you: `factory schedule install` (macOS, run in the repository's main checkout; `factory schedule remove` undoes it) checks every 30 minutes for stuck, blocked or over-limit tasks, red CI and the like without running a model, and only when something new turns up starts a short Sonnet run that tells the dispatcher or drops it as noise with a reason. It also merges for you: comment `lgtm` on a handed-over pull request and, checks green and no conflict, the next check merges it.
 
 <!-- screenshot: factory status with several tasks -->
 
