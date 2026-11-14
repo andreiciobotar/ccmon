@@ -25,6 +25,7 @@ Verified on Claude Code 2.1.325 by running them in this repo, unless marked othe
 | Reviewer | subagent of the lead | opus | spec conformance, bugs, test quality, smallest complete design |
 | Coder | subagent of the lead | sonnet | implementation |
 | Explorer | subagent of the lead or coder | haiku | facts with evidence |
+| Site manager | a fresh headless run, started by the scheduled `factory watch` only when a criterion fired | sonnet | reads the evidence for each firing, escalates to the dispatcher or suppresses with a reason (`docs/specs/site-manager.md`) |
 
 The dispatcher never plans, writes code or reviews a task. When unsure whether a brief is one task or several, or how to approach it, it starts one lead.
 
@@ -36,6 +37,8 @@ factory/agents/{explorer,coder,reviewer}.md
 factory/skills/coding-taste/SKILL.md
 factory/skills/dispatch/SKILL.md    the dispatcher's rules; the human runs /factory:dispatch
 factory/roles/lead.md               the lead's rules; appended to the lead's system prompt
+factory/roles/site-manager.md       the site manager's rules; appended to each run's system prompt
+factory/criteria.json               the health criteria: name, escalate, threshold, one line each
 factory/bin/factory                 Python 3.11+, standard library only
 factory/tests/                      unittest
 ```

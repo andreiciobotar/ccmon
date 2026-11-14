@@ -1,0 +1,14 @@
+[
+{"name": "past-limit", "escalate": "always", "threshold": null, "what": "A lead is still working past the task time limit in settings."},
+{"name": "ci-red-default", "escalate": "always", "threshold": null, "what": "The newest decisive CI run of a workflow on the default branch did not succeed."},
+{"name": "dispatcher-missing", "escalate": "always", "threshold": null, "what": "Tasks are live but there is not exactly one unfinished session named as the dispatcher."},
+{"name": "quiet", "escalate": "judgment", "threshold": 20, "what": "A working lead has written no transcript line and made no commit for more than the threshold, in minutes."},
+{"name": "ended-undeclared", "escalate": "judgment", "threshold": 10, "what": "A lead's session ended without it declaring a hand-over or a block, and nothing has happened for more than the threshold, in minutes."},
+{"name": "blocked-unanswered", "escalate": "judgment", "threshold": 30, "what": "A lead declared itself blocked more than the threshold, in minutes, ago and is still blocked."},
+{"name": "handover-unacknowledged", "escalate": "judgment", "threshold": 24, "what": "A lead handed its work over more than the threshold, in hours, ago and nobody has acknowledged it."},
+{"name": "review-loops", "escalate": "judgment", "threshold": 3, "what": "A task has had at least the threshold number of reviewer dispatches since it started."},
+{"name": "wrong-model", "escalate": "judgment", "threshold": null, "what": "A subagent or lead ran on a model other than the one pinned for its role."},
+{"name": "ci-red-handover", "escalate": "judgment", "threshold": null, "what": "A task handed over a pull request that has a failing check."},
+{"name": "deep-stack", "escalate": "judgment", "threshold": 3, "what": "A task is stacked on a chain of other tasks longer than the threshold."},
+{"name": "merged-not-cleaned", "escalate": "judgment", "threshold": 2, "what": "A task's pull request was merged, or the task was settled, more than the threshold, in hours, ago and it has not been cleaned."}
+]
