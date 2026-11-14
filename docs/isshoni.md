@@ -181,7 +181,8 @@ VIEW=... SIZE=...` turns it into a PNG under `shots/` (needs Chrome).
   or `stale`. At the top, a band lists everything that waits on you across repositories,
   oldest first: tasks in review (the pull request or deliverable to look at) and blocked
   tasks (what they asked), each with how long it has waited; when nothing waits it says
-  so. The `4 Factory` tab carries `▲N` for the number waiting on every view. It refreshes
+  so. The `4 Factory` tab carries `▲N` for the number waiting on every view (in a narrow header the live count then shows as
+  `● N`, without the word). It refreshes
   every 30 seconds while shown, every 2 minutes otherwise. `c` sets `worktree_cap` (1 to
   999) in `~/.claude/factory/settings.json`, leaving the other keys as they were; a file
   that is not a JSON object is never overwritten. See [factory.md](factory.md).

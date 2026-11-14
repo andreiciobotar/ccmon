@@ -384,8 +384,35 @@ func TestFactoryBandDoCellWrapsWhenNarrowAndTruncates(t *testing.T) {
 	}
 }
 
+// At 80 columns five tabs leave the badge no room beside "N live": the word goes, the count stays.
+func TestFactoryTabBadgeKeepsTheLiveCountAt80Columns(t *testing.T) {
+	for _, n := range []int{0, 7, 12, 123} {
+		for _, v := range []viewID{viewDashboard, viewFactory} {
+			m := fakeModel(true, 80, 24)
+			m.view = v
+			for _, s := range m.sessions {
+				m.seen[s.ID] = m.now()
+			}
+			rows := make([]data.FactoryTask, n)
+			for i := range rows {
+				rows[i] = ftask(fmt.Sprintf("t%d", i), "review")
+			}
+			m.fac.repos, m.fac.doneAt = []factoryRepo{{name: "r", st: fstatus(5, rows...)}}, m.now()
+			live := m.liveCount()
+			head := strings.Split(plain(m), "\n")[0]
+			badge, count := fmt.Sprintf("4 Factory ▲%d", n), fmt.Sprintf("● %d ", live)
+			if n == 0 {
+				badge, count = "4 Factory", fmt.Sprintf("● %d live", live)
+			}
+			if live == 0 || !strings.Contains(head, badge) || !strings.Contains(head, count) || !strings.Contains(head, "[7d]") {
+				t.Errorf("view %d, %d waiting, %d live: %q", v, n, live, head)
+			}
+		}
+	}
+}
+
 func TestFactoryTabBadge(t *testing.T) {
-	for _, v := range []viewID{viewDashboard, viewSession, viewAgents, viewFactory} {
+	for _, v := range []viewID{viewDashboard, viewSession, viewAgents, viewFactory, viewKaizen} {
 		m := fakeModel(true, 140, 40)
 		m.view = v
 		m.fac.repos, m.fac.doneAt = waitingRepos(), m.now()

@@ -141,9 +141,10 @@ func (m *model) header(p paint) string {
 	}
 
 	live := m.liveCount()
-	liveStr := bar.t("○ idle", th.Faint)
+	liveStr, liveShort := bar.t("○ idle", th.Faint), bar.t("○", th.Faint) // the short one when the tab badge takes its room
 	if live > 0 {
 		liveStr = bar.dot(th.Green, m.pulse()) + bar.b(fmt.Sprintf(" %d live", live), th.Green)
+		liveShort = bar.dot(th.Green, m.pulse()) + bar.b(fmt.Sprintf(" %d", live), th.Green)
 	}
 	clock := ""
 	if !m.lastUpdate.IsZero() {
@@ -160,6 +161,7 @@ func (m *model) header(p paint) string {
 		{rangeStr, liveStr, state, clock},
 		{rangeStr, liveStr, state},
 		{rangeStr, liveStr},
+		{rangeStr, liveShort},
 		{rangeStr},
 		{chips[m.rangeIdx]},
 	}
