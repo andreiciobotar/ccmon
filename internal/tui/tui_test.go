@@ -263,6 +263,7 @@ func TestTruncByDisplayWidth(t *testing.T) {
 
 func TestViewSwitching(t *testing.T) {
 	m := fakeModel(true, 120, 40)
+	send(m, "j") // off the all row: the session view needs a session
 	send(m, "tab")
 	if m.view != viewSession {
 		t.Fatalf("tab -> %v", m.view)
@@ -328,26 +329,27 @@ func TestQuitKeys(t *testing.T) {
 
 func TestCursorBounds(t *testing.T) {
 	m := fakeModel(true, 120, 40)
-	vis := m.visible()
-	if m.cursor(vis) != 0 {
-		t.Fatal("starts on first row")
+	at := func() int { cur, _ := m.cursorRow(m.rows()); return cur }
+	last := len(m.rows()) - 1
+	if at() != 0 || m.rows()[0].kind != kindAll {
+		t.Fatal("starts on the all row")
 	}
 	send(m, "k", "up")
-	if m.cursor(m.visible()) != 0 {
-		t.Fatal("cannot go above the first row")
+	if at() != 0 {
+		t.Fatal("cannot go above the all row")
 	}
 	for i := 0; i < 10; i++ {
 		send(m, "j")
 	}
-	if got := m.cursor(m.visible()); got != len(vis)-1 {
-		t.Fatalf("cursor %d, want last %d", got, len(vis)-1)
+	if at() != last {
+		t.Fatalf("cursor %d, want last %d", at(), last)
 	}
 	send(m, "g")
-	if m.cursor(m.visible()) != 0 {
+	if at() != 0 {
 		t.Fatal("g jumps to top")
 	}
 	send(m, "G")
-	if m.cursor(m.visible()) != len(vis)-1 {
+	if at() != last {
 		t.Fatal("G jumps to bottom")
 	}
 	// session view cursor
@@ -434,8 +436,8 @@ func TestFilter(t *testing.T) {
 	if got := len(m.visible()); got != 1 || m.visible()[0].Project != "beta-é" {
 		t.Fatalf("filter result %d", got)
 	}
-	if m.selID != "bbbbbbbb-0002" {
-		t.Fatal("selection must follow the filtered list")
+	if cur, _ := m.cursorRow(m.rows()); cur != 0 || m.rows()[0].kind != kindAll {
+		t.Fatal("a selection filtered out falls to the all row")
 	}
 	send(m, "backspace", "backspace", "backspace")
 	if len(m.visible()) != 3 {
@@ -845,11 +847,11 @@ func TestTreeOrderUnderEachSort(t *testing.T) {
 		want string
 	}{
 		// recent: beta ends last; in alpha the sessions without a task come first, then tasks by latest activity
-		{sortRecent, "beta b1000000,alpha ×4,  a1000000,  zz a4000000,  ci ×2,    a3000000,    a2000000"},
+		{sortRecent, "all ×5,beta b1000000,alpha ×4,  a1000000,  zz a4000000,  ci ×2,    a3000000,    a2000000"},
 		// cost (the fakes price every token alike, so it follows tokens): alpha before beta; zz before ci
-		{sortCost, "alpha ×4,  a1000000,  zz a4000000,  ci ×2,    a3000000,    a2000000,beta b1000000"},
+		{sortCost, "all ×5,alpha ×4,  a1000000,  zz a4000000,  ci ×2,    a3000000,    a2000000,beta b1000000"},
 		// subagent share: ci 50% first among tasks; repositories by summed share (alpha ~3.6%, beta 0)
-		{sortShare, "alpha ×4,  a1000000,  ci ×2,    a3000000,    a2000000,  zz a4000000,beta b1000000"},
+		{sortShare, "all ×5,alpha ×4,  a1000000,  ci ×2,    a3000000,    a2000000,  zz a4000000,beta b1000000"},
 	} {
 		m.sortBy = c.sort
 		if got := rowNames(m); got != c.want {
@@ -858,17 +860,21 @@ func TestTreeOrderUnderEachSort(t *testing.T) {
 	}
 }
 
-func TestCursorSkipsGroupRows(t *testing.T) {
+func TestCursorVisitsEveryRow(t *testing.T) {
 	m := groupedModel(120, 40)
 	m.sortBy = sortCost
 	send(m, "g")
 	var seen []string
-	for i := 0; i < 6; i++ {
-		seen = append(seen, short8(m.selID))
+	for range m.rows() {
+		seen = append(seen, rowNameOf(m.rows()[mustCursor(m)]))
 		send(m, "j")
 	}
-	if got, want := strings.Join(seen, ","), "a1000000,a4000000,a3000000,a2000000,b1000000,b1000000"; got != want {
+	want := "all ×5,alpha ×4,a1000000,zz a4000000,ci ×2,a3000000,a2000000,beta b1000000"
+	if got := strings.Join(seen, ","); got != want {
 		t.Fatalf("j order %s, want %s", got, want)
+	}
+	if got := rowNameOf(m.rows()[mustCursor(m)]); got != "beta b1000000" {
+		t.Fatalf("j stops at the last row, on %s", got)
 	}
 	send(m, "k")
 	if m.selID != "a2000000" {
@@ -878,7 +884,15 @@ func TestCursorSkipsGroupRows(t *testing.T) {
 	if m.selID != "b1000000" {
 		t.Fatalf("G -> %s", m.selID)
 	}
+	send(m, "g")
+	if m.rows()[mustCursor(m)].kind != kindAll {
+		t.Fatal("g -> the all row")
+	}
 }
+
+func mustCursor(m *model) int { cur, _ := m.cursorRow(m.rows()); return cur }
+
+func rowNameOf(r treeRow) string { return strings.TrimSpace(r.name + " " + r.suffix) }
 
 func TestScrollKeepsGroupRowsAboveTheFirstSession(t *testing.T) {
 	m := groupedModel(120, 15)
@@ -893,16 +907,24 @@ func TestScrollKeepsGroupRowsAboveTheFirstSession(t *testing.T) {
 	if m.rows()[m.top].s != nil {
 		t.Fatalf("top row %d is a session; the task row above a3000000 must stay in view", m.top)
 	}
-	send(m, "k", "k") // a4, a1: first session of the repository
+	send(m, "k", "k", "k") // ci, a4, a1: first session of the repository
 	if m.selID != "a1000000" || m.rows()[m.top].s != nil {
 		t.Fatalf("a1000000 must keep its repository row in view (top %d)", m.top)
+	}
+	send(m, "g")
+	if m.top != 0 {
+		t.Fatalf("the all row is in view at the top, top %d", m.top)
+	}
+	send(m, "G", "k", "k", "k", "k") // up to the ci task row
+	if cur, _ := m.cursorRow(m.rows()); cur < m.top || cur >= m.top+m.dashRows() {
+		t.Fatalf("a selected group row stays inside the window: cur %d top %d", cur, m.top)
 	}
 }
 
 func TestFilterMatchesLabel(t *testing.T) {
 	m := groupedModel(120, 40)
 	send(m, "/", "a", "l", "p", "h", "a", "/", "c", "i")
-	if got := rowNames(m); got != "alpha ×2,  ci ×2,    a3000000,    a2000000" {
+	if got := rowNames(m); got != "all ×2,alpha ×2,  ci ×2,    a3000000,    a2000000" {
 		t.Fatalf("filter alpha/ci -> %s", got)
 	}
 	if got := m.totals().tokens; got != 400 {
@@ -911,12 +933,19 @@ func TestFilterMatchesLabel(t *testing.T) {
 }
 
 func TestGroupedRenderFitsEverySize(t *testing.T) {
-	for _, sz := range [][2]int{{60, 16}, {80, 24}, {100, 30}, {140, 40}} {
-		m := groupedModel(sz[0], sz[1])
-		m.fixScroll()
-		for i, line := range strings.Split(m.Render(), "\n") {
-			if width(line) > sz[0] {
-				t.Fatalf("%dx%d line %d is %d wide", sz[0], sz[1], i, width(line))
+	var sizes [][2]int
+	for w := 60; w <= 160; w++ {
+		sizes = append(sizes, [2]int{w, 24})
+	}
+	sizes = append(sizes, [2]int{60, 16}, [2]int{100, 30}, [2]int{140, 40})
+	for _, sz := range sizes {
+		m := pluginModel(sz[0], sz[1])
+		for _, r := range m.rows() { // the cursor on every kind of row, group rows included
+			selectRow(m, r.key)
+			for i, line := range strings.Split(m.Render(), "\n") {
+				if width(line) > sz[0] {
+					t.Fatalf("%dx%d on %s: line %d is %d wide", sz[0], sz[1], r.label(), i, width(line))
+				}
 			}
 		}
 	}
@@ -928,7 +957,7 @@ func TestSortUsesGroupSums(t *testing.T) {
 		groupSession("p2000000", "r", "/r", "p", 20, 300, 0),
 		groupSession("q1000000", "r", "/r", "q", 30, 500, 0))
 	m.sortBy = sortCost
-	if got, want := rowNames(m), "r ×3,  p ×2,    p2000000,    p1000000,  q q1000000"; got != want {
+	if got, want := rowNames(m), "all ×3,r ×3,  p ×2,    p2000000,    p1000000,  q q1000000"; got != want {
 		t.Fatalf("got %s, want %s", got, want)
 	}
 }
@@ -937,18 +966,18 @@ func TestSameNameRepositoriesStaySeparate(t *testing.T) {
 	m := modelOf(120, 40,
 		groupSession("x1000000", "app", "/one/app", "", 10, 100, 0),
 		groupSession("y1000000", "app", "/two/app", "", 20, 100, 0))
-	if got, want := rowNames(m), "app y1000000,app x1000000"; got != want {
+	if got, want := rowNames(m), "all ×2,app y1000000,app x1000000"; got != want {
 		t.Fatalf("got %s, want %s", got, want)
 	}
 }
 
-func TestHiddenSelectionNeverSelectsAGroupRow(t *testing.T) {
+func TestHiddenSelectionFallsToTheAllRow(t *testing.T) {
 	m := groupedModel(120, 40)
 	m.selID = "a2000000"
 	m.filter = "beta"
-	rows := m.rows()
-	if cur, _ := m.cursorRow(rows); rows[cur].s == nil {
-		t.Fatalf("row %d is a group row", cur)
+	m.normalizeSelection()
+	if r := m.rows()[mustCursor(m)]; r.kind != kindAll || m.selID != r.key {
+		t.Fatalf("cursor on %+v, selID %q", r, m.selID)
 	}
 	m.follow = true
 	m.followTarget()

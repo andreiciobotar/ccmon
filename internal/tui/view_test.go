@@ -259,7 +259,7 @@ func fixtureCopy(t *testing.T, name string) string {
 	return dst
 }
 
-func fixtureSnapshot(t *testing.T, projects, view, session string, w, h int) (string, error) {
+func fixtureSnapshot(t *testing.T, projects, view, session string, row, w, h int) (string, error) {
 	t.Helper()
 	root, _ := filepath.Abs("../..")
 	r := &data.Runner{Root: root, ProjectsDir: projects, AgentsDir: filepath.Join(root, "tests", "fixtures", "agents"),
@@ -269,27 +269,37 @@ func fixtureSnapshot(t *testing.T, projects, view, session string, w, h int) (st
 	}
 	return Snapshot(SnapshotOptions{
 		Options: Options{Runner: r, NoColor: true, Range: "all", Now: func() time.Time { return goldenNow }},
-		View:    view, Session: session, W: w, H: h,
+		View:    view, Session: session, Row: row, W: w, H: h,
 	})
 }
 
 func TestGoldenSnapshots(t *testing.T) {
+	// a golden of the dashboard names the row it has the cursor on; row is its display index in the grouping fixture
+	type shot struct {
+		view, label string
+		row         int
+	}
+	plainShots := []shot{{"dashboard", "", 0}, {"session", "", 0}, {"agents", "", 0}, {"help", "", 0}}
+	groupShots := []shot{{"dashboard", "all ×9", 0}, {"dashboard-repo", "repo alpha ×7", 3}, {"dashboard-task", "task ci ×2", 9}, {"dashboard-session", "session a1000006", 4}}
 	for _, fx := range []struct {
 		root, prefix string
-		views        []string
+		shots        []shot
 		sizes        [][2]int
 	}{
-		{"projects", "", []string{"dashboard", "session", "agents", "help"}, [][2]int{{140, 40}, {80, 24}}},
-		{"grouping", "grouping-", []string{"dashboard"}, [][2]int{{140, 40}, {100, 30}, {80, 24}}},
+		{"projects", "", plainShots, [][2]int{{140, 40}, {80, 24}}},
+		{"grouping", "grouping-", groupShots, [][2]int{{140, 40}, {100, 30}, {80, 24}}},
 	} {
 		projects := fixtureCopy(t, fx.root)
 		for _, sz := range fx.sizes {
-			for _, view := range fx.views {
-				name := fmt.Sprintf("%s%s-%dx%d", fx.prefix, view, sz[0], sz[1])
+			for _, sh := range fx.shots {
+				name := fmt.Sprintf("%s%s-%dx%d", fx.prefix, sh.view, sz[0], sz[1])
 				t.Run(name, func(t *testing.T) {
-					got, err := fixtureSnapshot(t, projects, view, "", sz[0], sz[1])
+					got, err := fixtureSnapshot(t, projects, strings.SplitN(sh.view, "-", 2)[0], "", sh.row, sz[0], sz[1])
 					if err != nil {
 						t.Fatal(err)
+					}
+					if sh.label != "" && !strings.Contains(got, "mix · "+sh.label) {
+						t.Fatalf("the mix panels do not name %q\n%s", sh.label, got)
 					}
 					path := filepath.Join("testdata", name+".golden")
 					if *update {
@@ -318,13 +328,13 @@ func TestSnapshotFailures(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(projects, "-fixture-proj", "fixture-0002.jsonl"), b, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := fixtureSnapshot(t, projects, "session", "fixture", 100, 30); err == nil || !strings.Contains(err.Error(), "ambiguous") {
+	if _, err := fixtureSnapshot(t, projects, "session", "fixture", 0, 100, 30); err == nil || !strings.Contains(err.Error(), "ambiguous") {
 		t.Fatalf("ambiguous prefix: %v", err)
 	}
-	if _, err := fixtureSnapshot(t, projects, "session", "nope", 100, 30); err == nil {
+	if _, err := fixtureSnapshot(t, projects, "session", "nope", 0, 100, 30); err == nil {
 		t.Fatal("unknown session must fail")
 	}
-	if out, err := fixtureSnapshot(t, projects, "session", "fixture-0001", 100, 30); err != nil || !strings.Contains(out, "fixture-0001") {
+	if out, err := fixtureSnapshot(t, projects, "session", "fixture-0001", 0, 100, 30); err != nil || !strings.Contains(out, "fixture-0001") {
 		t.Fatalf("exact id: %v", err)
 	}
 	// a load that fails exits non-zero: no python, or a missing projects dir

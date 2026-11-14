@@ -64,17 +64,18 @@ terminal of at least 60x16.
 ```
 bin/isshoni-tui [--range 24h|7d|30d|all] [--follow] [--no-color]
                 [--projects-dir DIR] [--agents-dir DIR] [--prices PATH]
-bin/isshoni-tui --snapshot dashboard|session|agents|factory|help [--size 140x40] [--session ID]
+bin/isshoni-tui --snapshot dashboard|session|agents|factory|help [--size 140x40] [--session ID] [--row N]
 ```
 `--range` defaults to `7d`. `NO_COLOR` gives the plain rendering too. `--snapshot`
-prints one settled frame and exits, non-zero when the load fails; `make screenshot
+prints one settled frame and exits, non-zero when the load fails; `--row N` puts the
+dashboard cursor on table row N (0 is the `all` row); `make screenshot
 VIEW=... SIZE=...` turns it into a PNG under `shots/` (needs Chrome).
 
 | Key | |
 |---|---|
 | `tab` `shift+tab`, `1` `2` `3` `4` | switch view: dashboard, session, agents, factory |
 | `↑` `↓` `j` `k`, `g` `G`, `pgup` `pgdn` | move, first and last, page |
-| `enter`, `esc` | open, back |
+| `enter`, `esc` | open a session row (nothing on a group row), back |
 | `r` | range: 24h, 7d, 30d, all (on the error screen: retry) |
 | `s` | sort: recent, cost, subagent share |
 | `/` | filter by `repo`, `repo/task`, project or session id |
@@ -85,8 +86,13 @@ VIEW=... SIZE=...` turns it into a PNG under `shots/` (needs Chrome).
 - **Dashboard:** totals for the range, the sessions as a tree of repository, task and
   session, the agent and model mix, and every dispatch running now. A group row sums
   its sessions (rates from summed counts, never a mean of rates); a group of one
-  session is a single row. Columns: time (last activity when sorted by recent, else
-  start), `COST`, `TOKENS`, `MAIN│SUB` and `SUB%` (shares of cost), `DISP`
+  session is a single row. The top row, `all`, sums every session shown. The cursor
+  moves over every row; the agent and model mix show the row under it and name it in
+  their titles, with money and share over that row's cost. The tiles always total every
+  session shown, and a line under them says so. In the mix a plugin's agent counts with
+  its role (`factory:coder` as `coder`); the Agents view keeps them apart. A cursor row
+  that disappears (filtered out, merged away) falls back to `all`. Columns: time (last activity when sorted by
+  recent, else start), `COST`, `TOKENS`, `MAIN│SUB` and `SUB%` (shares of cost), `DISP`
   (dispatches), `REP` (repeats), `LOOP` (review loops), `RCHK` (re-checks), `WARN`
   (model warnings), `BAD` (malformed lines, only when there are any). A narrow
   terminal drops `BAD`, `SUB%`, `TOKENS`, then the time.

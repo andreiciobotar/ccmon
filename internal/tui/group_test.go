@@ -194,7 +194,7 @@ func TestMergedRows(t *testing.T) {
 	}
 
 	one := modelOf(140, 40, groupSession("t1000000", "solo", "/r/solo", "job", 0, 100, 0))
-	if got := rowNames(one); got != "solo ×1,  job t1000000" {
+	if got := rowNames(one); got != "all ×1,solo ×1,  job t1000000" {
 		t.Errorf("one tasked session: %s", got)
 	}
 

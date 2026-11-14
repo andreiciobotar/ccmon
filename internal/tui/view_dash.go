@@ -33,18 +33,19 @@ func (m *model) dashLayout() dashLayout {
 		l.sideW = 38
 		l.tableW = m.w - l.sideW - 1
 	} else {
-		l.stripH = 2
+		l.stripH = 3 // heading naming the scope, then the two strips
 	}
 	avail -= l.stripH
 	l.nowH = min(max(len(m.nowRunning()), 1)+2, 10)
 	if l.nowH = min(l.nowH, avail-4); l.nowH < 3 {
 		l.nowH = 0
 	}
-	// the table and side column take what their content needs, up to what is left
+	// the table and side column take what their content needs, up to what is left; the side column is
+	// sized from the whole range, so it does not jump as the cursor moves
 	need := max(len(m.rows())+3, 7)
 	if l.sideW > 0 {
 		t := m.totals()
-		need = max(need, len(t.byAgent)+2+len(t.byModel)+3)
+		need = max(need, len(roleUsage(t.byAgent))+2+len(t.byModel)+3)
 	}
 	l.topH = max(min(need, avail-l.nowH), 3)
 	return l
@@ -55,18 +56,23 @@ func (m *model) dashRows() int { return max(1, m.dashLayout().topH-3) }
 
 func (m *model) dashBody(p paint, w, h int) block {
 	l := m.dashLayout()
-	t := m.totals()
+	sc, shown := m.scope()
+	t := sumTotals(sc.group) // the row under the cursor: the same sum as its table columns
+	label := ""
+	if shown {
+		label = sc.label()
+	}
 	out := m.tiles(p, w, l.compactTiles)
-	out = append(out, p.sp(w))
+	out = append(out, m.caption(p, w))
 	table := m.sessionsTable(p, l.tableW, l.topH)
 	if l.sideW == 0 {
 		out = append(out, table...)
 	} else {
-		agentH := min(len(t.byAgent)+2, max(l.topH-4, 3))
+		agentH := min(len(roleUsage(m.totals().byAgent))+2, max(l.topH-4, 3))
 		modelH := l.topH - agentH
-		side := m.agentMixBox(p, t, l.sideW, agentH)
+		side := m.agentMixBox(p, label, t, l.sideW, agentH)
 		if modelH >= 3 {
-			side = append(side, m.modelMixBox(p, t, l.sideW, modelH)...)
+			side = append(side, m.modelMixBox(p, label, t, l.sideW, modelH)...)
 		}
 		out = append(out, joinCols(p, l.topH, 1, []int{l.tableW, l.sideW}, table, side)...)
 	}
@@ -74,12 +80,35 @@ func (m *model) dashBody(p paint, w, h int) block {
 		out = append(out, m.nowRunningBox(p, w, l.nowH)...)
 	}
 	if l.stripH > 0 {
-		rows, total := agentUsage(t.byAgent)
-		out = append(out, m.mixStrip(p, "agents", rows, total, m.th.AgentColor, func(k string) string { return k }, w))
-		rows, total = sortedUsage(t.byModel)
-		out = append(out, m.mixStrip(p, "models", rows, total, m.th.ModelColor, shortModel, w))
+		head := p.t(" mix", m.th.Faint)
+		if label != "" {
+			head += p.t(" · ", m.th.Faint) + p.t(label, m.th.Text) + p.t(" · ", m.th.Faint) + p.t(m.money(t.cost, t.unpriced), m.th.Text)
+		}
+		out = append(out, fit(head, w, p))
+		rows, _ := agentUsage(roleUsage(t.byAgent))
+		out = append(out, m.scopeStrip(p, "agents", rows, t.cost, m.th.AgentColor, func(k string) string { return k }, w))
+		rows, _ = sortedUsage(t.byModel)
+		out = append(out, m.scopeStrip(p, "models", rows, t.cost, m.th.ModelColor, shortModel, w))
 	}
 	return out
+}
+
+// caption says what the tiles total, since the mix panels follow the cursor instead.
+func (m *model) caption(p paint, w int) string {
+	n := len(m.visible())
+	if n == 0 {
+		return p.sp(w)
+	}
+	return fit(p.t(fmt.Sprintf(" ↑ totals of all %d sessions shown · the mix panels show the selected row", n), m.th.Faint), w, p)
+}
+
+// label names a row for the mix panels: its kind, its text, its suffix.
+func (r treeRow) label() string {
+	word := [...]string{kindRepo: "repo ", kindTask: "task ", kindSession: "session ", kindAll: ""}[r.kind]
+	if r.suffix == "" {
+		return word + r.name
+	}
+	return word + r.name + " " + r.suffix
 }
 
 // mixStrip is a one-line stacked bar with a legend, for the mixes when there is no side column.
@@ -98,6 +127,28 @@ func (m *model) mixStrip(p paint, label string, rows []kv, total float64, col fu
 	}
 	bw := min(max(w/4, 8), 24)
 	line := p.sp(1) + p.t(cell(label, 7, false), th.Faint) + p.stack(bw, segs) + p.sp(2) + strings.Join(legend, p.sp(2))
+	return fit(line, w, p)
+}
+
+// scopeStrip is mixStrip for the dashboard's scope: each legend entry also shows its money, and an entry
+// that does not fit is left out whole rather than cut mid-number.
+func (m *model) scopeStrip(p paint, label string, rows []kv, total float64, col func(string) color.Color, name func(string) string, w int) string {
+	var segs []seg
+	for _, r := range rows {
+		segs = append(segs, seg{r.v, col(r.k)})
+	}
+	line := p.sp(1) + p.t(cell(label, 7, false), m.th.Faint) + p.stack(min(max(w/6, 6), 16), segs)
+	for i, r := range rows {
+		share := 0.0
+		if total > 0 {
+			share = r.v / total * 100
+		}
+		entry := p.sp(2) + p.swatch(i, col(r.k)) + p.t(" "+name(r.k)+" "+m.money(r.v, r.unpriced)+" "+pct(share), m.th.Muted)
+		if width(line)+width(entry) > w {
+			break
+		}
+		line += entry
+	}
 	return fit(line, w, p)
 }
 
@@ -423,8 +474,8 @@ func (m *model) rowTime(group []*data.Session) time.Time {
 	return out
 }
 
-// treeLine renders one repository, task or session row. Only rows with a session select and flash;
-// a group row shows a live dot when any of its sessions is live.
+// treeLine renders one row. Every row can be selected; only rows with a session flash.
+// A group row shows a live dot when any of its sessions is live.
 func (m *model) treeLine(r treeRow, selected bool, c tableCols, iw int, base paint) string {
 	th := m.th
 	bg := th.Surface
@@ -469,7 +520,7 @@ func (m *model) treeLine(r treeRow, selected bool, c tableCols, iw int, base pai
 		if !selected {
 			name = q.t(head, th.Purple)
 		}
-	case r.kind == kindRepo || selected:
+	case r.kind == kindRepo || r.kind == kindAll || selected:
 		name = q.b(head, th.Text)
 	default:
 		name = q.t(head, th.Faint)
@@ -576,16 +627,35 @@ func agentUsage(m map[string]data.Usage) ([]kv, float64) {
 	return out, total
 }
 
-func (m *model) agentMixBox(p paint, t totals, w, h int) block {
+// roleUsage adds each plugin agent (factory:coder) into its role (coder), for the mix panels.
+func roleUsage(m map[string]data.Usage) map[string]data.Usage {
+	out := map[string]data.Usage{}
+	for k, u := range m {
+		v := out[agentRole(k)]
+		v.Add(u)
+		out[agentRole(k)] = v
+	}
+	return out
+}
+
+// boxTitle puts the scope in a mix panel's title; no scope, no label.
+func boxTitle(name, label string) string {
+	if label == "" {
+		return name
+	}
+	return name + " · " + label
+}
+
+func (m *model) agentMixBox(p paint, label string, t totals, w, h int) block {
 	th := m.th
 	in := p.on(th.Surface)
-	rows, total := agentUsage(t.byAgent)
+	rows, _ := agentUsage(roleUsage(t.byAgent))
 	iw := w - 4
 	nameW := 0
 	for _, r := range rows {
 		nameW = max(nameW, width(r.k))
 	}
-	nameW = min(nameW, 16)
+	nameW = min(nameW, 12)
 	var lines []string
 	for i, r := range rows {
 		if i >= h-2 {
@@ -593,23 +663,24 @@ func (m *model) agentMixBox(p paint, t totals, w, h int) block {
 		}
 		col := th.AgentColor(r.k)
 		share := 0.0
-		if total > 0 {
-			share = r.v / total
+		if t.cost > 0 {
+			share = r.v / t.cost
 		}
-		bw := max(4, iw-nameW-2-5-1)
+		bw := max(4, iw-2-nameW-1-1-9-5)
 		lines = append(lines, in.t("● ", col)+in.t(cell(r.k, nameW, false), th.Text)+in.sp(1)+
-			in.bar(bw, share, col, false)+in.t(cell(pct(share*100), 5, true), th.Muted))
+			in.bar(bw, share, col, false)+in.sp(1)+in.t(cell(m.money(r.v, r.unpriced), 9, true), th.Muted)+in.t(cell(pct(share*100), 5, true), th.Faint))
 	}
 	if len(rows) == 0 {
 		lines = []string{in.t("no data yet", th.Faint)}
 	}
-	return p.boxed("Agent mix", lines, w, h, th.Yellow)
+	return p.boxed(boxTitle("Agent mix", label), lines, w, h, th.Yellow)
 }
 
-func (m *model) modelMixBox(p paint, t totals, w, h int) block {
+func (m *model) modelMixBox(p paint, label string, t totals, w, h int) block {
 	th := m.th
 	in := p.on(th.Surface)
-	rows, total := sortedUsage(t.byModel)
+	rows, _ := sortedUsage(t.byModel)
+	total := t.cost
 	iw := w - 4
 	var segs []seg
 	for _, r := range rows {
@@ -631,5 +702,5 @@ func (m *model) modelMixBox(p paint, t totals, w, h int) block {
 	if len(rows) == 0 {
 		lines = []string{in.t("no data yet", th.Faint)}
 	}
-	return p.boxed("Model mix", lines, w, h, th.Teal)
+	return p.boxed(boxTitle("Model mix", label), lines, w, h, th.Teal)
 }

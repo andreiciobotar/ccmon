@@ -355,6 +355,7 @@ func (m *model) helpScreen(p paint) []string {
 	lines = append(lines, "",
 		p.t("r cycles 24h · 7d · 30d · all; on the error screen it retries.", th.Faint),
 		p.t("s sorts by recent · cost · subagent share.", th.Faint),
+		p.t("Mix panels follow the cursor row; the tiles total every session.", th.Faint),
 		p.t("A dot pulses on sessions written in the last 30 seconds.", th.Faint),
 		p.t("The factory view refreshes every 30 s while shown.", th.Faint))
 	bw := 0
