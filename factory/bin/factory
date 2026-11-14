@@ -870,7 +870,7 @@ def follow_dispatcher(p):
     backend, label = scheduler(), job_label(repo.root)
     name = f"dispatcher-{os.path.basename(repo.root)}"
     if (event == "UserPromptSubmit" or (event == "SessionStart" and p.get("source") not in ("startup", "resume"))) \
-            and backend.status(label)[0]:
+            and all(backend.status(label)):
         return
     sessions = list_sessions() or []
     me = next((s for s in sessions if s.get("sessionId") == p.get("session_id")), None)
@@ -879,7 +879,7 @@ def follow_dispatcher(p):
         return
     if event != "SessionEnd":
         schedule_install(repo, name, backend)
-    elif not live_dispatchers(sessions, repo.root, name, exclude=p["session_id"]):
+    elif p.get("reason") != "clear" and not live_dispatchers(sessions, repo.root, name, exclude=p["session_id"]):
         schedule_remove(repo, backend)
 
 
@@ -1500,7 +1500,7 @@ def cmd_watch(args):
     else:
         run_site_manager(p, send)
     if orphaned and "dispatcher-missing" not in {s["criterion"] for s in skipped}:
-        print(f"no dispatcher session for {repo.root}: schedule removed", flush=True)  # launchd kills us in remove
+        print(f"no dispatcher session for {repo.root}: removing the schedule", flush=True)  # launchd kills this process in remove
         schedule_remove(repo, scheduler())
     return 0
 
@@ -1654,9 +1654,10 @@ class Systemd:
     def install(self, label, argv, cwd, path, log):
         service, timer = self.unit(label, "service"), self.unit(label, "timer")
         service.parent.mkdir(parents=True, exist_ok=True)
-        service.write_text(f"[Unit]\nDescription=factory watch {cwd}\n\n[Service]\nType=oneshot\n"
-                           f"WorkingDirectory={cwd}\nEnvironment=\"PATH={path}\"\nExecStart={shlex.join(argv)}\n"
-                           f"StandardOutput=append:{log}\nStandardError=append:{log}\n")
+        command = shlex.join(argv).replace("$", "$$")
+        service.write_text((f"[Unit]\nDescription=factory watch {cwd}\n\n[Service]\nType=oneshot\n"
+                            f"WorkingDirectory={cwd}\nEnvironment=\"PATH={path}\"\nExecStart={command}\n"
+                            f"StandardOutput=append:{log}\nStandardError=append:{log}\n").replace("%", "%%"))
         timer.write_text(f"[Unit]\nDescription=factory watch {cwd}\n\n[Timer]\nOnActiveSec={WATCH_INTERVAL}\n"
                          f"OnUnitActiveSec={WATCH_INTERVAL}\n\n[Install]\nWantedBy=timers.target\n")
         run(["systemctl", "--user", "daemon-reload"])
@@ -1692,8 +1693,8 @@ class Cron:
 
     def install(self, label, argv, cwd, path, log):
         q = shlex.quote
-        self.write([*self.lines(label)[1], f"*/{WATCH_INTERVAL // 60} * * * * cd {q(cwd)} && PATH={q(path)} "
-                    f"{shlex.join(argv)} >> {q(str(log))} 2>&1 # {label}"])
+        command = f"cd {q(cwd)} && PATH={q(path)} {shlex.join(argv)} >> {q(str(log))} 2>&1".replace("%", "\\%")
+        self.write([*self.lines(label)[1], f"*/{WATCH_INTERVAL // 60} * * * * {command} # {label}"])
 
     def remove(self, label, root):
         lines, kept = self.lines(label)

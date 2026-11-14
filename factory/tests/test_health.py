@@ -772,10 +772,16 @@ class WatchTests(Harness):
             self.cli("watch", sessions=[], entries=["x"], answers={("notify-send",): (0, "", "")})
             self.assertEqual([c for c in self.fake.calls if c[0] == "notify-send"],
                              [["notify-send", "factory: repo", "0 unfinished sessions named dispatcher-repo"]])
-            self.tools.pop("notify-send")
-            self.seed("firings", [{"ts": iso(NOW), "repo": ROOT, "id": "zz", "cleared": True}])
-            self.cli("watch", sessions=[], entries=["x"], at=NOW + 1800)
+
+    def test_without_a_notification_service_the_notice_goes_to_the_log(self):
+        self.seed("tasks", [{"repo": ROOT, "slug": "x", "state": "blocked", "ts": iso(NOW - 2 * HOUR)}])
+        self.tools.pop("notify-send")
+        with mock.patch.object(factory.sys, "platform", "linux"):
+            _, out, _ = self.cli("watch", sessions=[], entries=["x"])
         self.assertFalse(self.fake.ran("notify-send"))
+        self.assertIn("notify: factory: repo: 0 unfinished sessions named dispatcher-repo\n", out)
+        [decision] = [r for r in self.records() if "decision" in r]
+        self.assertIn("written to the watch log", decision["reason"])
 
     def test_a_timed_out_run_exits_1(self):
         code, out, err = self.tick(answers={("claude", "-p"): (124, "", "timed out")})
@@ -942,6 +948,22 @@ class SchedHarness(Harness):
 
 
 class JobTests(unittest.TestCase):
+    def test_a_percent_or_dollar_in_a_path_is_escaped_for_systemd_and_cron(self):
+        calls = []
+
+        def run(argv, **kw):
+            calls.append((argv, kw.get("input")))
+            return 0, "", ""
+        with tempfile.TemporaryDirectory() as home, mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": home}), \
+                mock.patch.object(factory, "run", run):
+            factory.Systemd().install("job", ["/py", "/a$b/f%y"], "/re%po", "/bin", "/lo%g")
+            unit = (Path(home) / "systemd" / "user" / "job.service").read_text()
+            factory.Cron().install("job", ["/py", "/f%y"], "/re%po", "/bin", "/lo%g")
+        self.assertIn("WorkingDirectory=/re%%po\n", unit)
+        self.assertIn("ExecStart=/py '/a$$b/f%%y'\n", unit)
+        self.assertIn("StandardOutput=append:/lo%%g\n", unit)
+        self.assertEqual(calls[-1][1], "*/30 * * * * cd /re\\%po && PATH=/bin /py /f\\%y >> /lo\\%g 2>&1 # job\n")
+
     def test_two_folders_with_one_name_get_two_labels(self):
         a, b = factory.job_label("/a/repo"), factory.job_label("/b/repo")
         self.assertNotEqual(a, b)
@@ -1233,6 +1255,16 @@ class HookTests(SchedHarness):
         self.hook("SessionEnd", sessions=[], session_title="dispatcher-repo")
         self.assertFalse(self.plist().exists())
 
+    def test_a_clear_does_not_end_the_dispatcher(self):
+        self.put_plist()
+        self.hook("SessionEnd", reason="clear")
+        self.assertTrue(self.plist().exists())
+
+    def test_a_job_that_is_present_but_not_loaded_is_installed_again(self):
+        self.put_plist(StartInterval=1)
+        self.hook("UserPromptSubmit", answers={("launchctl", "print"): (113, "", "not found")})
+        self.assertEqual(plistlib.loads(self.plist().read_bytes())["StartInterval"], 1800)
+
     def test_another_live_dispatcher_keeps_the_job(self):
         twin = DISPATCHER | {"name": "dispatcher-repo", "sessionId": "sid-2", "cwd": f"{ROOT}/sub"}
         self.put_plist()
@@ -1272,7 +1304,7 @@ class OrphanTests(SchedHarness):
         notice = {("osascript",): (0, "", "")}
         _, out, _ = self.watch([], answers=notice)
         self.assertFalse(self.plist().exists())
-        self.assertIn(f"no dispatcher session for {ROOT}: schedule removed", out)
+        self.assertIn(f"no dispatcher session for {ROOT}: removing the schedule", out)
         self.assertEqual(len([c for c in self.fake.calls if c[0] == "osascript"]), 1)
         [decision] = [r for r in self.records() if "decision" in r]
         self.assertIn("notified on this machine", decision["reason"])
@@ -1298,18 +1330,18 @@ class OrphanTests(SchedHarness):
         unplaced = {"sessionId": "u", "kind": "interactive"}
         _, out, _ = self.watch([unplaced])
         self.assertIn("not evaluated: dispatcher-missing", out)
-        self.assertNotIn("schedule removed", out)
+        self.assertNotIn("removing the schedule", out)
         self.assertTrue(self.plist().exists())
 
     def test_it_stays_when_the_sessions_cannot_be_listed(self):
         _, out, _ = self.watch([], answers={("claude", "agents"): (1, "", "boom")})
         self.assertTrue(self.plist().exists())
-        self.assertNotIn("schedule removed", out)
+        self.assertNotIn("removing the schedule", out)
 
     def test_it_stays_while_a_dispatcher_lives(self):
         _, out, _ = self.watch([DISPATCHER | {"name": "dispatcher-repo"}])
         self.assertTrue(self.plist().exists())
-        self.assertNotIn("schedule removed", out)
+        self.assertNotIn("removing the schedule", out)
 
     def test_a_dispatcher_of_another_repository_does_not_count(self):
         self.watch([DISPATCHER | {"name": "dispatcher-repo", "cwd": "/elsewhere"}], entries=[])

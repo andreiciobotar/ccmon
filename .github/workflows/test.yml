@@ -44,7 +44,7 @@ jobs:
         run: mkdir -p ~/.claude/projects
       - run: make snapshot
       - name: make up (three seconds in a pseudo-terminal, then q)
-        run: (sleep 3; printf q) | script -qec "make up" /dev/null | tail -c 400
+        run: (sleep 3; printf q) | script -qec "make up" /dev/null > /dev/null
       - run: make screenshot && test -s shots/dashboard-140x40.png
       - name: a systemd user session, as a logged-in user has
         run: |

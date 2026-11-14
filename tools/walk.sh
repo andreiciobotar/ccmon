@@ -79,7 +79,7 @@ wait_for() { # wait_for <seconds> <command...>
     return 1
 }
 logged() { grep -q "$1" "$log" 2>/dev/null; }
-absent() { case "$(status)" in *absent*) return 0 ;; *) return 1 ;; esac; }
+absent() { case "$(status)" in *"absent, not loaded"*) return 0 ;; *) return 1 ;; esac; }
 
 say "hook: a prompt in the dispatcher session installs the job"
 alive
@@ -103,7 +103,7 @@ gone
 tick
 wait_for 30 absent || { cat "$log"; die "the job did not remove itself"; }
 cat "$log"
-logged "schedule removed" || die "the log does not say the schedule was removed"
+logged "removing the schedule" || die "the log does not say the schedule was removed"
 status
 
 say "manual control"
