@@ -99,7 +99,7 @@ def load_settings():
     if "monitor" in data and (not isinstance(monitor, str) or not monitor.strip()):
         raise Fail("settings: monitor must be a non-empty string")
     return {"worktree_cap": cap, "lead_model": model, "lead_permission_mode": mode,
-            "task_time_limit_hours": hours, "monitor": monitor}
+            "task_time_limit_hours": hours, "monitor": monitor and os.path.expanduser(monitor)}
 
 
 def build_launch_argv(slug, dispatcher, brief, settings, base, remote, now):
@@ -338,9 +338,15 @@ def append(name, record):
 
 
 def log(name, record):
-    """append to the file of the record's month; the first write of a month prunes that log."""
+    """append to the file of the record's month; whoever creates a month's file prunes that log, once."""
     month = f"{name}-{record['ts'][:7]}"
-    fresh = not (STORE.expanduser() / f"{month}.jsonl").exists()
+    directory = STORE.expanduser()
+    directory.mkdir(parents=True, exist_ok=True)
+    try:
+        os.close(os.open(directory / f"{month}.jsonl", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
+        fresh = True
+    except FileExistsError:
+        fresh = False
     append(month, record)
     if fresh:
         prune(name)
@@ -401,15 +407,15 @@ def carry_feedback(files):
 
 
 def carry_tasks(files):
-    """Per (repo, slug), the newest record of the oldest file, while no newer file has one and its worktree exists."""
-    later = {(r.get("repo"), r.get("slug")) for _, p in files[1:] for r in read_file(p)}
+    """Per (repo, slug), its newest record by `ts`, when the oldest file holds it and its worktree exists."""
     newest = {}
-    for r in read_file(files[0][1]):
-        key = (r.get("repo"), r.get("slug"))
-        if key not in later and stamp(r) >= stamp(newest.get(key)):
-            newest[key] = r
-    return [r for (repo, slug), r in newest.items()
-            if isinstance(repo, str) and isinstance(slug, str) and Path(repo, ".claude", "worktrees", slug).is_dir()]
+    for i, (_, path) in enumerate(files):
+        for r in read_file(path):
+            key = (r.get("repo"), r.get("slug"))
+            if stamp(r) >= stamp(newest.get(key, (0, None))[1]):
+                newest[key] = (i, r)
+    return [r for (repo, slug), (i, r) in newest.items() if i == 0
+            and isinstance(repo, str) and isinstance(slug, str) and Path(repo, ".claude", "worktrees", slug).is_dir()]
 
 
 def carry_firings(files):
@@ -1265,9 +1271,11 @@ def costs(p):
 
 def landed_median(p):
     """(median total cost, count) over the tasks with a merged pull request and a cost above 0."""
-    merged = {r.get("headRefName", "").removeprefix("worktree-") for r in
-              p["gh"](list, "pr", "list", "--state", "merged", "--limit", "1000", "--json", "headRefName")}
-    totals = [c["total"] for slug, c in costs(p).items() if slug in merged and c["total"] > 0]
+    if "landed" not in p:
+        merged = {r.get("headRefName", "").removeprefix("worktree-") for r in
+                  p["gh"](list, "pr", "list", "--state", "merged", "--limit", "1000", "--json", "headRefName")}
+        p["landed"] = [c["total"] for slug, c in costs(p).items() if slug in merged and c["total"] > 0]
+    totals = p["landed"]
     if len(totals) < MIN_LANDED:
         raise NotEvaluated(f"only {len(totals)} landed tasks have a cost; {MIN_LANDED} are needed for a median")
     return statistics.median(totals), len(totals)

@@ -507,8 +507,9 @@ class CostTests(unittest.TestCase):
         self.assertEqual(found, [("x", "x", "cost 10.00, 3.3 times the median landed task (3.00 over 5)")])
 
     def test_lead_heavy(self):
-        rows = [row("a"), row("b"), row("c"), row("d"), row("e", pr_state="merged")]
-        tasks = [("a", 3.0, 90.0), ("b", 2.9, 99.0), ("c", 5.0, 85.0), ("d", 4.0, 85.1), ("e", 9.0, 99.0)]
+        rows = [row("a"), row("b"), row("c"), row("d"), row("e", pr_state="merged"), row("f", state="acknowledged")]
+        tasks = [("a", 3.0, 90.0), ("b", 2.9, 99.0), ("c", 5.0, 85.0), ("d", 4.0, 85.1), ("e", 9.0, 99.0),
+                 ("f", 9.0, 99.0)]
         found = self.evaluate("lead-heavy", 85, tasks, rows)
         self.assertEqual(found, [("a", "a", "the lead's own session is 90.0% of its cost (3.00)"),
                                  ("d", "d", "the lead's own session is 85.1% of its cost (4.00)")])

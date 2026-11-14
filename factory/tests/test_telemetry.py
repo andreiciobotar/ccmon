@@ -635,6 +635,15 @@ class PruneTests(LogCase):
             factory.prune("tasks")
         self.assertEqual((self.names(), self.lines("tasks")), (["tasks-2026-11.jsonl"], [record]))
 
+    def test_an_unsuffixed_record_newer_than_a_month_files_is_the_one_carried(self):
+        self.worktree("a")
+        newest = self.task("a", "2025-06-01T00:00:00Z", "acknowledged")
+        self.put("tasks", newest, mtime=time.mktime((2025, 6, 1, 12, 0, 0, 0, 0, -1)))
+        self.put("tasks-2025-11", self.task("a", "2025-05-01T00:00:00Z", "working"))
+        with self.clock():
+            factory.prune("tasks")
+        self.assertEqual(factory.read_tasks(str(self.tmp / "repo"))["a"]["state"], "acknowledged")
+
     def test_read_tasks_picks_the_newest_ts_across_files_and_the_later_read_on_a_tie(self):
         root = str(self.tmp / "repo")
         self.put("tasks-2026-11", self.task("a", "2025-01-01T00:00:00Z", "working"))
