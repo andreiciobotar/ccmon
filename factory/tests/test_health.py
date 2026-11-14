@@ -139,7 +139,7 @@ class CriteriaTests(Home):
         self.assertEqual([f[1] for f in two], ["deploy"])
         asked = []
         check("ci-red-default", pic(gh=lambda *a: asked.append(a) or []))
-        self.assertEqual(asked[0][:4], ("run", "list", "--branch", "main"))
+        self.assertEqual(asked[0][:5], (list, "run", "list", "--branch", "main"))
 
     def test_dispatcher_missing(self):
         d = DISPATCHER | {"name": "dispatcher-repo"}
@@ -191,8 +191,6 @@ class CriteriaTests(Home):
         self.assertEqual(check("ended-undeclared", pic(rows=[r], sessions=[young]), 10), [])
         self.assertEqual(check("ended-undeclared", pic(rows=[r], sessions=[lead("x")]), 10), [])
         self.assertEqual(check("ended-undeclared", pic(rows=[row("x", phase="review")], sessions=[done]), 10), [])
-        unplaced = {"id": "s9", "kind": "background", "status": "busy", "state": "working"}
-        self.assertEqual(check("ended-undeclared", pic(rows=[r], sessions=[done, unplaced]), 10), [])
 
     def test_blocked_unanswered(self):
         for minutes, fires in ((31, 1), (29, 0)):
@@ -251,7 +249,7 @@ class CriteriaTests(Home):
             return [{"name": "test", "bucket": "fail"}, {"name": "lint", "bucket": "pass"}]
         found = check("ci-red-handover", pic(rows=[r], gh=checks))
         self.assertEqual(found, [("x", "x", "failed: test https://pr/1")])
-        self.assertEqual(asked, [("pr", "checks", "https://pr/1", "--json", "name,bucket")])
+        self.assertEqual(asked, [(list, "pr", "checks", "https://pr/1", "--json", "name,bucket")])
         green = pic(rows=[r], gh=lambda *a: [{"name": "t", "bucket": "pass"}, {"name": "p", "bucket": "pending"}])
         self.assertEqual(check("ci-red-handover", green), [])
         nothing = pic(rows=[row("x", phase="motion", pr_url="u"), row("y", phase="review")], gh=checks)
@@ -302,13 +300,61 @@ class CriteriaTests(Home):
         self.assertEqual(firings, [])
         self.assertEqual({s["criterion"] for s in skipped}, {"ci-red-default", "ci-red-handover"})
 
-    def test_gh_json_reports_failures_and_keeps_json_from_a_failing_exit(self):
+    def test_gh_json_reports_failures_wrong_shapes_and_keeps_json_from_a_failing_exit(self):
         repo = SimpleNamespace(root=ROOT)
         for result in ((1, "", "not logged in"), (1, "garbage", "")):
             with mock.patch.object(factory, "run", FakeRun({("gh",): result})), self.assertRaises(factory.NotEvaluated):
-                factory.gh_json(repo, "pr", "checks", "u")
+                factory.gh_json(repo, list, "pr", "checks", "u")
+        for kind, out in ((list, "{}"), (dict, "[]"), (list, "[1]"), (list, "null")):
+            with self.subTest(kind=kind, out=out), mock.patch.object(factory, "run", FakeRun({("gh",): (0, out, "")})), \
+                    self.assertRaises(factory.NotEvaluated) as cm:
+                factory.gh_json(repo, kind, "run", "list")
+            self.assertNotIsInstance(cm.exception, factory.NoJson)
         with mock.patch.object(factory, "run", FakeRun({("gh",): (8, '[{"bucket": "fail"}]', "")})):
-            self.assertEqual(factory.gh_json(repo, "pr", "checks", "u"), [{"bucket": "fail"}])
+            self.assertEqual(factory.gh_json(repo, list, "pr", "checks", "u"), [{"bucket": "fail"}])
+
+    def test_a_wrong_shape_from_gh_is_not_evaluated_but_a_pr_without_checks_is_skipped(self):
+        repo = SimpleNamespace(root=ROOT, default="main")
+        gh = lambda *a: factory.gh_json(repo, *a)  # noqa: E731
+        listed = {("gh", "run"): (0, '{"a": 1}', ""), ("gh", "pr", "view"): (0, "[]", ""),
+                  ("gh", "pr", "checks"): (1, "", "no checks reported")}
+        reviewing = row("x", phase="review", pr_url="https://pr/1")
+        merged = row("y", phase="merged", pr_url="https://pr/2")
+        with mock.patch.object(factory, "run", FakeRun(listed)):
+            _, skipped = factory.evaluate(pic(gh=gh, rows=[reviewing, merged]), [
+                c for c in factory.load_criteria() if c["name"] in ("ci-red-default", "ci-red-handover",
+                                                                    "merged-not-cleaned")])
+        self.assertEqual({s["criterion"] for s in skipped}, {"ci-red-default", "merged-not-cleaned"})
+        with mock.patch.object(factory, "run", FakeRun(listed)):
+            self.assertEqual(check("ci-red-handover", pic(gh=gh, rows=[reviewing])), [])
+
+    def test_phase_criteria_are_not_evaluated_when_phases_cannot_be_trusted(self):
+        phase_based = [c for c in factory.load_criteria() if c["name"] in (
+            "dispatcher-missing", "quiet", "ended-undeclared", "blocked-unanswered", "handover-unacknowledged",
+            "review-loops", "ci-red-handover", "merged-not-cleaned")]
+        trusted = [c for c in factory.load_criteria() if c["name"] in ("past-limit", "wrong-model", "deep-stack")]
+        unplaced = {"id": "s9", "kind": "background", "status": "busy", "state": "working"}
+        for label, p in (("an unplaced session", pic(rows=[row("x")], sessions=[unplaced])),
+                         ("an unknown pull request state", pic(rows=[row("x", pr_state="unknown")]))):
+            with self.subTest(label):
+                firings, skipped = factory.evaluate(p, phase_based)
+                self.assertEqual(firings, [])
+                self.assertEqual([s["criterion"] for s in skipped], [c["name"] for c in phase_based])
+                self.assertIn("no working directory" if "unplaced" in label else "pull request state is unknown",
+                              skipped[0]["why"])
+                self.assertEqual(factory.evaluate(p, trusted)[1], [])
+        self.assertEqual(factory.evaluate(pic(rows=[row("x", branch=None, pr_state="unknown")]), phase_based)[1], [])
+
+    def test_last_activity_survives_a_null_start(self):
+        r = row("x", last_commit=NOW - 100)
+        self.assertEqual(factory.last_activity(pic(), r, lead("x", startedAt=None)), NOW - 100)
+        self.assertEqual(factory.last_activity(pic(), row("x"), lead("x", startedAt=None)), None)
+
+    def test_fold_skips_records_without_a_string_id(self):
+        records = [{"repo": ROOT, "decision": "escalated"}, {"repo": ROOT, "id": 7, "cleared": True},
+                   {"repo": ROOT, "id": ["a"], "criterion": "c"}, fired("a1")]
+        folded, misses = factory.fold(records)
+        self.assertEqual(([f["id"] for f in folded], misses), (["a1"], []))
 
 
 class RunTests(unittest.TestCase):
@@ -351,7 +397,8 @@ class Harness(Home):
 
     def cli(self, *argv, answers=None, sessions=(DISPATCHER | {"name": "dispatcher-repo"},), entries=(), at=None):
         base = repo_answers([task_entry(s) for s in entries], sessions)
-        base[("claude", "-p")] = (0, "", "")
+        base[("claude", "-p")] = reply()
+        base[("gh", "pr", "list")] = (0, "[]", "")
         self.fake = TimedRun({**base, **(answers or {})})
         if at is not None:
             self.clock = at
@@ -370,6 +417,15 @@ class Harness(Home):
         kw.setdefault("sessions", [DISPATCHER | {"name": "dispatcher-repo"}, self.overtime()])
         kw.setdefault("entries", ["x"])
         return self.cli("watch", **kw)
+
+
+def reply(decisions=(), sent=True, cost=0.15):
+    doc = {"structured_output": {"sent": sent, "decisions": list(decisions)}}
+    return 0, json.dumps({**doc, **({"total_cost_usd": cost} if cost is not None else {})}), ""
+
+
+def choice(fid, decision="escalated", reason="because"):
+    return {"id": fid, "decision": decision, "reason": reason}
 
 
 class TimedRun(FakeRun):
@@ -444,29 +500,120 @@ class WatchTests(Harness):
         self.assertIn(f"{record['id']}  past-limit  x  undecided", out)
 
     def test_the_launch_argv(self):
-        self.transcript("{sid}.jsonl", NOW - 60)
+        path = self.transcript("{sid}.jsonl", NOW - 60)
+        entries = [{"timestamp": "T0", "message": {"role": "user", "content": "start"}}] + [
+            {"timestamp": f"T{i}", "message": {"role": "assistant", "content": [
+                {"type": "text", "text": "x" * 400}, {"type": "tool_use", "name": "Bash", "input": {"cmd": "ls"}}]}}
+            for i in range(1, 17)]
+        entries.append({"timestamp": "TR", "message": {"role": "user", "content": [
+            {"type": "tool_result", "content": [{"type": "text", "text": "ok"}]}]}})
+        path.write_text("partial\n" + "".join(json.dumps(e) + "\nnot json\n" for e in entries) + '{"no": "message"}\n')
         self.tick()
         [argv] = self.claude_runs()
-        fac = str(factory.FACTORY)
-        self.assertEqual(argv[:6], ["claude", "-p", "--model", "sonnet", "--permission-mode", "dontAsk"])
-        at = argv.index("--allowedTools")
-        self.assertEqual(argv[at + 1:at + 9], [f"Bash({fac} {c}:*)" for c in ("firing", "status", "health", "firings")]
-                         + ["Read", "SendMessage", "ToolSearch", "ListAgents"])
-        self.assertEqual(argv[argv.index("--add-dir") + 1], str(self.home / ".claude" / "projects"))
-        self.assertEqual(argv[argv.index("--plugin-dir") + 1], str(factory.PLUGIN_ROOT))
-        self.assertEqual(argv[argv.index("--append-system-prompt") + 1], "SITE MANAGER RULES")
-        prompt = argv[-1]
-        head, _, body = prompt.partition("\n\n")
-        self.assertEqual(head, f"Job: watch. Repo: {ROOT}. The dispatcher's session name is dispatcher-repo. "
-                               f"The factory command is {fac}.")
+        self.assertEqual(argv[:-1], [
+            "claude", "-p", "--model", "sonnet", "--permission-mode", "dontAsk", "--allowedTools", "SendMessage",
+            "ToolSearch", "--output-format", "json", "--json-schema", json.dumps(factory.RUN_SCHEMA),
+            "--append-system-prompt", "SITE MANAGER RULES"])
+        schema = factory.RUN_SCHEMA
+        self.assertEqual(schema["required"], ["sent", "decisions"])
+        self.assertEqual(schema["properties"]["decisions"]["items"]["required"], ["id", "decision", "reason"])
+        self.assertEqual(schema["properties"]["decisions"]["items"]["properties"]["decision"]["enum"],
+                         ["escalated", "suppressed"])
+        head, _, body = argv[-1].partition("\n\n")
+        self.assertEqual(head, f"Job: watch. Repo: {ROOT}. The dispatcher's session name is dispatcher-repo.")
         [sent] = json.loads(body)
         self.assertEqual(sent["id"], self.records()[0]["id"])
         self.assertEqual((sent["criterion"], sent["escalate"], sent["slug"], sent["subject"]),
                          ("past-limit", "always", "x", "x"))
         self.assertTrue(sent["what"] and sent["detail"])
-        self.assertEqual(sent["session_id"], SID)
-        self.assertEqual(sent["transcript"], str(self.home / ".claude" / "projects" / "proj" / f"{SID}.jsonl"))
+        self.assertNotIn("session_id", sent)
+        self.assertNotIn("transcript", sent)
+        self.assertEqual(sent["task"], {"phase": "motion", "state": None, "session": "working", "elapsed": "3h",
+                                        "last_commit": "?", "dirty": None, "ahead": None, "behind": None,
+                                        "pr_state": "none", "pr_url": "", "overtime": True})
+        tail = sent["transcript_tail"]
+        self.assertEqual(len(tail), 15)
+        self.assertEqual(tail[0][:20], "T3 assistant: " + "x" * 6)
+        self.assertEqual(tail[-1], "TR user: [result] ok")
+        self.assertEqual(tail[-2], "T16 assistant: " + "x" * 300 + ' [tool Bash] {"cmd": "ls"}')
         self.assertEqual(self.fake.timeouts[-1], 600)
+
+    def test_a_firing_without_a_transcript_or_a_task_carries_no_tail(self):
+        self.tick(sessions=[DISPATCHER | {"name": "dispatcher-repo"}, self.overtime()])
+        [sent] = json.loads(self.claude_runs()[0][-1].partition("\n\n")[2])
+        self.assertNotIn("transcript_tail", sent)
+        self.assertIn("task", sent)
+
+    def decisions(self):
+        return [(r["id"], r["decision"], r["reason"], r["by"]) for r in self.records() if "decision" in r]
+
+    def test_decisions_are_recorded_from_the_runs_output(self):
+        self.seeded_run(choice("aaa", "escalated", " red "))
+        self.assertEqual(self.decisions(), [("aaa", "escalated", "red", "site-manager")])
+
+    def test_output_lines_show_the_decision_and_the_cost(self):
+        self.seed("firings", [fired("aaa", escalate="judgment", criterion="blocked-unanswered")])
+        self.seed("tasks", [{"repo": ROOT, "slug": "x", "state": "blocked", "ts": iso(NOW - 2 * HOUR)}])
+        _, out, _ = self.cli("watch", entries=["x"], answers={("claude", "-p"): reply([choice("aaa", "suppressed")])})
+        self.assertIn("aaa  blocked-unanswered  x  suppressed", out)
+        self.assertTrue(out.endswith("site manager run cost $0.15\n"))
+        self.assertEqual(self.decisions(), [("aaa", "suppressed", "because", "site-manager")])
+
+    def test_no_cost_line_without_a_numeric_cost(self):
+        _, out, _ = self.tick(answers={("claude", "-p"): reply(cost=None)})
+        self.assertNotIn("cost", out)
+
+    def seeded_run(self, *decisions, sent=True, escalate="judgment"):
+        """One tick with firing `aaa` open and undecided: a blocked task (judgment) or an overtime lead (always)."""
+        if escalate == "judgment":
+            self.seed("firings", [fired("aaa", criterion="blocked-unanswered", escalate="judgment")])
+            self.seed("tasks", [{"repo": ROOT, "slug": "x", "state": "blocked", "ts": iso(NOW - 2 * HOUR)}])
+            kw = {"sessions": [DISPATCHER | {"name": "dispatcher-repo"}]}
+        else:
+            self.seed("firings", [fired("aaa")])
+            kw = {}
+        _, out, _ = self.tick(answers={("claude", "-p"): reply(decisions, sent)}, **kw)
+        return out
+
+    def test_suppressed_for_an_always_firing_is_not_recorded(self):
+        out = self.seeded_run(choice("aaa", "suppressed"), escalate="always")
+        self.assertEqual(self.decisions(), [])
+        self.assertIn("aaa  past-limit  x  undecided", out)
+
+    def test_sent_false_records_no_escalation(self):
+        self.seeded_run(choice("aaa", "escalated"), sent=False)
+        self.assertEqual(self.decisions(), [])
+
+    def test_sent_false_still_records_a_suppression(self):
+        self.seeded_run(choice("aaa", "suppressed"), sent=False)
+        self.assertEqual(self.decisions(), [("aaa", "suppressed", "because", "site-manager")])
+
+    def test_ids_not_sent_malformed_and_repeated_decisions_are_ignored(self):
+        self.seeded_run(choice("zzz"), choice("aaa", "maybe"), choice("aaa", "escalated", "  "), "junk",
+                        {"id": ["aaa"], "decision": "escalated", "reason": "r"}, {"id": "aaa"},
+                        choice("aaa", "escalated", "first"), choice("aaa", "suppressed", "second"))
+        self.assertEqual(self.decisions(), [("aaa", "escalated", "first", "site-manager")])
+
+    def test_output_that_is_not_the_expected_json_exits_1_and_records_nothing(self):
+        for answer in ((0, "", ""), (0, "not json", ""), (0, "[]", ""), (0, "{}", ""),
+                       (0, json.dumps({"structured_output": {"sent": True}}), ""),
+                       (0, json.dumps({"structured_output": {"sent": True, "decisions": "x"}}), ""),
+                       (1, reply([choice("aaa")])[1], "boom")):
+            with self.subTest(answer=answer):
+                self.seed("firings", [fired("aaa", escalate="judgment")])
+                code, out, err = self.tick(answers={("claude", "-p"): answer})
+                self.assertEqual(code, 1)
+                self.assertIn("aaa  past-limit  x  undecided", out)
+                self.assertEqual(self.decisions(), [])
+                self.store.joinpath("firings.jsonl").unlink()
+
+    def test_an_open_blocked_firing_survives_an_unplaced_session(self):
+        self.seed("firings", [fired("aaa", criterion="blocked-unanswered", escalate="judgment")])
+        unplaced = {"id": "s9", "kind": "background", "status": "busy", "state": "working"}
+        code, out, _ = self.cli("watch", sessions=[DISPATCHER | {"name": "dispatcher-repo"}, unplaced], entries=["x"])
+        self.assertEqual(code, 0)
+        self.assertIn("not evaluated: blocked-unanswered: session s9 has no working directory", out)
+        self.assertEqual(self.records(), [fired("aaa", criterion="blocked-unanswered", escalate="judgment")])
 
     def test_an_escalated_firing_is_not_sent_again(self):
         self.tick()
@@ -576,69 +723,50 @@ class WatchTests(Harness):
         self.assertEqual(code, 1)
         self.assertIn("no such file", err)
 
-    def test_the_decision_the_run_recorded_is_printed(self):
-        self.seed("firings", [fired("aaa")])
-        self.fake = None
-
-        class Deciding(TimedRun):
-            def __call__(inner, argv, cwd=None, timeout=None):
-                if argv[:2] == ["claude", "-p"]:
-                    self.seed("firings", [decided("aaa", "escalated", ts=NOW)])
-                return super().__call__(argv, cwd, timeout)
-        with mock.patch.object(factory, "run", Deciding(repo_answers([task_entry("x")], [
-                DISPATCHER | {"name": "dispatcher-repo"}, self.overtime()], {("claude", "-p"): (0, "", "")}))), \
-                redirect_stdout(io.StringIO()) as out:
-            self.assertEqual(factory.main(["watch"]), 0)
-        self.assertIn("aaa  past-limit  x  escalated", out.getvalue())
-
 
 class FiringTests(Harness):
     def setUp(self):
         super().setUp()
-        self.seed("firings", [fired("abc111", escalate="judgment"), fired("abc222", escalate="judgment"),
-                              fired("def333", criterion="ci-red-default", subject="ci")])
+        self.seed("firings", [fired("abc111", escalate="judgment"), decided("abc111", "escalated"),
+                              fired("abc222", escalate="judgment"), decided("abc222", "escalated"),
+                              fired("def333", criterion="ci-red-default", subject="ci"),
+                              decided("def333", "escalated"),
+                              fired("sss444", escalate="judgment"), decided("sss444", "suppressed"),
+                              fired("uuu555", escalate="judgment"), "junk", {"repo": ROOT, "decision": "escalated"}])
 
     def refused(self, *argv, why):
         code, _, err = self.cli(*argv)
         self.assertEqual(code, 2, err)
         self.assertIn(why, err)
 
-    def test_decisions_by_prefix_id(self):
-        code, _, _ = self.cli("firing", "abc1", "suppressed", "--reason", " noise ")
-        self.assertEqual(code, 0)
-        self.assertEqual(self.records()[-1], {"ts": iso(NOW), "repo": ROOT, "id": "abc111", "decision": "suppressed",
-                                              "reason": "noise", "by": "site-manager"})
-        self.cli("firing", "def", "escalated", "--reason", "red")
-        self.assertEqual((self.records()[-1]["id"], self.records()[-1]["decision"]), ("def333", "escalated"))
+    def outcomes(self):
+        return [(r["id"], r["outcome"]) for r in self.records() if "outcome" in r]
+
+    def test_an_outcome_by_prefix_id_and_the_last_one_wins(self):
+        self.assertEqual(self.cli("firing", "def", "ignored")[0], 0)
+        self.assertEqual(self.records()[-1], {"ts": iso(NOW), "repo": ROOT, "id": "def333", "outcome": "ignored"})
+        self.cli("firing", "def", "acted")
+        self.assertEqual(self.outcomes(), [("def333", "ignored"), ("def333", "acted")])
+        folded, _ = factory.fold([r for r in self.records() if isinstance(r, dict)])
+        self.assertEqual([f["outcome"] for f in folded if f["id"] == "def333"], ["acted"])
 
     def test_refusals(self):
-        self.refused("firing", "zzz", "escalated", "--reason", "r", why="no firing matches")
-        self.refused("firing", "abc", "escalated", "--reason", "r", why="matches 2 firings")
-        self.refused("firing", "abc1", "escalated", why="needs a --reason")
-        self.refused("firing", "abc1", "escalated", "--reason", "  ", why="needs a --reason")
-        self.refused("firing", "def", "suppressed", "--reason", "r", why="`always`")
-        self.refused("firing", "abc1", "acted", why="was not escalated")
-        self.refused("firing", "abc1", "acted", "--reason", "r", why="--reason")
-        self.cli("firing", "abc1", "escalated", "--reason", "r")
-        self.refused("firing", "abc1", "suppressed", "--reason", "r", why="already escalated")
-        self.refused("firing", "abc1", "escalated", "--reason", "r", why="already escalated")
-        self.seed("firings", [{"ts": iso(NOW), "repo": ROOT, "id": "abc222", "cleared": True}])
-        self.refused("firing", "abc2", "escalated", "--reason", "r", why="already cleared")
-        self.assertEqual(len([r for r in self.records() if "decision" in r]), 1)
+        self.refused("firing", "zzz", "acted", why="no firing matches")
+        self.refused("firing", "abc", "acted", why="matches 2 firings")
+        self.refused("firing", "sss", "acted", why="was not escalated")
+        self.refused("firing", "uuu", "ignored", why="was not escalated")
+        self.assertEqual(self.outcomes(), [])
+        for argv in (("firing", "abc1", "escalated"), ("firing", "abc1", "acted", "--reason", "r")):
+            with self.subTest(argv), redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                factory.parse_args(list(argv))
 
-    def test_an_always_firing_can_be_escalated_and_outcomes_follow_escalation_only(self):
-        self.cli("firing", "def", "escalated", "--reason", "red")
-        self.cli("firing", "def", "ignored")
-        self.cli("firing", "def", "acted")
-        self.assertEqual([r["outcome"] for r in self.records() if "outcome" in r], ["ignored", "acted"])
-        folded, _ = factory.fold(self.records())
-        self.assertEqual([f["outcome"] for f in folded if f["id"] == "def333"], ["acted"])
+    def test_an_outcome_is_allowed_after_the_firing_cleared(self):
         self.seed("firings", [{"ts": iso(NOW), "repo": ROOT, "id": "def333", "cleared": True}])
-        self.assertEqual(self.cli("firing", "def", "ignored")[0], 0)
+        self.assertEqual(self.cli("firing", "def", "acted")[0], 0)
 
-    def test_a_suppressed_firing_has_no_outcome(self):
-        self.cli("firing", "abc1", "suppressed", "--reason", "r")
-        self.refused("firing", "abc1", "acted", why="was not escalated")
+    def test_a_record_without_a_string_id_does_not_crash_the_commands(self):
+        self.assertEqual(self.cli("firings")[0], 0)
+        self.assertEqual(self.cli("firing", "abc1", "acted")[0], 0)
 
 
 class MissTests(Harness):

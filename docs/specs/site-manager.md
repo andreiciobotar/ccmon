@@ -8,7 +8,7 @@ The merge job is a separate task (`site-manager-merge`, stacked on this one). No
 Checked on this machine (macOS, Claude Code 2.1.325), 2026-11-14.
 1. **Scheduler.** A LaunchAgent loaded with `launchctl bootstrap gui/<uid> <plist>` (`StartInterval` 1800) ran a script with no model session and no terminal; inside it `gh auth status` was logged in, `claude agents --json` listed sessions, `claude -p --model haiku` answered, and `osascript -e 'display notification ...'` exited 0. `launchctl bootout gui/<uid>/<label>` removed it. The job sees only the `PATH` its plist gives it. There is no crontab on this machine.
 2. **Fresh run.** `claude -p --model sonnet --permission-mode dontAsk --allowedTools "Bash(factory:*)" Read SendMessage ToolSearch ListAgents --plugin-dir <plugin> "<prompt>"` ran `factory status`, read a file, ran `git log` (read-only git is not denied in `dontAsk`), and its `SendMessage` to a session name arrived in that session as a `<cross-session-message>` (sent to `site-manager`, received from `site-manager-5f`). `SendMessage` is a deferred tool there: the run loads it with `ToolSearch`. The model used was `claude-sonnet-5-5`.
-3. In that run `which factory` was the main checkout's copy, not the `--plugin-dir` one (the known limit in `factory-events.md`). So the prompt gives the absolute path of `factory`, and the allowed commands name that path.
+3. A first live tick let the run record its own decisions with `factory firing` under `--allowedTools "Bash(<factory> firing:*)"`. Sonnet wrote one compound shell command (a variable, a loop, `tail` on transcripts); `dontAsk` denied it, the run sent its escalation anyway and recorded nothing, so the next tick would have escalated again. Hence the design below: the run gets its evidence in the prompt, has no shell and no file tools, and returns its decisions as structured output that `watch` records. Verified: `claude -p --model sonnet --permission-mode dontAsk --allowedTools SendMessage ToolSearch --output-format json --json-schema '<schema>' "<prompt>"` sent its message to a named session and printed one JSON object whose `structured_output` matched the schema (also `is_error`, `total_cost_usd`: $0.15 for that run).
 4. `claude agents --json --all` rows carry `name`, `sessionId`, `kind`, `status`, `state`, `cwd`; a lead's transcript is `~/.claude/projects/*/<sessionId>.jsonl` with its subagents under `<sessionId>/subagents/`.
 5. `events.jsonl`, full count (172 lines, one repo): `SubagentStart` carries `role` (`reviewer` 10, `coder` 6, `explorer` 5) and `model` null on all 21; `SubagentStop` and `PostToolUse` carry the model (`claude-opus-5-5` for reviewer, `claude-sonnet-5-5` coder, `claude-haiku-5-5` explorer; never null for those roles); `TaskStarted` carries `lead_model` (alias, `fable`), lead events carry `claude-fable-5-2` or null. A pinned alias is a substring of the model id it resolves to.
 6. `gh run list --branch main --limit 20 --json conclusion,status,url,workflowName` and `gh pr checks <url> --json name,bucket` (bucket `pass`, `fail`, `pending`, `skipping`, `cancel`) answer as expected; `gh pr checks` exits non-zero when a check fails but still prints the JSON.
@@ -23,7 +23,7 @@ Each criterion is one small function in `factory/bin/factory` that takes the gat
 | `past-limit` | always | - | task | its row's `overtime` is true (the same flag `status` shows: lead working past `task_time_limit_hours`) |
 | `ci-red-default` | always | - | workflow | per workflow on the default branch, the newest completed run whose conclusion is not `cancelled`, `skipped` or `neutral` is not `success` |
 | `dispatcher-missing` | always | - | repo | some task is in `motion`, `blocked` or `review`, and the number of unfinished sessions named as the dispatcher is not exactly one |
-| `quiet` | judgment | 20 minutes | task | phase `motion`, lead session working (`status` busy or `state` working), and neither a transcript write (lead or its subagents, by file mtime) nor a commit for more than the threshold |
+| `quiet` | judgment | 20 minutes | task | phase `motion`, lead session working (`status` busy or `state` working), and its last activity (below) is older than the threshold |
 | `ended-undeclared` | judgment | 10 minutes | task | phase `motion`, sessions can be told and none is unfinished in it (the lead stopped without declaring a hand-over or a block), last activity older than the threshold |
 | `blocked-unanswered` | judgment | 30 minutes | task | phase `blocked` and declared more than the threshold ago |
 | `handover-unacknowledged` | judgment | 24 hours | task | phase `review`, declared `handed-over` more than the threshold ago |
@@ -37,7 +37,7 @@ Each criterion is one small function in `factory/bin/factory` that takes the gat
 
 Not shipped: cost far above the median landed task, and the lead doing most of the work itself. Both need cost per task, which `cost-in-money` is building; a second token count here would be a second owner. They become two lines in `criteria.json` and two functions when it lands.
 
-A criterion whose inputs cannot be read (sessions not listable, `gh` failing, no event log) is not evaluated: it fires nothing and is reported as `not evaluated: <name>: <why>`.
+A criterion whose inputs cannot be read (sessions not listable, `gh` failing, no event log) is not evaluated: it fires nothing and is reported as `not evaluated: <name>: <why>`. A criterion that reads a task's phase is also not evaluated when the phases cannot be trusted: an unfinished session has no working directory (`unplaced_block`), or some task's pull request state is `unknown`; `collect` then falls back to `motion`, and acting on that would clear open firings and raise false ones. `gh` output of an unexpected shape (not the list or object asked for) counts as `gh` failing. In `ci-red-handover`, a pull request for which `gh pr checks` prints no JSON (it has no checks) is skipped, not a failure of the criterion.
 
 A firing is `{"criterion", "escalate", "slug" (null for repo-wide ones), "subject", "detail", "what"}`. `subject` identifies the thing within the criterion (the slug, `<slug>/<role>`, the workflow name, or `-`); `detail` is one line of evidence (numbers, URL, session id).
 
@@ -58,15 +58,12 @@ The scheduled tick. In order:
    - otherwise (escalated, or suppressed recently): nothing. An escalation is never repeated while its condition lasts.
 5. Nothing to send: print `nothing new` and exit 0. **No model runs.**
 6. `dispatcher-missing` is handled here, since no model can message a session that is not there: show a desktop notification (`osascript -e 'display notification "<detail>" with title "factory: <repo dir>"'`); on exit 0 append the decision `escalated`, by `watch`, reason `notified on this machine: no dispatcher session to message`; otherwise leave it undecided for the next tick. While it fires, nothing else is sent (it stays undecided and goes out on the first tick with a dispatcher) and no model runs.
-7. Otherwise start one site manager run (below) with the firings to send, wait for it (10 minute timeout), then print one line per sent firing with its decision, or `undecided` (sent again next tick). Exit 1 when the run failed to start or timed out, else 0.
+7. Otherwise start one site manager run (below) with the firings to send and wait for it (10 minute timeout). From its structured output, append a decision (by `site-manager`) for each sent firing it names, except: `suppressed` for an `always` firing is not recorded (the bypass is enforced here, not left to the model); and when the output says the message was not sent, no `escalated` is recorded. Ids that were not sent are ignored. Then print one line per sent firing with its decision, or `undecided` (sent again next tick), and the run's cost. Exit 1 when the run failed to start, timed out, or printed no usable output; else 0.
 
 Each tick prints a first line `<UTC time> watch <repo dir>` so the log file reads as a history.
 
-### `factory firing <id> escalated|suppressed --reason <text>` — the site manager
-Appends the decision. `<id>` is an id or a unique prefix among this repo's firings. Refused (exit 2): unknown or ambiguous id; a firing that is cleared or already decided; `suppressed` for an `always` firing (the bypass is enforced here, not left to the model); an empty reason.
-
 ### `factory firing <id> acted|ignored` — the dispatcher
-Appends the outcome of an escalation: `acted` when the dispatcher or the human did something because of it, `ignored` when it was noise. Refused unless the firing's decision is `escalated`; `--reason` is refused with these two. The last outcome wins.
+Appends the outcome of an escalation: `acted` when the dispatcher or the human did something because of it, `ignored` when it was noise. `<id>` is an id or a unique prefix among this repo's firings; unknown or ambiguous is refused (exit 2), and so is a firing whose decision is not `escalated`. The last outcome wins.
 
 ### `factory miss <text> [--slug <slug>] [--firing <id>]` — the dispatcher
 Records a problem the dispatcher or the human caught that the site manager had not escalated. `--firing` names the firing when one existed and was suppressed or undecided (the filter was wrong); without it nothing fired (a criterion is missing or too loose). Refused when `--firing` names an escalated firing: that is `factory firing <id> acted`.
@@ -90,19 +87,23 @@ Append-only, written with `append()`. Every record has `ts` and `repo` (the main
 - outcome: `id`, `outcome` (`acted`|`ignored`).
 - cleared: `id`, `cleared: true`.
 - miss: `miss` (the text), `slug`, `firing` (an id or null).
-Folding: a firing is its `fired` record plus its first decision, last outcome and whether cleared. Lines that are not JSON objects, or belong to another repo, are skipped; a missing file is an empty log.
+Folding: a firing is its `fired` record plus its first decision, last outcome and whether cleared. Lines that are not JSON objects, belong to another repo, or are not a miss and lack a string `id`, are skipped; a missing file is an empty log.
 
 ## The site manager run
 `factory/roles/site-manager.md` holds the persona's rules. `watch` starts a run, in the main checkout, with (one function builds it, as `build_launch_argv` does for a lead):
 ```
-claude -p --model sonnet --permission-mode dontAsk
-  --allowedTools "Bash(<factory> firing:*)" "Bash(<factory> status:*)" "Bash(<factory> health:*)" "Bash(<factory> firings:*)" Read SendMessage ToolSearch ListAgents
-  --add-dir ~/.claude/projects
-  --plugin-dir <plugin root> --append-system-prompt <roles/site-manager.md> "<prompt>"
+claude -p --model sonnet --permission-mode dontAsk --allowedTools SendMessage ToolSearch
+  --output-format json --json-schema '<schema>' --append-system-prompt <roles/site-manager.md> "<prompt>"
 ```
-The model is pinned in code (`SITE_MANAGER_MODEL = "sonnet"`). The prompt: `Job: watch. Repo: <root>. The dispatcher's session name is <name>. The factory command is <absolute path>.` and the firings to send as JSON, each with `id`, `criterion`, `escalate`, `slug`, `subject`, `detail`, `what`, and for a task firing the lead's `session_id` and `transcript` path when found. Each run is fresh: it has no memory but the log.
+The model is pinned in code (`SITE_MANAGER_MODEL = "sonnet"`). The run has no shell and no file tools: it cannot change anything, and all it can do besides answering is message a session. Each run is fresh: it has no memory.
 
-Rules in the role file: read-only (it writes only through `factory firing`); `always` firings are passed on unjudged; for a `judgment` firing read the evidence (the tail of the lead's transcript, `factory status`) and decide whether the dispatcher would act on it now; one `SendMessage` to the dispatcher per run, first line `ESCALATION: <repo dir>`, then one line per escalated firing `<id> <criterion> <subject>: <diagnosis in one sentence, with the evidence>`; record `escalated` only after the send succeeded, `suppressed` with a one-line reason otherwise; never message a lead; never merge, clean, start or stop anything; when in doubt between noise and a real problem that costs money or blocks the human, escalate.
+The prompt: `Job: watch. Repo: <root>. The dispatcher's session name is <name>.` and the firings to send as JSON. Each has `id`, `criterion`, `escalate`, `slug`, `subject`, `detail`, `what`, and for a task firing the evidence, gathered by `watch`:
+- `task`: from its status row: `phase`, `state`, `session`, `elapsed` and `last_commit` as ages, `dirty`, `ahead`, `behind`, `pr_state`, `pr_url`, `overtime`.
+- `transcript_tail`: the last 15 entries of the lead's transcript, read from its final 64 KiB, one string each: `<timestamp> <user|assistant>: ` then, per content block, the text, `[tool <name>] <input>` or `[result] <content>`, each cut to 300 characters. Absent when no transcript is found.
+
+The schema: `{"sent": boolean, "decisions": [{"id", "decision": "escalated"|"suppressed", "reason"}]}`, all required. `sent` says whether the one `SendMessage` succeeded (true as well when nothing needed sending).
+
+Rules in the role file: `always` firings are passed on unjudged; for a `judgment` firing weigh the evidence given and decide whether the dispatcher would act on it now; one `SendMessage` to the dispatcher per run, first line `ESCALATION: <repo dir>`, then one line per escalated firing `<id> <criterion> <subject>: <diagnosis in one sentence, with the evidence>`; never message a lead; when in doubt between noise and a real problem that costs money or blocks the human, escalate.
 
 ## The dispatcher
 `factory/skills/dispatch/SKILL.md` gains a section: what the site manager is; `factory schedule install` on the human's word and `factory schedule status` in the on-start sweep; an `ESCALATION:` message is a teammate's report, checked against `factory status` and shown to the human when it needs them; after handling each escalated firing run `factory firing <id> acted|ignored`; whenever it or the human catches a problem that was not escalated run `factory miss`; `factory firings` is the record the human uses to decide the dispatcher's model.
@@ -115,23 +116,24 @@ Rules in the role file: read-only (it writes only through `factory firing`); `al
 ## Tests (`factory/tests/test_health.py`, standard library, same harness style as `test_factory.py`)
 - Criteria file: the shipped file loads; an unknown name, a bad `escalate`, a missing or non-positive threshold are refused; a deleted line turns its criterion off.
 - Each criterion on both sides of its condition and its threshold, from a hand-built picture (rows, sessions, events, declared records, faked `gh` answers), including: `dispatcher-missing` with zero, one and two sessions and with no live task; `ci-red-default` with a newer cancelled run over an older failure and with two workflows; `wrong-model` with a null model and with the lead's model; `deep-stack` at and above the threshold; a slug reused (events before the last `TaskStarted` ignored).
-- Not evaluated: sessions unlistable, `gh` failing, are reported and fire nothing.
+- Not evaluated: sessions unlistable, `gh` failing or answering with the wrong shape, an unplaced session, an `unknown` pull request state, are reported and fire nothing; in `watch`, an open `blocked-unanswered` firing plus an unplaced session leaves no `cleared` record.
 - `health`: table and `--json`; writes nothing to the store.
-- `watch`: nothing fired starts no `claude`; a new firing is logged and sent; a firing already escalated is not sent again; an undecided one is sent again; a suppressed one is sent again only after `RESURFACE_MINUTES`; a condition that ended is cleared and fires anew later under a new id; a criterion that was not evaluated clears nothing; `dispatcher-missing` notifies, records `escalated` by `watch`, runs no `claude` and holds the other firings; a failed notification leaves it undecided; the launch argv (model, permission mode, allowed tools naming the absolute `factory`, role text, prompt carrying the firings); a timed-out run exits 1.
-- `firing`: each refusal; `always` cannot be suppressed; prefix ids; outcomes only on escalated.
+- `watch`: nothing fired starts no `claude`; a new firing is logged and sent; a firing already escalated is not sent again; an undecided one is sent again; a suppressed one is sent again only after `RESURFACE_MINUTES`; a condition that ended is cleared and fires anew later under a new id; a criterion that was not evaluated clears nothing; `dispatcher-missing` notifies, records `escalated` by `watch`, runs no `claude` and holds the other firings; a failed notification leaves it undecided; the launch argv (model, permission mode, exactly the two allowed tools, the schema, role text, prompt carrying the firings with `task` and `transcript_tail` built from a transcript file in the temporary home); decisions recorded from the run's output; `suppressed` for an `always` firing not recorded; `sent` false records no escalation; an id that was not sent ignored; output that is not the expected JSON exits 1 and records nothing; a timed-out run exits 1.
+- `firing`: each refusal; prefix ids; outcomes only on escalated; the last outcome wins.
 - `miss` and `firings`: the summary numbers, zero denominators, `--json`.
 - `schedule`: the plist content (parsed with `plistlib`), the `launchctl` calls made, `remove` and `status`, the refusal off macOS, the worktree warning; `launchctl` is never really run.
 
 ## Live check
 - `factory health` and `factory health --json` against this repo's tasks; the output goes in the pull request.
 - `factory schedule install`, `status`, `remove` once on this machine, from this worktree, removed at once.
-- One real `factory watch` tick with `--dispatcher` set to this lead's own session name, so that the Sonnet run's `ESCALATION:` lands here and not with the dispatcher; then `factory firings`. The pull request says exactly what was run.
+- One real `factory watch` tick with `--dispatcher` set to this lead's own session name, so that the Sonnet run's `ESCALATION:` lands here and not with the dispatcher, with two thresholds lowered for the tick so that something fires; then `factory firings`. The test log is moved out of the store afterwards. The pull request says exactly what was run.
 
 ## Known limits
 - Thresholds are guesses; the log is how they get tuned.
 - `quiet` reads file mtimes; a lead waiting on a long foreground command looks quiet. That is what the judgment step is for.
 - `review-loops` counts reviewer dispatches, not `CHANGES_NEEDED` verdicts (the events do not carry verdicts).
 - `dispatcher-missing` reaches the human only as a desktop notification on this machine.
-- The site manager's own sessions are recorded by the hooks with role `other`.
+- A site manager run costs about $0.15 (one measured run); `watch` prints each run's cost. The runs load no plugin, so the hooks record no events for them.
+- If a run sends its message and then dies before answering, its escalations stay undecided and are sent again next tick: a duplicate is possible, a lost escalation is not.
 - `watch.log` grows without bound (a few lines per tick).
 - macOS only for the scheduler; elsewhere the cron line is printed, not installed.
