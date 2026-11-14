@@ -140,8 +140,9 @@ class FixtureStore(Store):
             ev("%sT13:00:00Z" % DAY, "", defects=[{"caught_by": "reviewer"}, {"caught_by": "reviewer"}, {"caught_by": "tests"},
                                                    {"caught_by": "weird"}, "str", {}], slowed=["slow two", 7, "slow three"])])
         self.log("tasks.jsonl", [
+            {"ts": "%sT10:55:00Z" % DAY, "repo": ALPHA, "slug": "a1", "state": "handed-over", "deliverable": "x"}])
+        self.log("tasks-2026-11.jsonl", [
             {"ts": "%sT10:01:00Z" % DAY, "repo": ALPHA, "slug": "a1", "state": "working"},
-            {"ts": "%sT10:55:00Z" % DAY, "repo": ALPHA, "slug": "a1", "state": "handed-over", "deliverable": "x"},
             {"ts": "%sT10:56:00Z" % DAY, "repo": ALPHA, "slug": "a1"},
             {"ts": "%sT09:00:00Z" % DAY, "repo": BETA, "slug": "b1", "state": "acknowledged"}])
         fb = lambda i, ts, text, **kw: {"ts": "2026-11-11T%s:00Z" % ts, "repo": ALPHA, "slug": "a1", "role": "reviewer",  # noqa: E731
