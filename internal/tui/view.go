@@ -140,7 +140,7 @@ func (m *model) header(p paint) string {
 
 func (m *model) subheader(p paint) string {
 	th := m.th
-	var left string
+	var left, warn string
 	switch {
 	case m.filterIn:
 		left = p.b("/ ", th.Purple) + p.t(m.filter, th.Text) + p.t("█", th.Purple) + p.t("  enter to keep · esc to clear", th.Faint)
@@ -165,6 +165,12 @@ func (m *model) subheader(p paint) string {
 		if m.follow {
 			left += p.t("  · ", th.Faint) + p.b("following", th.Pink)
 		}
+		if um := m.totals().unpricedModels; len(um) > 0 {
+			for i := range um {
+				um[i] = shortModel(um[i])
+			}
+			warn = p.t("  · ", th.Faint) + p.b("no price for "+strings.Join(um, ", ")+": excluded from cost", th.Yellow)
+		}
 	}
 	right := ""
 	if m.toast.text != "" {
@@ -174,7 +180,7 @@ func (m *model) subheader(p paint) string {
 		}
 		right = p.pill(trunc(m.toast.text, max(10, m.w/2)), col)
 	}
-	left = trunc(left, m.w-width(right)-3)
+	left = trunc(left, m.w-width(right)-3-width(warn)) + warn
 	pad := m.w - 1 - width(left) - width(right)
 	if pad < 0 {
 		pad = 0
@@ -331,11 +337,19 @@ func (m *model) helpScreen(p paint) []string {
 	}
 	lines = append(lines, "",
 		p.t("r cycles 24h · 7d · 30d · all; on the error screen it retries.", th.Faint),
-		p.t("s sorts by recent · tokens · subagent share.", th.Faint),
+		p.t("s sorts by recent · cost · subagent share.", th.Faint),
 		p.t("A dot pulses on sessions written in the last 30 seconds.", th.Faint))
 	bw := 0
 	for _, l := range lines {
 		bw = max(bw, width(l))
+	}
+	if m.prices.AsOf != "" { // second line, so a short terminal still shows it; the path gives way to keep the box as wide as the rest
+		pre, post := "Prices: ", fmt.Sprintf(" (%s, as of %s)", m.prices.Currency, m.prices.AsOf)
+		path := []rune(m.prices.Path)
+		if room := bw - width(pre) - width(post); len(path) > room {
+			path = append([]rune("…"), path[max(0, len(path)-max(room, 1)+1):]...)
+		}
+		lines[1] = p.t(pre+string(path)+post, th.Faint) // in place of the blank line under the title: no extra row
 	}
 	bw = min(m.w-2, bw+4)
 	bh := min(m.h, len(lines)+2)

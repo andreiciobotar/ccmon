@@ -83,16 +83,16 @@ func (m *model) dashBody(p paint, w, h int) block {
 }
 
 // mixStrip is a one-line stacked bar with a legend, for the mixes when there is no side column.
-func (m *model) mixStrip(p paint, label string, rows []kv, total int64, col func(string) color.Color, name func(string) string, w int) string {
+func (m *model) mixStrip(p paint, label string, rows []kv, total float64, col func(string) color.Color, name func(string) string, w int) string {
 	th := m.th
 	var segs []seg
 	var legend []string
 	for i, r := range rows {
 		c := col(r.k)
-		segs = append(segs, seg{float64(r.v), c})
+		segs = append(segs, seg{r.v, c})
 		share := 0.0
 		if total > 0 {
-			share = float64(r.v) / float64(total) * 100
+			share = r.v / total * 100
 		}
 		legend = append(legend, p.swatch(i, c)+p.t(" "+name(r.k)+" "+pct(share), th.Muted))
 	}
@@ -111,11 +111,11 @@ func (m *model) nowRunningBox(p paint, w, h int) block {
 	if len(items) == 0 {
 		lines = []string{in.t("nothing running", th.Faint)}
 	}
-	agentW, projW, tokW, durW := 16, 16, 10, 7
+	agentW, projW, costW, tokW, durW := 16, 16, 9, 10, 7
 	if iw < 70 {
 		projW = 0
 	}
-	descW := iw - 2 - agentW - 1 - tokW - 1 - durW - 1
+	descW := iw - 2 - agentW - 1 - costW - 1 - tokW - 1 - durW - 1
 	if projW > 0 {
 		descW -= projW + 1
 	}
@@ -132,6 +132,7 @@ func (m *model) nowRunningBox(p paint, w, h int) block {
 		}
 		line += in.t(cell(firstLine(x.Description), max(descW, 0), false), th.Text) + in.sp(1)
 		line += in.t(cell(FmtDuration(m.now().Sub(*x.Start)), durW, true), th.Text) + in.sp(1)
+		line += in.t(cell(m.money(x.Usage.Cost, x.Usage.Unpriced), costW, true), th.Text) + in.sp(1)
 		line += in.t(cell(Human(float64(x.Usage.Total))+" tok", tokW, true), th.Muted)
 		lines = append(lines, line)
 	}
@@ -168,9 +169,9 @@ func (m *model) tiles(p paint, w int, compact bool) block {
 	gauge := func(tw int) string {
 		return sp.bar(tw-4, shareV/100, th.Purple, true)
 	}
-	tokV := Human(m.counter["tokens"].Cur)
+	tok := Human(m.counter["tokens"].Cur) + " tok"
 	var tiles []tile
-	tiles = append(tiles, tile{"TOKENS", tokV, fmt.Sprintf("%d sessions", len(m.visible())), th.Blue})
+	tiles = append(tiles, tile{"COST", m.money(t.cost, t.unpriced), tok, th.Blue})
 	tiles = append(tiles, tile{"SUBAGENT SHARE", fmt.Sprintf("%.1f%%", shareV), "\x00gauge", th.Purple})
 	tiles = append(tiles, tile{"DISPATCHES", fmt.Sprintf("%d", int(c("dispatches"))), avgDisp(t.dispatches, len(m.visible())), th.Teal})
 	rv, rc := count("repeats", th.Yellow)
@@ -330,8 +331,8 @@ func (m *model) emptyTable(p paint, w, h int, title string) block {
 }
 
 type tableCols struct {
-	name, start, tok, split, dis int
-	showStart, sig, subPct, bad  bool
+	name, start, cost, tok, split, dis   int
+	showStart, sig, showTok, subPct, bad bool
 }
 
 const (
@@ -339,11 +340,11 @@ const (
 	minName, maxName = 14, 30
 )
 
-// tableCols adds the optional columns in a fixed order as the width allows (signals, time, SUB%, BAD),
+// tableCols adds the optional columns in a fixed order as the width allows (signals, time, TOKENS, SUB%, BAD),
 // so a wider table never loses a column.
 func (m *model) tableCols(iw int) tableCols {
-	c := tableCols{tok: 7, split: 8, dis: 4, start: 11}
-	avail := iw - (3 + 1 + c.tok + 1 + c.split + 1 + c.dis)
+	c := tableCols{cost: 9, tok: 7, split: 8, dis: 4, start: 11}
+	avail := iw - (3 + 1 + c.cost + 1 + c.split + 1 + c.dis)
 	want, malformed := minName, false
 	for _, r := range m.rows() {
 		want = max(want, 2*r.depth+width(r.name)+1+width(r.suffix))
@@ -359,7 +360,8 @@ func (m *model) tableCols(iw int) tableCols {
 	}
 	c.sig = add(true, sigW+1, 12) // an indented session id still fits at the smallest terminal
 	c.showStart = add(c.sig, c.start+1, minName)
-	c.subPct = add(c.showStart, 5, want)
+	c.showTok = add(c.showStart, c.tok+1, want)
+	c.subPct = add(c.showTok, 5, want)
 	c.bad = add(c.subPct && malformed, 4, want)
 	c.name = min(want, avail)
 	slack := avail - c.name
@@ -374,7 +376,11 @@ func (c tableCols) header(timeLabel string) string {
 	if c.showStart {
 		s += cell(timeLabel, c.start, false) + " "
 	}
-	s += cell("TOKENS", c.tok, true) + " " + cell("MAIN│SUB", c.split, false)
+	s += cell("COST", c.cost, true) + " "
+	if c.showTok {
+		s += cell("TOKENS", c.tok, true) + " "
+	}
+	s += cell("MAIN│SUB", c.split, false)
 	if c.subPct {
 		s += " " + cell("SUB%", 4, true)
 	}
@@ -483,10 +489,13 @@ func (m *model) treeLine(r treeRow, selected bool, c tableCols, iw int, base pai
 			tok = rc.Value()
 		}
 	}
-	line += q.t(cell(Human(tok), c.tok, true), th.Text) + q.sp(1)
-	line += q.stack(c.split, []seg{{float64(t.main), th.Yellow}, {float64(t.sub), th.Purple}})
+	line += q.t(cell(m.money(t.cost, t.unpriced), c.cost, true), th.Text) + q.sp(1)
+	if c.showTok {
+		line += q.t(cell(Human(tok), c.tok, true), th.Muted) + q.sp(1)
+	}
+	line += q.stack(c.split, []seg{{t.mainCost, th.Yellow}, {t.subCost, th.Purple}})
 	if c.subPct {
-		line += q.sp(1) + q.t(cell(share(t.sub, t.tokens), 4, true), th.Muted)
+		line += q.sp(1) + q.t(cell(costShare(t.subCost, t.cost), 4, true), th.Muted)
 	}
 	line += q.sp(1) + q.t(cell(fmt.Sprintf("%d", t.dispatches), c.dis, true), th.Muted)
 	if c.sig {
@@ -523,6 +532,14 @@ func recheckCell(q paint, t totals) string {
 }
 
 // share is n of d as a whole percent, from summed counts; "-" when d is 0.
+// costShare is share for money.
+func costShare(n, d float64) string {
+	if d == 0 {
+		return "-"
+	}
+	return pct(100 * n / d)
+}
+
 func share(n, d int64) string {
 	if d == 0 {
 		return "-"
@@ -533,22 +550,23 @@ func share(n, d int64) string {
 // ---- mix panels -----------------------------------------------------------------------
 
 type kv struct {
-	k string
-	v int64
+	k        string
+	v        float64 // cost
+	unpriced int64   // tokens with no price
 }
 
-func usageRows(m map[string]data.Usage) ([]kv, int64) {
+func usageRows(m map[string]data.Usage) ([]kv, float64) {
 	var out []kv
-	var total int64
+	var total float64
 	for k, u := range m {
-		out = append(out, kv{k, u.Total})
-		total += u.Total
+		out = append(out, kv{k, u.Cost, u.Unpriced})
+		total += u.Cost
 	}
 	return out, total
 }
 
-// sortedUsage lists a usage map by total, largest first (models).
-func sortedUsage(m map[string]data.Usage) ([]kv, int64) {
+// sortedUsage lists a usage map by cost, largest first (models).
+func sortedUsage(m map[string]data.Usage) ([]kv, float64) {
 	out, total := usageRows(m)
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].v != out[j].v {
@@ -560,7 +578,7 @@ func sortedUsage(m map[string]data.Usage) ([]kv, int64) {
 }
 
 // agentUsage lists a usage map by agent type in the fixed agent order.
-func agentUsage(m map[string]data.Usage) ([]kv, int64) {
+func agentUsage(m map[string]data.Usage) ([]kv, float64) {
 	out, total := usageRows(m)
 	sort.Slice(out, func(i, j int) bool { return agentLess(out[i].k, out[j].k) })
 	return out, total
@@ -584,7 +602,7 @@ func (m *model) agentMixBox(p paint, t totals, w, h int) block {
 		col := th.AgentColor(r.k)
 		share := 0.0
 		if total > 0 {
-			share = float64(r.v) / float64(total)
+			share = r.v / total
 		}
 		bw := max(4, iw-nameW-2-5-1)
 		lines = append(lines, in.t("● ", col)+in.t(cell(r.k, nameW, false), th.Text)+in.sp(1)+
@@ -603,16 +621,20 @@ func (m *model) modelMixBox(p paint, t totals, w, h int) block {
 	iw := w - 4
 	var segs []seg
 	for _, r := range rows {
-		segs = append(segs, seg{float64(r.v), th.ModelColor(r.k)})
+		segs = append(segs, seg{r.v, th.ModelColor(r.k)})
 	}
 	lines := []string{in.stack(iw, segs)}
 	for i, r := range rows {
 		share := 0.0
 		if total > 0 {
-			share = float64(r.v) / float64(total) * 100
+			share = r.v / total * 100
 		}
-		lines = append(lines, in.swatch(i, th.ModelColor(r.k))+in.sp(1)+in.t(cell(shortModel(r.k), max(6, iw-14), false), th.Text)+
-			in.t(cell(Human(float64(r.v)), 7, true), th.Muted)+in.t(cell(pct(share), 5, true), th.Faint))
+		amount := m.money(r.v, 0)
+		if r.unpriced > 0 {
+			amount = "unpriced"
+		}
+		lines = append(lines, in.swatch(i, th.ModelColor(r.k))+in.sp(1)+in.t(cell(shortModel(r.k), max(6, iw-16), false), th.Text)+
+			in.t(cell(amount, 9, true), th.Muted)+in.t(cell(pct(share), 5, true), th.Faint))
 	}
 	if len(rows) == 0 {
 		lines = []string{in.t("no data yet", th.Faint)}

@@ -30,6 +30,7 @@ type Runner struct {
 	Python      string        // interpreter; default python3
 	ProjectsDir string        // absolute; passed through when non-empty
 	AgentsDir   string        // absolute; passed through when non-empty
+	Prices      string        // price file, absolute; passed through when non-empty
 	Timeout     time.Duration // per call; default callTimeout
 	Err         error         // set when the root could not be located; reported by Check
 
@@ -144,6 +145,9 @@ func (r *Runner) run(ctx context.Context, out any, args ...string) error {
 	}
 	if r.AgentsDir != "" {
 		full = append(full, "--agents-dir", r.AgentsDir)
+	}
+	if r.Prices != "" {
+		full = append(full, "--prices", r.Prices)
 	}
 	cmd := exec.CommandContext(ctx, r.python(), full...)
 	cmd.Dir = r.Root

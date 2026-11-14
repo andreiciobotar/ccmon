@@ -3,14 +3,14 @@ import os
 import tempfile
 import unittest
 
-from tests.support import AGENTS, HERE, by_desc
+from tests.support import AGENTS, HERE, PRICES, by_desc
 from ccmon import metrics, transcript
 
 SESSION = os.path.join(HERE, "fixtures", "plugin", "-plug-proj", "plug-0001.jsonl")
 
 
 def load(agents_dir=AGENTS):
-    s = transcript.load_session(SESSION)
+    s = transcript.load_session(SESSION, PRICES)
     metrics.analyze(s, agents_dir, 0.5)
     return s
 

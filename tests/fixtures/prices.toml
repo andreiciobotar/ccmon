@@ -1,0 +1,33 @@
+# Round rates for tests; claude-sonnet-5-5 is deliberately missing (unpriced).
+currency = "USD"
+as_of = "2026-01-01"
+source = "test"
+
+[models.claude-fable-5-2]
+input = 10
+output = 20
+cache_write_5m = 30
+cache_write_1h = 40
+cache_read = 1
+
+[models.claude-opus-5-5]
+input = 5
+output = 10
+cache_write_5m = 15
+cache_write_1h = 20
+cache_read = 0.5
+
+[models.claude-haiku-5-5]
+input = 1
+output = 2
+cache_write_5m = 3
+cache_write_1h = 4
+cache_read = 0.1
+
+[models.claude-haiku-5-5.long_prompt]
+over = 100
+input = 10
+output = 20
+cache_write_5m = 30
+cache_write_1h = 40
+cache_read = 1

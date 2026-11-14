@@ -1,22 +1,22 @@
  ccmon  1 Dash  2 Sess [3 Agents]          24h  7d  30d [all]  ○ idle  00:00:00 
  Agents  per agent type across 1 sessions in all                                
- models █████████▓▓▓▓▓▓▓▓▓▒░  █ haiku-5-5 45%  ▓ fable-5-2 45%  ▒ opus-5-5 5%  …
+ models ████████████████▓▓▓▒  █ fable-5-2 79%  ▓ haiku-5-5 16%  ▒ opus-5-5 5%  …
                                                                                 
 > ● main   main session   ■ fable-5-2                                           
-    usage ████████▓▓▓▓▓▓▒▒▒▒░░  ░ in 30  ▒ out 60  ▓ cw 90  █ cr 120  = 300     
+    usage ██████▓▓▓▓▒▒▒░  = 300 · $0.0043  ░ in 30  ▒ out 60  ▓ cw 90  █ cr 120 
     the orchestrating session itself · no dispatches                            
                                                                                 
   ● coder   3 dispatches   ■ sonnet-5-5                                [loop 3] 
-    usage ███████▓▓▓▓▓▓▒▒▒▒░░░  ░ in 3  ▒ out 4  ▓ cw 5  █ cr 6  = 18           
-    tok p50 █░░ 18  p90 █░░ 18    time p50 ███ 38s  p90 ███ 38s                 
+    usage ███████▓▓▓▓▓▓▒▒▒▒░░░  = 18 · $0*  ░ in 3  ▒ out 4  ▓ cw 5  █ cr 6     
+    cost p50 ░░░ $0*  p90 ░░░ $0*    time p50 ███ 38s  p90 ███ 38s              
                                                                                 
   ● reviewer   4 dispatches   ■ opus-5-5          no repeats, loops or warnings 
-    usage ███████▓▓▓▓▓▓▒▒▒▒░░░  ░ in 6  ▒ out 8  ▓ cw 10  █ cr 12  = 36         
-    tok p50 ░░░ 9  p90 █░░ 14    time p50 ██░ 31s  p90 ███ 41s                  
+    usage ██████▓▓▓▓▓▒▒▒▒░░░  = 36 · $0.0003  ░ in 6  ▒ out 8  ▓ cw 10  █ cr 12 
+    cost p50 █░░ $0.0001  p90 ██░ $0.0001    time p50 ██░ 31s  p90 ███ 41s      
                                                                                 
   ● explorer   10 dispatches   ■ haiku-5-5  ■ sonnet-5-5    [WARN 1] [repeat 1] 
-    usage ███████████████▓▒▒░░  ░ in 26  ▒ out 39  ▓ cw 13  █ cr 234  = 312     
-    tok p50 ░░░ 4  p90 ███ 67    time p50 █░░ 12s  p90 ██░ 30s                  
+    usage ██████████▒▒░  = 312 · $0.0008*  ░ in 26  ▒ out 39  ▓ cw 13  █ cr 234 
+    cost p50 ░░░ <$0.0001*  p90 ███ $0.0002*    time p50 █░░ 12s  p90 ██░ 30s   
  +1 more agent types · ↓ to scroll                                              
                                                                                 
                                                                                 

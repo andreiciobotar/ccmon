@@ -44,8 +44,8 @@ Full count over `~/.claude/projects`: 788 files, 431,444 lines, 51,284 deduplica
 ### Price file: `ccmon/prices.toml`
 Shipped next to the code that reads it (the monitor runs from its checkout; the factory plugin is a
 separate thing). TOML because it takes comments and Python 3.11 reads it with the standard library.
-`--prices PATH` on every command reads another file instead (private rates, tests). The dashboard uses
-the default file.
+`--prices PATH` on every command reads another file instead (private rates, tests); `ccmon-tui --prices`
+passes it through, like `--projects-dir`.
 
 ```toml
 # header comment: what is not priced (fast mode, US-only inference, web search), how to edit
@@ -92,7 +92,7 @@ Nothing else computes cost; aggregation is addition.
 - Every usage object (`usage`, `by_model`, `by_agent`, `usage_by_model` values) gains `"cost"` (rounded to 6
   decimals) and `"unpriced"` (tokens).
 - Wherever `"tokens": {total, main, subagents, main_pct, subagent_pct}` appears (session, task, repo), a
-  sibling `"cost"` with the same five keys by money, plus `"unpriced_tokens"` and `"unpriced_models"`
+  sibling `"cost"` with the same five keys by money and, inside it, `"unpriced_tokens"` and `"unpriced_models"`
   (sorted ids with `unpriced > 0`). Percentages are of priced cost.
 - `agents` rows gain `cost_p50`, `cost_p90` (same population as `tokens_p50`); the `agents` document gains
   top-level `unpriced_models`.
@@ -102,7 +102,7 @@ Nothing else computes cost; aggregation is addition.
 
 ### CLI text
 One `money(x, currency)` formatter: `$` prefix for USD, otherwise the code and a space. `0` → `$0`;
-under 0.01 → two significant digits (`$0.0012`); under 100 → two decimals; under 10,000 → whole units;
+under 0.00005 → `<$0.0001`; under 0.01 → four decimals (`$0.0012`); under 100 → two decimals; under 10,000 → whole units;
 then `k`, `M` with one decimal. A figure whose usage has `unpriced > 0` gets a trailing `*`.
 - `sessions`: columns `cost`, `main%`, `sub%` (now by cost), `tokens` (was `total`), then as before.
 - `session`: a `cost` line above `tokens` (total, main, subagents with percentages by cost); a `cost`
@@ -115,7 +115,7 @@ then `k`, `M` with one decimal. A figure whose usage has `unpriced > 0` gets a t
 ### Dashboard (Go)
 `data.Usage` gains `Cost`, `Unpriced`; a `Cost` struct mirrors `Tokens`; results carry `Prices`. One
 `Money` formatter with the rules above. Group rows sum cost the way they sum tokens today.
-- Dashboard tiles: first tile `COST` (money; sub-line: tokens and session count). `SUBAGENT SHARE` is by cost.
+- Dashboard tiles: first tile `COST` (money; sub-line: tokens). `SUBAGENT SHARE` is by cost.
 - Sessions table: `COST` column added before `TOKENS`; when the width cannot hold both, `TOKENS` drops.
   `MAIN│SUB` bar by cost. Sort mode `tokens` becomes `cost`; `share` is share of cost.
 - Agent mix and Model mix by cost; Model mix shows money per model (`unpriced` for a model with no price).
@@ -127,7 +127,7 @@ then `k`, `M` with one decimal. A figure whose usage has `unpriced > 0` gets a t
   cost instead of tokens (token percentiles stay in JSON and the CLI).
 - Unpriced: a figure with unpriced tokens carries `*`; when anything in range is unpriced the dashboard
   subtitle line appends, in the warning colour, `no price for <models>: excluded from cost`.
-- Help view: one line saying where prices come from (`ccmon/prices.toml`, currency, as-of date).
+- Help view: one line saying where prices come from (the loaded file's path, currency, as-of date).
 - Look at rendered output: `make screenshot` for dashboard, session, agents at 140x40 and 80x24.
 
 ### Docs
@@ -143,11 +143,13 @@ what is not priced). `docs/specs/tui.md`: the lines describing tiles, table, mix
   `unpriced_models`, its tokens in `unpriced`/`unpriced_tokens`, and totals equal the sum of priced parts;
   repo and task groups sum their sessions.
 - CLI: text output shows cost columns, footer, and the `*` line only when something is unpriced; JSON keys.
-- Go: decode of the new fields; `Money`; goldens regenerated with non-trivial costs in the fakes, including
-  one unpriced model; sort by cost.
+- Go: decode of the new fields; `Money`; goldens regenerated (they render the fixtures through the CLI with
+  `tests/fixtures/prices.toml`, so they show cost and an unpriced model); sort by cost with a pair whose
+  cost order differs from its token order; unit tests on fakes for dollar-size figures.
 
 ## Defaults chosen
-- Sub-cent amounts show two significant digits rather than `<$0.01`, so small sessions still rank.
+- Sub-cent amounts show four decimals rather than `<$0.01`, so small sessions still rank; the widest money
+  string is then 9 cells (`<$0.0001*`), which every money column holds without truncation.
 - Cost is list price at the time of reading the file, not the price on the day of the message; the file has
   one `as_of`.
 - Subscription plans are not modelled: cost is the API list-price equivalent.

@@ -18,18 +18,32 @@ using the explorer, coder and reviewer agents."
 ## ccmon usage
 Read-only CLI over `~/.claude/projects` transcripts (Python 3.11+, stdlib only).
 ```
-bin/ccmon sessions [--since 7d]     # sessions grouped by repository and task, with totals
-bin/ccmon session <id-prefix>       # totals by model/agent, warnings, dispatch timeline
-bin/ccmon agents [--since 7d]       # per agent type: tokens, p50/p90, repeats, WARN
-bin/ccmon agents --repo ccmon --task ci-workflow   # tokens by agent and model for one task
+bin/ccmon sessions [--since 7d]     # sessions grouped by repository and task, with cost and token totals
+bin/ccmon session <id-prefix>       # cost and tokens by model/agent, warnings, dispatch timeline
+bin/ccmon agents [--since 7d]       # per agent type: cost and tokens, p50/p90, repeats, WARN
+bin/ccmon agents --repo ccmon --task ci-workflow   # cost and tokens by agent and model for one task
 ```
 `sessions` and `agents` accept `--repo NAME` and `--task NAME` (exact match).
 Global options: `--json` (one JSON document on stdout), `--projects-dir`,
-`--agents-dir` (agent definitions used for the model WARN), `--repeat-threshold`
-(Jaccard, default 0.5). `--since` takes `Nd`, `Nh`, `Nw` or an ISO date.
+`--agents-dir` (agent definitions used for the model WARN), `--prices` (price file),
+`--repeat-threshold` (Jaccard, default 0.5). `--since` takes `Nd`, `Nh`, `Nw` or an ISO date.
 Exit codes: 0 ok, 2 usage error (unknown or ambiguous session id, bad option).
 Flags in the timeline: `repeat`, `review-loop`, `rechecked`, `WARN`, plus the
 status when not `completed` (`running`, `no-run`, `orphan`).
+
+Cost: every command shows money next to tokens, computed per message from
+`ccmon/prices.toml` (USD per million tokens: input, output, cache write 5m and 1h,
+cache read; Claude Haiku 5.5 has a `long_prompt` table for prompts over 100,000
+tokens). Edit that file or pass `--prices PATH` to use your own rates; a missing
+rate or bad file exits 2. A model id matches a table by exact name or with a
+trailing `-YYYYMMDD` removed, never by prefix. A model with no table is never
+counted as zero: its tokens are listed as `unpriced`, figures that contain them
+end in `*`, and a footer line names the models. In `--json` every usage object
+gains `cost` and `unpriced`, and each document a `prices` block. Cost is the API
+list-price equivalent at the file's `as_of` date, not what a subscription charges.
+Not priced: fast mode, US-only inference, web search, batch. It is a lower bound:
+Claude Code makes helper calls that it does not write to the transcript (web fetch
+and web search summaries, for example), so its own session total can be higher.
 
 Grouping: a task is a git worktree a session worked in. A session belongs to one
 repository and at most one task: the last worktree it entered (from the

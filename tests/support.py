@@ -6,15 +6,17 @@ ROOT = os.path.dirname(HERE)
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from ccmon import metrics, transcript  # noqa: E402
+from ccmon import metrics, prices, transcript  # noqa: E402
 
+PRICES_PATH = os.path.join(HERE, "fixtures", "prices.toml")
+PRICES = prices.load(PRICES_PATH)
 PROJECTS = os.path.join(HERE, "fixtures", "projects")
 AGENTS = os.path.join(HERE, "fixtures", "agents")
 SESSION = os.path.join(PROJECTS, "-fixture-proj", "fixture-0001.jsonl")
 
 
 def load(threshold=0.5):
-    s = transcript.load_session(SESSION)
+    s = transcript.load_session(SESSION, PRICES)
     metrics.analyze(s, AGENTS, threshold)
     return s
 

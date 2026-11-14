@@ -1,0 +1,48 @@
+# Prices for ccmon, in USD per million tokens. Edit freely; `--prices PATH` reads another file.
+# Each [models.<id>] needs input, output, cache_write_5m, cache_write_1h and cache_read.
+# A dated id (<id>-YYYYMMDD) uses the table of <id>; no other matching is done.
+# [models.<id>.long_prompt] replaces the five rates for one request whose
+# input + cache write + cache read tokens exceed `over`.
+# A model with no table is reported as unpriced, never as zero.
+#
+# Not priced (absent from the transcripts checked, nothing to verify against):
+#   fast mode (2x), US-only inference (1.1x), web search ($10 per 1,000), batch pricing.
+currency = "USD"
+as_of = "2026-11-14"
+source = "https://platform.claude.com/docs/en/about-claude/pricing"
+
+[models.claude-fable-5-2]
+input = 8
+output = 40
+cache_write_5m = 10
+cache_write_1h = 16
+cache_read = 0.20
+
+[models.claude-opus-5-5]
+input = 4
+output = 20
+cache_write_5m = 5
+cache_write_1h = 8
+cache_read = 0.20
+
+[models.claude-sonnet-5-5]
+input = 2
+output = 10
+cache_write_5m = 2.50
+cache_write_1h = 4
+cache_read = 0.10
+
+[models.claude-haiku-5-5]
+input = 0.10
+output = 0.50
+cache_write_5m = 0.125
+cache_write_1h = 0.20
+cache_read = 0.01
+
+[models.claude-haiku-5-5.long_prompt]
+over = 100000
+input = 0.50
+output = 2.50
+cache_write_5m = 0.625
+cache_write_1h = 1
+cache_read = 0.05
