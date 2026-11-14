@@ -107,7 +107,7 @@ func (m *model) factorySubheader(p paint) string {
 		out += dot + p.t(fmt.Sprintf("%d %s", review, phaseLabel("review", long)), th.Yellow) + dot +
 			p.t(fmt.Sprintf("%d %s", merged, phaseLabel("merged", long)), m.mergedColor())
 		if settled > 0 {
-			out += dot + p.t(fmt.Sprintf("%d settled", settled), th.Faint)
+			out += dot + p.t(fmt.Sprintf("%d settled", settled), th.Muted)
 		}
 		return out
 	}
@@ -117,6 +117,8 @@ func (m *model) factorySubheader(p paint) string {
 	}
 	tail := func(asOf string) string {
 		switch {
+		case f.busy && asOf == "":
+			return lead + p.t(spin(m.spinFrame()), th.Blue)
 		case f.busy:
 			return lead + p.t(spin(m.spinFrame())+" refreshing", th.Blue)
 		case !f.doneAt.IsZero():
@@ -175,7 +177,11 @@ func (m *model) repoHeader(p paint, r factoryRepo, w int) string {
 		if st.Settled > 0 {
 			counts += p.sp(3) + count("settled", st.Settled, th.Muted)
 		}
-		right = m.meter(p, st, w-3-(1+min(nameLeast, width(r.name)))-width(counts)) + counts
+		budget := w - 3 - (1 + min(nameLeast, width(r.name)))
+		right = m.meter(p, st, budget-width(counts)) + counts
+		if width(right) > budget {
+			right = m.meter(p, st, budget) // the name comes before the other counts
+		}
 	}
 	left := trunc(p.sp(1)+p.b(r.name, th.Text), max(1, w-width(right)-3))
 	return fit(left+p.sp(max(1, w-width(left)-width(right)-1))+right, w, p)

@@ -162,7 +162,7 @@ func TestFactoryMeter(t *testing.T) {
 		}
 	}
 	m := factoryModel(true, 140, 40, factoryRepo{name: "r", path: "/r", st: fstatus(40, manyTasks(10)...)})
-	if out := plain(m); !strings.Contains(out, "in motion ██████████░░░░░░░░░░ 10/40") && !strings.Contains(out, "in motion █████░░░░░░░░░░░░░░░ 10/40") {
+	if out := plain(m); !strings.Contains(out, "in motion █████░░░░░░░░░░░░░░░ 10/40") {
 		t.Errorf("a cap above %d is a %d-cell bar:\n%s", meterCells, meterCells, out)
 	}
 	blocked := fstatus(5, append(manyTasks(2), ftask("q", "blocked"))...)
@@ -189,6 +189,11 @@ func TestFactoryMeter(t *testing.T) {
 	nm := factoryModel(true, 60, 20, factoryRepo{name: "mid-size-nam", path: "/r/mid", st: fstatus(17, manyTasks(4)...)})
 	if out := plain(nm); !strings.Contains(out, " mid-size-nam ") || strings.Contains(out, "●●●●○") {
 		t.Errorf("at 60 columns a long meter gives way to a bar and the name stays whole:\n%s", out)
+	}
+	full := fstatus(5, append(manyTasks(4), ftask("q", "blocked"), ftask("v", "review"), ftask("g", "merged"), ftask("s", "settled"))...)
+	nm = factoryModel(true, 60, 20, factoryRepo{name: "mid-size-name-long", path: "/r/mid", st: full})
+	if out := plain(nm); !strings.Contains(out, " mid-size-nam") || !strings.Contains(out, "in motion ▲●●●● 5/5") {
+		t.Errorf("at 60 columns the other counts go before the name or the meter cells:\n%s", out)
 	}
 }
 

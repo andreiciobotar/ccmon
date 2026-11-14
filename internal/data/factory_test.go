@@ -277,4 +277,29 @@ func TestWriteWorktreeCapThroughASymlink(t *testing.T) {
 	if st, _ := os.Stat(target); st.Mode().Perm() != 0o600 {
 		t.Fatalf("the target keeps its mode: %v", st.Mode().Perm())
 	}
+
+	dangling := filepath.Join(dir, "dangling.json")
+	if err := os.Symlink(filepath.Join(dir, "missing.json"), dangling); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteWorktreeCap(dangling, 9); err == nil {
+		t.Fatal("a link to a missing file must be refused")
+	}
+	if st, err := os.Lstat(dangling); err != nil || st.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("the dangling link must stay a link: %v %v", st, err)
+	}
+}
+
+func TestSettingsErrorsNameTheFileShort(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := FactorySettingsPath()
+	if err := os.MkdirAll(path, 0o755); err != nil { // a directory where the file should be
+		t.Fatal(err)
+	}
+	for name, err := range map[string]error{"read": func() error { _, err := ReadWorktreeCap(path); return err }(), "write": WriteWorktreeCap(path, 3)} {
+		if err == nil || !strings.HasPrefix(err.Error(), "~/.claude/factory/settings.json: ") || strings.Contains(err.Error(), home) {
+			t.Errorf("%s: want an error starting with the ~ path and no absolute path, got %v", name, err)
+		}
+	}
 }

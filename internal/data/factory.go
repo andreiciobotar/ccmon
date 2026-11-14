@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -112,6 +113,19 @@ func ShortPath(path string) string {
 	return path
 }
 
+// shortErr names the settings file with ~ and drops the path the OS error repeats.
+func shortErr(path string, err error) error {
+	var pe *fs.PathError
+	var le *os.LinkError
+	switch {
+	case errors.As(err, &pe):
+		err = pe.Err
+	case errors.As(err, &le):
+		err = le.Err
+	}
+	return fmt.Errorf("%s: %w", ShortPath(path), err)
+}
+
 // readSettings returns the file's keys with their values as written; a missing file is
 // no keys, and a file that is not JSON or not an object is an error naming the path.
 func readSettings(path string) (map[string]json.RawMessage, error) {
@@ -120,7 +134,7 @@ func readSettings(path string) (map[string]json.RawMessage, error) {
 		return map[string]json.RawMessage{}, nil
 	}
 	if err != nil {
-		return nil, err
+		return nil, shortErr(path, err)
 	}
 	if !json.Valid(b) {
 		return nil, fmt.Errorf("%s is not valid JSON", ShortPath(path))
@@ -151,7 +165,8 @@ func ReadWorktreeCap(path string) (int, error) {
 
 // WriteWorktreeCap sets worktree_cap and leaves every other key's value as it was. The
 // file is replaced atomically (a symbolic link is followed, so the link stays), keeps its
-// permission bits, and is never written when it is not a JSON object.
+// permission bits, and is never written when it is not a JSON object. A link to a missing
+// file is refused: renaming over it would replace the link.
 func WriteWorktreeCap(path string, n int) error {
 	obj, err := readSettings(path)
 	if err != nil {
@@ -159,6 +174,8 @@ func WriteWorktreeCap(path string, n int) error {
 	}
 	if p, err := filepath.EvalSymlinks(path); err == nil {
 		path = p
+	} else if _, lerr := os.Lstat(path); lerr == nil {
+		return fmt.Errorf("%s is a symbolic link to a missing file", ShortPath(path))
 	}
 	obj["worktree_cap"] = json.RawMessage(strconv.Itoa(n))
 	keys := make([]string, 0, len(obj))
@@ -177,7 +194,14 @@ func WriteWorktreeCap(path string, n int) error {
 		out.WriteByte('\n')
 	}
 	out.WriteString("}\n")
+	if err := replaceFile(path, out.Bytes()); err != nil {
+		return shortErr(path, err)
+	}
+	return nil
+}
 
+// replaceFile writes data to a temporary file beside path and renames it over path.
+func replaceFile(path string, data []byte) error {
 	mode := os.FileMode(0o644)
 	if st, err := os.Stat(path); err == nil {
 		mode = st.Mode().Perm()
@@ -191,7 +215,7 @@ func WriteWorktreeCap(path string, n int) error {
 		return err
 	}
 	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(out.Bytes()); err != nil {
+	if _, err := tmp.Write(data); err != nil {
 		tmp.Close()
 		return err
 	}
