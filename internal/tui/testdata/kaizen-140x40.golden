@@ -31,10 +31,10 @@
  ████████████▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒## 
  █ tests 5   ▓ reviewer 39   ▒ lead 13   ░ ci 0   # human 1                                                                                 
                                                                                                                                             
+ site manager  what it escalated, and what came of it ───────────────────────────────────────────────────────────────────────────────────── 
+ precision 75%  3 acted on of 4 with an outcome   recall 60%  3 acted on of 5 that needed the human                                         
+ 6 escalated   3 acted on   1 ignored   2 no outcome yet   4 suppressed   2 missed (1 suppressed first, 1 never fired)                      
+                                                                                                                                            
  14 open issues · 7 decisions · 7 acted on  → Board                                                                                         
-                                                                                                                                            
-                                                                                                                                            
-                                                                                                                                            
-                                                                                                                                            
                                                                                                                                             
  ←→/hl kaizen page  ·  ↑↓/jk move  ·  r range  ·  tab next view  ·  ? help  ·  q quit                                                       

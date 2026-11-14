@@ -6,18 +6,35 @@ import "context"
 // factory is getting better. A JSON null decodes to the zero value, or to nil where a
 // number or a record may be absent.
 type Kaizen struct {
-	Generated  string        `json:"generated"`
-	FactoryDir string        `json:"factory_dir"`
-	StoreFound bool          `json:"store_found"`
-	Prices     Prices        `json:"prices"`
-	Repos      []KaizenRepo  `json:"repos"`
-	Versions   []KaizenVer   `json:"versions"`
-	Tasks      []KaizenTask  `json:"tasks"`
-	Summary    KaizenSummary `json:"summary"`
-	Stops      []KaizenStop  `json:"stops"`
-	Slowed     []KaizenSlow  `json:"slowed"`
-	Rewards    []KaizenAward `json:"rewards"`
-	Outbox     KaizenOutbox  `json:"outbox"`
+	Generated   string        `json:"generated"`
+	FactoryDir  string        `json:"factory_dir"`
+	StoreFound  bool          `json:"store_found"`
+	Prices      Prices        `json:"prices"`
+	Repos       []KaizenRepo  `json:"repos"`
+	Versions    []KaizenVer   `json:"versions"`
+	Tasks       []KaizenTask  `json:"tasks"`
+	Summary     KaizenSummary `json:"summary"`
+	Stops       []KaizenStop  `json:"stops"`
+	Slowed      []KaizenSlow  `json:"slowed"`
+	Rewards     []KaizenAward `json:"rewards"`
+	Outbox      KaizenOutbox  `json:"outbox"`
+	SiteManager SiteManager   `json:"site_manager"`
+}
+
+// SiteManager is the site manager's record as `factory firings` counts it, over every
+// repository: precision is acted/(acted+ignored), recall acted/(acted+missed), nil when
+// there is nothing to divide by.
+type SiteManager struct {
+	Escalated        int      `json:"escalated"`
+	Acted            int      `json:"acted"`
+	Ignored          int      `json:"ignored"`
+	NoOutcome        int      `json:"no_outcome"`
+	Suppressed       int      `json:"suppressed"`
+	Missed           int      `json:"missed"`
+	MissedSuppressed int      `json:"missed_suppressed"`
+	MissedNeverFired int      `json:"missed_never_fired"`
+	Precision        *float64 `json:"precision"`
+	Recall           *float64 `json:"recall"`
 }
 
 // KaizenRepo says whether the pull requests of one repository could be read.

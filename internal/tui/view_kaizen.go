@@ -167,6 +167,8 @@ func (m *model) pulseLines(p paint, w int) block {
 	lines = append(lines, m.pulseCharts(p, w)...)
 	lines = append(lines, "")
 	lines = append(lines, m.defectLines(p, w)...)
+	lines = append(lines, "")
+	lines = append(lines, m.siteManagerLines(p, w)...)
 	acted := 0
 	for _, c := range []data.OutboxCounts{d.Outbox.Issues, d.Outbox.Decisions} {
 		acted += c.Accepted + c.Rejected + c.Done
@@ -796,9 +798,58 @@ func (m *model) stopLines(p paint, w int) block {
 		}
 		line := p.sp(1) + p.t(cell(kzTime(s.TS), 11, false), th.Muted) + p.sp(2) + p.t(cell(s.Slug, slugW, false), th.Text) + p.sp(2) +
 			p.pill(s.Kind, m.stopColor(s.Kind)) + p.sp(1+pill-pillWidth(s.Kind)) + p.t(cell(waited, 7, true), wcol) + p.sp(2)
-		out = append(out, fit(line+p.t(trunc(why, max(0, w-width(line)-1)), wcol2), w, p))
+		// the reason in full, wrapped beside the row; under it when the row leaves no room
+		indent := width(line)
+		if w-indent-1 < 20 {
+			out = append(out, fit(line, w, p))
+			line, indent = p.sp(3), 3
+		}
+		for i, l := range wrapPlain(why, max(1, w-indent-1)) {
+			if i > 0 {
+				line = p.sp(indent)
+			}
+			out = append(out, fit(line+p.t(l, wcol2), w, p))
+		}
 	}
 	return out
+}
+
+// siteManagerLines is the site manager's record: how often the human acted on what it
+// escalated (precision) and how much of what needed the human it escalated (recall).
+func (m *model) siteManagerLines(p paint, w int) block {
+	th := m.th
+	s := m.kz.doc.SiteManager
+	lines := block{m.heading(p, w, "site manager", "what it escalated, and what came of it")}
+	if s.Escalated+s.Suppressed+s.Missed == 0 {
+		for _, l := range wrapPlain("nothing escalated, suppressed or missed yet · precision and recall start with the first outcome (factory firing <id> acted|ignored)", w-2) {
+			lines = append(lines, p.sp(1)+p.t(l, th.Faint))
+		}
+		return lines
+	}
+	ratio := func(name string, v *float64, of, missing string) string {
+		if v == nil {
+			return p.t(name+" ", th.Muted) + p.b("-", th.Faint) + p.t("  "+missing, th.Faint)
+		}
+		return p.t(name+" ", th.Muted) + p.b(pct(*v*100), th.Text) + p.t("  "+of, th.Muted)
+	}
+	lines = append(lines, legend(p, w, []string{
+		ratio("precision", s.Precision, fmt.Sprintf("%d acted on of %d with an outcome", s.Acted, s.Acted+s.Ignored), "no outcome recorded yet"),
+		ratio("recall", s.Recall, fmt.Sprintf("%d acted on of %d that needed the human", s.Acted, s.Acted+s.Missed), "nothing acted on or missed yet"),
+	})...)
+	count := func(n int, label string, col color.Color) string {
+		if n == 0 {
+			col = th.Muted
+		}
+		return p.b(strconv.Itoa(n), col) + p.t(" "+label, th.Muted)
+	}
+	missed := count(s.Missed, "missed", th.Red)
+	if s.Missed > 0 {
+		missed += p.t(fmt.Sprintf(" (%d suppressed first, %d never fired)", s.MissedSuppressed, s.MissedNeverFired), th.Muted)
+	}
+	return append(lines, legend(p, w, []string{
+		count(s.Escalated, "escalated", th.Text), count(s.Acted, "acted on", th.Green), count(s.Ignored, "ignored", th.Orange),
+		count(s.NoOutcome, "no outcome yet", th.Text), count(s.Suppressed, "suppressed", th.Text), missed,
+	})...)
 }
 
 func (m *model) slowedLines(p paint, w int) block {

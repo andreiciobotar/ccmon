@@ -1046,7 +1046,7 @@
    "slug": "fx-rate-limits",
    "kind": "BLOCKED",
    "waited_s": 3300,
-   "why": null
+   "why": "git push was denied: the remote rejects the task branch"
   },
   {
    "ts": "2026-11-06T09:40:00+00:00",
@@ -1078,7 +1078,7 @@
    "slug": "fx-websocket-hooks",
    "kind": "QUESTION",
    "waited_s": null,
-   "why": null
+   "why": "Should the hook payload keep the legacy session field? Two consumers still read it, and dropping it would break the replay tool until both are migrated."
   }
  ],
  "slowed": [
@@ -1500,5 +1500,17 @@
     "pr": null
    }
   ]
+ },
+ "site_manager": {
+  "escalated": 6,
+  "acted": 3,
+  "ignored": 1,
+  "no_outcome": 2,
+  "suppressed": 4,
+  "missed": 2,
+  "missed_suppressed": 1,
+  "missed_never_fired": 1,
+  "precision": 0.75,
+  "recall": 0.6
  }
 }
