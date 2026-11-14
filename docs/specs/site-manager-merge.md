@@ -2,7 +2,7 @@
 
 Merging a pull request is mechanical, so a deterministic command does it: `factory merge`. No model takes part in a merge. Two things start it: (a) the dispatcher runs it on the human's word; (b) the human comments `lgtm` on the pull request and the 30-minute `factory watch` tick merges it. Whatever is not mechanical stops the merge and is reported; the watch job never merges on judgment.
 
-Stacked on `site-manager` (`docs/specs/site-manager.md`): this reuses its `gather`, `gh_json`, `NotEvaluated`, criteria, firing log and `watch`.
+Built on the watch job (`docs/specs/site-manager.md`, merged as #14 while this was in work): this reuses its `gather`, `gh_json`, `NotEvaluated`, criteria, firing log and `watch`.
 
 ## What (b) rests on
 Agents act with the human's own GitHub credentials, so **nothing technical separates the human's `lgtm` from one an agent posts**. Trigger (b) rests entirely on a rule: no role (lead, coder, explorer, reviewer, dispatcher, site manager) ever posts such a comment. The rule is written into every role file (below). The human accepts this while they are the only GitHub user. A separate GitHub identity for the factory, so that the check becomes technical, is a later refinement and not built here.
@@ -17,7 +17,7 @@ Checked against `andreiciobotar/isshoni` with `gh` 2.80.0 on 2026-11-14.
 6. `gh pr merge <n> --merge --match-head-commit <sha>` refuses when the head is no longer `<sha>`. The repo allows merge commits, has no branch protection, no auto-merge, and does not delete head branches on merge.
 7. With merge commits a branch stacked on a merged one stays valid: retargeted onto the default branch, its pull request shows only its own commits. Squash would not (lesson from merging #1 to #7 by hand).
 8. CI (`.github/workflows/test.yml`) runs on `pull_request` with the default types, so retargeting does not rerun it.
-9. On `main` (not yet in this base), PR #12 made `collect` work out whether a recorded base still counts, so nobody clears `factoryBase`; rows there carry `stacked_on` (the recorded base or None).
+9. PR #12 made `collect` work out whether a recorded base still counts, so nobody clears `factoryBase`; rows there carry `stacked_on` (the recorded base or None).
 
 ## `factory merge <pr>... | --all [--dry-run]`
 `<pr>` is a pull request number; one or more, or `--all` (not both, one required). Run from anywhere in the repo.
@@ -31,8 +31,9 @@ Per pull request (each blocker has a kind, used by the watch job):
 - `fork`: its head is in another repository.
 - `handover`: no task row has its head branch; or that row's phase is not `review` (reason names the phase and declared state; `review` already means declared `handed-over`, or an undeclared task with an open pull request, with every session of the task finished); or the row's local head differs from the pull request's head (commits that are not on the pull request).
 - `base`: its base is not the default branch and is not the head branch of a pull request merged into the default branch (`pull_request(repo, base)`), nor of one merged earlier in this run.
-- `ci`: `gh pr checks` prints no JSON (no checks, or `gh` failed: the reason carries what it said), or some check is in bucket `fail` or `cancel` (reason names them), or no check is in bucket `pass`.
-- `pending`: some check is in bucket `pending` and none failed.
+- `ci`: `gh pr checks` prints no JSON (no checks, or `gh` failed: the reason carries what it said), or some check is in bucket `fail` or `cancel` (reason names them).
+- `pending`: otherwise, some check is in bucket `pending`.
+- `ci`: otherwise, no check is in bucket `pass` (all skipped).
 - Then act: if its base is not the default branch, `gh pr edit <n> --base <default>` (retarget).
 - `conflict` / `pending`: `gh pr view <n> --json mergeable`, asked up to `MERGEABLE_TRIES` (5) times `MERGEABLE_WAIT` (3) seconds apart while it answers `UNKNOWN`: `CONFLICTING` is a `conflict`; still `UNKNOWN` is `pending`; `gh` failing is `merge`.
 - If it is a draft, `gh pr ready <n>`. Then `gh pr merge <n> --merge --match-head-commit <headRefOid from step 1>`. A failing `gh pr edit`, `gh pr ready` or `gh pr merge` is a blocker of kind `merge` whose reason is the command and its error.
@@ -52,9 +53,6 @@ Not done, on purpose:
 ### `clean` guard
 `keep_reason` gains one rule, first: a task whose worktree contains the running plugin (`PLUGIN_ROOT` inside the row's path) is kept, `this factory runs from it; leads started by it load their plugin from there`. `merge` runs `clean` unattended, and removing that worktree breaks every lead launched from it.
 
-### `collect`
-Adds `row["stacked_on"] = recorded or None`, the same line as on `main` (fact 9), so that the criterion below reads the same field before and after `main` is merged in.
-
 ## Trigger (a): the dispatcher
 The dispatcher runs `factory merge <pr>...` or `factory merge --all`, only when the human said to merge, and reports the lines. There is no model in between: the command is the site manager's merge job, and running it costs the dispatcher one command and a few lines. The human's word replaces the `lgtm` check; every other check applies.
 
@@ -72,9 +70,9 @@ Results reach the dispatcher through the firing log, as two new criteria (two li
 | name | escalate | fires for | when |
 |---|---|---|---|
 | `lgtm-blocked` | always | pull request | the lgtm step ended with a blocker other than `pending`. Subject `#<n>/<kind>`, slug of its task or null, detail `<reason> <url>`. A different kind is a different firing, so a red CI that turns into a stale `lgtm` is escalated again. `pending` (CI running, mergeability not computed) fires nothing: the next tick tries again. |
-| `base-merged` | always | task | phase `motion` or `blocked`, and its `stacked_on` branch has a pull request merged into the default branch (`pull_request`). Subject the slug; detail `its base <branch> merged (<url>): tell its lead to rebase onto <remote>/<default> and to open or retarget its pull request against <default>`. Uses `phased`. |
+| `base-merged` | always | task | phase `motion` or `blocked`, its own pull request is neither merged nor open against the default branch, and its `stacked_on` branch has a pull request merged into the default branch (`pull_request`). Subject the slug; detail `its base <branch> merged (<url>): tell its lead to rebase onto <remote>/<default> and to open or retarget its pull request against <default>`. Uses `phased`. |
 
-`lgtm-blocked` is not evaluated when `gh pr list`, a comments call, a permission call or an activity call fails; then nothing is merged for the pull requests not yet reached. The criterion reads the step's results from the picture (`watch` stores what it did, `health` what the dry run found), so the step runs once per tick.
+`lgtm-blocked` is not evaluated, and nothing (further) is merged, when the phases cannot be trusted (`phased`: an unplaced session, an `unknown` pull request state), or when `gh pr list`, a comments call, a permission call or an activity call fails; pull requests reached before the failure keep their result. Deleting the `lgtm-blocked` line from `criteria.json` silences the escalation only: the step still merges. There is no switch for (b) other than not commenting `lgtm` (or `factory schedule remove`). The criterion reads the step's results from the picture (`watch` stores what it did, `health` what the dry run found), so the step runs once per tick.
 
 The plain case (an approval, a green handed-over mergeable pull request) runs no model: it merges, cleans and prints. A model runs only for a firing, as for any other criterion; `always` firings are passed on unjudged.
 
@@ -95,7 +93,6 @@ The plain case (an approval, a green handed-over mergeable pull request) runs no
 - `health` performs no `gh pr edit|ready|merge` and writes nothing.
 - `base-merged`: fires for `motion` and `blocked` with a merged recorded base; not for `review`, an open base, or no recorded base.
 - `keep_reason`: the plugin's own worktree is kept.
-- `collect` sets `stacked_on`.
 - The shipped `criteria.json` still loads and names every criterion once (existing test).
 
 ## Live check (nothing real is merged)

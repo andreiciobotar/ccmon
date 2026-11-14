@@ -10,5 +10,7 @@
 {"name": "wrong-model", "escalate": "judgment", "threshold": null, "what": "A subagent or lead ran on a model other than the one pinned for its role."},
 {"name": "ci-red-handover", "escalate": "judgment", "threshold": null, "what": "A task handed over a pull request that has a failing check."},
 {"name": "deep-stack", "escalate": "judgment", "threshold": 3, "what": "A task is stacked on a chain of other tasks longer than the threshold."},
-{"name": "merged-not-cleaned", "escalate": "judgment", "threshold": 2, "what": "A task's pull request was merged, or the task was settled, more than the threshold, in hours, ago and it has not been cleaned."}
+{"name": "merged-not-cleaned", "escalate": "judgment", "threshold": 2, "what": "A task's pull request was merged, or the task was settled, more than the threshold, in hours, ago and it has not been cleaned."},
+{"name": "lgtm-blocked", "escalate": "always", "threshold": null, "what": "A pull request carries the human's lgtm but the merge job could not merge it, for a reason other than checks still running."},
+{"name": "base-merged", "escalate": "always", "threshold": null, "what": "A working or blocked task is stacked on a branch whose pull request has been merged into the default branch."}
 ]

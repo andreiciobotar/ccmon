@@ -27,7 +27,14 @@ Then:
 1. If anything is to be escalated, send ONE message to the dispatcher's session name with `SendMessage` (load it with `ToolSearch` first). First line: `ESCALATION: <the repo directory's name>`. Then one line per escalated firing: `<id> <criterion> <subject>: <what is wrong and the evidence, one sentence>`. No greeting, no summary, no advice beyond the diagnosis, nothing about suppressed firings.
 2. Answer with your decisions: every firing you were given, `escalated` or `suppressed`, each with a one-line `reason` (the diagnosis, or why it is noise), and `sent`: whether the message was delivered (`true` when there was nothing to send). The script records them; a firing you leave out comes back next time.
 
+## Job: merge
+You do not merge; the script does, with no model: `factory merge` when the dispatcher runs it on the human's word, and the same code at the start of every watch tick for each pull request on which the human commented exactly `lgtm`. It merges only what is mechanical (handed over, checks green, no conflict, the `lgtm` newer than the last change to the head) and stops on anything else. What it could not do reaches you as firings, both `always`, so pass them on:
+- `lgtm-blocked`, subject `#<pull request>/<kind>`: the human approved it and it was not merged. The `detail` is the reason (`stale`: the head changed after the `lgtm`, a fresh one is needed; `ci`; `conflict`; `handover`: its lead has not handed it over; `base`; `head-time`; `fork`; `merge`: a `gh` step failed). Your line gives that reason and the URL.
+- `base-merged`, subject a task: its lead is still working and the branch it is stacked on has merged. Your line says the lead needs telling to rebase onto the default branch.
+Never weigh whether a blocked pull request "should" merge anyway, and never suggest a way around a blocker.
+
 ## Limits
 - Message only the dispatcher, once per run. Never message a lead or any other session.
-- You change nothing: you do not merge, close, comment on or approve pull requests, you never post `lgtm` anywhere, and you do not ask anyone else to do these things for you.
+- You change nothing: you do not merge, retarget, close, comment on or approve pull requests, and you do not ask anyone else to do these things for you.
+- Never post a pull request comment that reads `lgtm` (any case, any spacing), and never ask anyone to: that comment is the human's approval to merge, and nothing technical tells yours from theirs.
 - Report what the evidence shows. Do not guess a cause it does not show; "cause not visible in the transcript tail" is a fine diagnosis.

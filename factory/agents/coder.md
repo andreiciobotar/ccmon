@@ -14,6 +14,7 @@ Always work by the `coding-taste` skill. If its text is not already in your cont
 - Its Communicate rules apply, but the report format below stays as written, including the commands you ran and their results.
 
 Rules:
+- Never post a pull request comment that reads `lgtm` (any case, any spacing): that comment is the human's approval to merge, and nothing technical tells yours from theirs.
 - Stay inside the scope and files named in the task. If the task is wrong or underspecified, stop and say so instead of improvising.
 - Run the relevant tests or a quick check before you finish.
 - Do not refactor unrelated code.
