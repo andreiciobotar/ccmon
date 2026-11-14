@@ -40,18 +40,23 @@ def task_entry(slug):
 
 
 class FakeRun:
-    """Canned runner. `answers` maps an argv prefix (tuple) to (rc, out, err) or a list of them; longest prefix wins."""
+    """Canned runner. `answers` maps an argv prefix (tuple) to (rc, out, err), a list of them or a function returning one;
+    longest prefix wins."""
 
     def __init__(self, answers):
         self.answers = answers
         self.calls = []
+        self.inputs = []
 
-    def __call__(self, argv, cwd=None):
+    def __call__(self, argv, cwd=None, input=None):
         self.calls.append(list(argv))
+        self.inputs.append(input)
         best = max((p for p in self.answers if tuple(argv[:len(p)]) == p), key=len, default=None)
         if best is None:
             return 1, "", "unexpected call"
         result = self.answers[best]
+        if callable(result):  # computed at call time, to look at the world as the caller left it
+            return result()
         if isinstance(result, list):  # successive answers; the last one repeats
             return result.pop(0) if len(result) > 1 else result[0]
         return result

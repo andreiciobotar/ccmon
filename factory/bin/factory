@@ -7,6 +7,8 @@ import json
 import os
 import plistlib
 import re
+import shlex
+import shutil
 import subprocess
 import sys
 import time
@@ -50,10 +52,10 @@ class Fail(Exception):
         self.code = code
 
 
-def run(argv, cwd=None, timeout=None):
-    """The only place git, claude, gh, launchctl and osascript are executed. Returns (returncode, stdout, stderr)."""
+def run(argv, cwd=None, timeout=None, input=None):
+    """The only place a subprocess starts. Returns (returncode, stdout, stderr)."""
     try:
-        p = subprocess.run(argv, cwd=cwd, capture_output=True, text=True, timeout=timeout)
+        p = subprocess.run(argv, cwd=cwd, capture_output=True, text=True, timeout=timeout, input=input)
     except subprocess.TimeoutExpired:
         return 124, "", "timed out"
     except OSError as e:
@@ -133,8 +135,8 @@ def parse_worktrees(porcelain):
 
 
 class Repo:
-    def __init__(self):
-        rc, out, _ = run(["git", "worktree", "list", "--porcelain"])
+    def __init__(self, cwd=None):
+        rc, out, _ = run(["git", "worktree", "list", "--porcelain"], cwd=cwd)
         entries = parse_worktrees(out) if rc == 0 else []
         if not entries:
             raise Fail("not inside a git repository")
@@ -190,6 +192,12 @@ def unplaced_block(sessions):
         if not (isinstance(cwd, str) and cwd) and not finished(s):
             return f"session {s.get('id') or s.get('sessionId')} has no working directory and is not finished"
     return None
+
+
+def live_dispatchers(sessions, root, name, exclude=None):
+    """The unfinished sessions named `name` that work in the repository at `root`, except session `exclude`."""
+    return [s for s in sessions if not finished(s) and s.get("name") == name and s.get("sessionId") != exclude
+            and isinstance(s.get("cwd"), str) and inside(os.path.realpath(s["cwd"]), root)]
 
 
 def sessions_in(sessions, root, path):
@@ -814,7 +822,9 @@ def cmd_ack(args):
 
 
 def cmd_hook(args):
-    """Record one hook payload. Prints nothing and exits 0 whatever happens."""
+    """Record one hook payload and keep the watch job in step with the dispatcher. Prints nothing and exits 0
+    whatever happens."""
+    p = {}
     try:
         p = json.loads(sys.stdin.read())
         event, tool_input = p["hook_event_name"], p.get("tool_input")
@@ -843,7 +853,34 @@ def cmd_hook(args):
             file_feedback(lines, tag)
     except Exception:
         pass
+    try:
+        follow_dispatcher(p)
+    except Exception:
+        pass
     return 0
+
+
+def follow_dispatcher(p):
+    """Install the watch job when a session becomes the dispatcher, remove it when the last one ends."""
+    event, cwd = p.get("hook_event_name"), p.get("cwd")
+    if event not in ("SessionStart", "UserPromptSubmit", "SessionEnd") or p.get("agent_id") \
+            or not isinstance(cwd, str) or WORKTREE_RE.match(cwd):
+        return
+    repo = Repo(cwd)
+    backend, label = scheduler(), job_label(repo.root)
+    name = f"dispatcher-{os.path.basename(repo.root)}"
+    if (event == "UserPromptSubmit" or (event == "SessionStart" and p.get("source") not in ("startup", "resume"))) \
+            and backend.status(label)[0]:
+        return
+    sessions = list_sessions() or []
+    me = next((s for s in sessions if s.get("sessionId") == p.get("session_id")), None)
+    # A session that is ending may already be unlisted; its payload carries a custom title.
+    if me not in live_dispatchers(sessions, repo.root, name) and (me or p.get("session_title") != name):
+        return
+    if event != "SessionEnd":
+        schedule_install(repo, name, backend)
+    elif not live_dispatchers(sessions, repo.root, name, exclude=p["session_id"]):
+        schedule_remove(repo, backend)
 
 
 def cmd_retro(args):
@@ -1063,7 +1100,7 @@ def c_ci_red_default(p, _):
 def c_dispatcher_missing(p, _):
     if not any(r["phase"] in ("motion", "blocked", "review") for r in phased(p)):
         return []
-    n = sum(s.get("name") == p["dispatcher"] and not finished(s) for s in p["sessions"])
+    n = len(live_dispatchers(p["sessions"], p["repo"].root, p["dispatcher"]))
     return [(None, "-", f"{n} unfinished sessions named {p['dispatcher']}")] if n != 1 else []
 
 
@@ -1391,11 +1428,15 @@ def dispatcher_name(args, repo):
 
 
 def notify(repo, f):
-    text = f["detail"].replace("\\", "\\\\").replace('"', '\\"')
-    script = f'display notification "{text}" with title "factory: {os.path.basename(repo.root)}"'
-    if run(["osascript", "-e", script])[0] == 0:
-        log_firing(repo, id=f["id"], decision="escalated", by="watch",
-                   reason="notified on this machine: no dispatcher session to message")
+    """Tell the human on this machine; without a notification service the line in the watch log is the notice."""
+    title = f"factory: {os.path.basename(repo.root)}"
+    argv = notify_argv(title, f["detail"])
+    heard = bool(argv) and run(argv)[0] == 0
+    if not heard:
+        print(f"notify: {title}: {f['detail']}")
+    log_firing(repo, id=f["id"], decision="escalated", by="watch",
+               reason="notified on this machine: no dispatcher session to message" if heard
+               else "written to the watch log: no notification service")
 
 
 def report(repo, sent):
@@ -1426,7 +1467,10 @@ def cmd_watch(args):
     repo = Repo()
     criteria = load_criteria()
     print(f"{now()} watch {os.path.basename(repo.root)}")
-    p = watch_lgtm(gather(repo, dispatcher_name(args, repo)))
+    p = gather(repo, dispatcher_name(args, repo))
+    orphaned = p["sessions"] is not None and not live_dispatchers(p["sessions"], repo.root, p["dispatcher"])
+    if not orphaned:
+        p = watch_lgtm(p)
     current, skipped = evaluate(p, criteria)
     for s in skipped:
         print(f"not evaluated: {s['criterion']}: {s['why']}")
@@ -1448,13 +1492,21 @@ def cmd_watch(args):
             send.append({**f, "id": old["id"]})
     if not send:
         print("nothing new")
-        return 0
-    if any(f["criterion"] == "dispatcher-missing" for f in current):
+    elif orphaned or any(f["criterion"] == "dispatcher-missing" for f in current):
         for f in send:
             if f["criterion"] == "dispatcher-missing":
                 notify(repo, f)
         report(repo, send)
-        return 0
+    else:
+        run_site_manager(p, send)
+    if orphaned and "dispatcher-missing" not in {s["criterion"] for s in skipped}:
+        schedule_remove(repo, scheduler())
+        print(f"no dispatcher session for {repo.root}: schedule removed")
+    return 0
+
+
+def run_site_manager(p, send):
+    repo = p["repo"]
     rc, out, err = run(site_manager_argv(p, send), cwd=repo.root, timeout=WATCH_TIMEOUT)
     try:
         doc = json.loads(out)
@@ -1470,7 +1522,6 @@ def cmd_watch(args):
         print(f"site manager run cost ${cost:.2f}")
     if not usable:
         raise Fail(f"the site manager run failed ({rc}): {err.strip() or 'no usable output'}", code=1)
-    return 0
 
 
 def cmd_firing(args):
@@ -1530,43 +1581,184 @@ def cmd_firings(args):
     return 0
 
 
+# ---- platform ---------------------------------------------------------------
+# Everything that names an operating-system tool: the scheduler backends, the job's PATH, the notifier.
+
+def job_label(root):
+    return f"com.claude.factory.watch.{os.path.basename(root)}-{hashlib.sha256(root.encode()).hexdigest()[:8]}"
+
+
+def job_path():
+    """The directories the watch needs: git, gh, claude, this Python, and the system's."""
+    dirs = []
+    for tool in ("git", "gh", "claude"):
+        found = shutil.which(tool)
+        if not found:
+            raise Fail(f"schedule: {tool} is not on PATH")
+        dirs.append(os.path.dirname(found))
+    return ":".join(dict.fromkeys([*dirs, os.path.dirname(sys.executable), "/usr/bin", "/bin", "/usr/sbin", "/sbin"]))
+
+
+class Launchd:
+    name = "launchd"
+
+    def plist(self, label):
+        return Path("~/Library/LaunchAgents").expanduser() / f"{label}.plist"
+
+    def drop(self, label):
+        """Unlink the plist before booting the job out: the job removes itself from inside a tick."""
+        plist = self.plist(label)
+        was = plist.exists()
+        plist.unlink(missing_ok=True)
+        run(["launchctl", "bootout", f"gui/{os.getuid()}/{label}"])
+        return was
+
+    def drop_legacy(self, label, root):
+        """The job of the version without the hash in its label, when it belongs to this repository."""
+        old = label.rsplit("-", 1)[0]
+        try:
+            ours = plistlib.loads(self.plist(old).read_bytes()).get("WorkingDirectory") == root
+        except Exception:
+            return False
+        return ours and self.drop(old)
+
+    def install(self, label, argv, cwd, path, log):
+        self.drop_legacy(label, cwd)
+        plist = self.plist(label)
+        plist.parent.mkdir(parents=True, exist_ok=True)
+        plist.write_bytes(plistlib.dumps({
+            "Label": label, "ProgramArguments": argv, "WorkingDirectory": cwd, "StartInterval": WATCH_INTERVAL,
+            "EnvironmentVariables": {"PATH": path}, "StandardOutPath": str(log), "StandardErrorPath": str(log)}))
+        run(["launchctl", "bootout", f"gui/{os.getuid()}/{label}"])
+        rc, out, err = run(["launchctl", "bootstrap", f"gui/{os.getuid()}", str(plist)])
+        if rc != 0:
+            raise Fail(f"schedule: launchctl bootstrap failed: {(err or out).strip()}", code=1)
+
+    def remove(self, label, root):
+        legacy = self.drop_legacy(label, root)
+        return self.drop(label) or legacy
+
+    def status(self, label):
+        return self.plist(label).exists(), run(["launchctl", "print", f"gui/{os.getuid()}/{label}"])[0] == 0
+
+
+class Systemd:
+    name = "systemd"
+
+    def unit(self, label, kind):
+        return Path(os.environ.get("XDG_CONFIG_HOME") or "~/.config").expanduser() / "systemd" / "user" / f"{label}.{kind}"
+
+    def install(self, label, argv, cwd, path, log):
+        service, timer = self.unit(label, "service"), self.unit(label, "timer")
+        service.parent.mkdir(parents=True, exist_ok=True)
+        service.write_text(f"[Unit]\nDescription=factory watch {cwd}\n\n[Service]\nType=oneshot\n"
+                           f"WorkingDirectory={cwd}\nEnvironment=\"PATH={path}\"\nExecStart={shlex.join(argv)}\n"
+                           f"StandardOutput=append:{log}\nStandardError=append:{log}\n")
+        timer.write_text(f"[Unit]\nDescription=factory watch {cwd}\n\n[Timer]\nOnActiveSec={WATCH_INTERVAL}\n"
+                         f"OnUnitActiveSec={WATCH_INTERVAL}\n\n[Install]\nWantedBy=timers.target\n")
+        run(["systemctl", "--user", "daemon-reload"])
+        rc, out, err = run(["systemctl", "--user", "enable", "--now", f"{label}.timer"])
+        if rc != 0:
+            raise Fail(f"schedule: systemctl enable failed: {(err or out).strip()}", code=1)
+
+    def remove(self, label, root):
+        was = self.unit(label, "timer").exists()
+        run(["systemctl", "--user", "disable", "--now", f"{label}.timer"])
+        for kind in ("timer", "service"):
+            self.unit(label, kind).unlink(missing_ok=True)
+        run(["systemctl", "--user", "daemon-reload"])
+        return was
+
+    def status(self, label):
+        return self.unit(label, "timer").exists(), run(["systemctl", "--user", "is-active", f"{label}.timer"])[0] == 0
+
+
+class Cron:
+    name = "cron"
+
+    def lines(self, label):
+        """(the user's crontab lines, those without this job's marker)."""
+        rc, out, _ = run(["crontab", "-l"])
+        lines = out.splitlines() if rc == 0 else []
+        return lines, [line for line in lines if not line.endswith(f" # {label}")]
+
+    def write(self, lines):
+        rc, out, err = run(["crontab", "-"], input="".join(f"{line}\n" for line in lines))
+        if rc != 0:
+            raise Fail(f"schedule: crontab failed: {(err or out).strip()}", code=1)
+
+    def install(self, label, argv, cwd, path, log):
+        q = shlex.quote
+        self.write([*self.lines(label)[1], f"*/{WATCH_INTERVAL // 60} * * * * cd {q(cwd)} && PATH={q(path)} "
+                    f"{shlex.join(argv)} >> {q(str(log))} 2>&1 # {label}"])
+
+    def remove(self, label, root):
+        lines, kept = self.lines(label)
+        if len(kept) != len(lines):
+            self.write(kept)
+        return len(kept) != len(lines)
+
+    def status(self, label):
+        lines, kept = self.lines(label)
+        return (len(kept) != len(lines),) * 2
+
+
+def scheduler():
+    if sys.platform == "darwin":
+        return Launchd()
+    if run(["systemctl", "--user", "show-environment"])[0] == 0:
+        return Systemd()
+    if shutil.which("crontab"):
+        return Cron()
+    raise Fail("schedule: no scheduler here: needs launchd, a systemd user session or crontab")
+
+
+def linger_note():
+    """What to tell the human when systemd would stop the timer at the last logout, else None."""
+    if run(["loginctl", "show-user", str(os.getuid()), "-p", "Linger"])[1].strip() != "Linger=yes":
+        return "the timer stops when you log out of every session; `loginctl enable-linger` keeps it running"
+
+
+def notify_argv(title, text):
+    """The command that shows a desktop notification here, or None."""
+    if sys.platform == "darwin":
+        def esc(s):
+            return s.replace("\\", "\\\\").replace('"', '\\"')
+        return ["osascript", "-e", f'display notification "{esc(text)}" with title "{esc(title)}"']
+    return ["notify-send", title, text] if shutil.which("notify-send") else None
+
+
+# ---- schedule ---------------------------------------------------------------
+
+def schedule_install(repo, dispatcher, backend):
+    """Install the watch job, replacing the one there; returns its label."""
+    label, log = job_label(repo.root), STORE.expanduser() / "watch.log"
+    log.parent.mkdir(parents=True, exist_ok=True)
+    backend.install(label, [sys.executable, str(FACTORY), "watch", "--dispatcher", dispatcher], repo.root, job_path(), log)
+    return label
+
+
+def schedule_remove(repo, backend):
+    """Remove the watch job; True when there was one."""
+    return backend.remove(job_label(repo.root), repo.root)
+
+
 def cmd_schedule(args):
     repo = Repo()
-    label = f"com.claude.factory.watch.{os.path.basename(repo.root)}"
-    plist = Path("~/Library/LaunchAgents").expanduser() / f"{label}.plist"
-    log = STORE.expanduser() / "watch.log"
-    domain = f"gui/{os.getuid()}"
+    backend, label = scheduler(), job_label(repo.root)
     if args.action == "install":
-        dispatcher = dispatcher_name(args, repo)
-        if sys.platform != "darwin":
-            raise Fail(f"schedule: launchd is macOS only; add this cron line by hand:\n"
-                       f"*/30 * * * * cd {repo.root} && {sys.executable} {FACTORY} watch --dispatcher {dispatcher} "
-                       f">> {log} 2>&1")
         if "/.claude/worktrees/" in str(FACTORY):
             sys.stderr.write("factory: warning: this factory lives in a task worktree; the job breaks when it is "
                              "removed. Install from the main checkout or the installed plugin.\n")
-        job = {"Label": label, "ProgramArguments": [sys.executable, str(FACTORY), "watch", "--dispatcher", dispatcher],
-               "WorkingDirectory": repo.root, "StartInterval": WATCH_INTERVAL,
-               "EnvironmentVariables": {"PATH": os.environ.get("PATH", "")},
-               "StandardOutPath": str(log), "StandardErrorPath": str(log)}
-        plist.parent.mkdir(parents=True, exist_ok=True)
-        log.parent.mkdir(parents=True, exist_ok=True)
-        plist.write_bytes(plistlib.dumps(job))
-        run(["launchctl", "bootout", f"{domain}/{label}"])
-        rc, out, err = run(["launchctl", "bootstrap", domain, str(plist)])
-        if rc != 0:
-            raise Fail(f"schedule: launchctl bootstrap failed: {(err or out).strip()}", code=1)
-        print(f"installed {label}")
+        schedule_install(repo, dispatcher_name(args, repo), backend)
+        print(f"installed {label} ({backend.name})")
+        if backend.name == "systemd" and (note := linger_note()):
+            print(note)
     elif args.action == "remove":
-        if not plist.exists():
-            print(f"nothing installed: {plist}")
-            return 0
-        run(["launchctl", "bootout", f"{domain}/{label}"])
-        plist.unlink()
-        print(f"removed {label}")
+        print(f"removed {label}" if schedule_remove(repo, backend) else f"nothing installed: {label}")
     else:
-        loaded = run(["launchctl", "print", f"{domain}/{label}"])[0] == 0
-        print(f"{label}: plist {'present' if plist.exists() else 'absent'}, {'loaded' if loaded else 'not loaded'}")
+        present, loaded = backend.status(label)
+        print(f"{label}: {backend.name} job {'present' if present else 'absent'}, {'loaded' if loaded else 'not loaded'}")
     return 0
 
 

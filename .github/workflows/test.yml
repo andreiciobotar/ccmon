@@ -26,3 +26,40 @@ jobs:
           python-version: "3.11" # the oldest version the code supports
       - run: make test
       - run: go test -race ./...
+
+  # The README's path on a Linux machine, with the real scheduler and no Claude login.
+  linux-walk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - run: make install
+      - run: make snapshot
+      - name: make up (three seconds in a pseudo-terminal, then q)
+        run: (sleep 3; printf q) | script -qec "make up" /dev/null | tail -c 400
+      - run: make screenshot && test -s shots/dashboard-140x40.png
+      - name: a systemd user session, as a logged-in user has
+        run: |
+          sudo loginctl enable-linger "$USER"
+          echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
+          timeout 30 sh -c "until [ -S /run/user/$(id -u)/bus ]; do sleep 1; done"
+      - run: tools/walk.sh
+      - name: the cron fallback
+        run: WALK_CRON=1 tools/walk.sh
+
+  # launchd for real, off anyone's own machine.
+  macos-walk:
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - run: tools/walk.sh
