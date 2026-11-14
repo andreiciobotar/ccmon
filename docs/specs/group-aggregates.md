@@ -46,7 +46,7 @@ Headers are right-aligned over right-aligned columns. `signalPills` is deleted (
 Width allocation, inner width `iw`, `want` = longest `2*depth + name + 1 + suffix` over all rows, clamped 14..30:
 1. Always: lead, name, time (if `iw >= 60`), TOKENS, MAIN│SUB at 8, DISP.
 2. The four signal columns (18 + 1 gap) are shown when the name column would still get at least 14 cells.
-3. `SUB%`, then `BAD` (when it exists), are each added only if the name column still gets `want`.
+3. `SUB%` is added only if the signals are shown and the name column still gets `want`; `BAD` (when it exists) only if `SUB%` is shown and the name still gets `want`. The column set therefore grows monotonically with width: signals, then `SUB%`, then `BAD`.
 4. name = min(want, what is left). Slack beyond that goes first to the MAIN│SUB bar (up to 16), then to the name column (up to 30); anything further stays blank at the right edge.
 A truncated name loses its suffix first (plain `cell` truncation with the ellipsis is fine).
 
