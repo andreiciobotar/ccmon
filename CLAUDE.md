@@ -2,7 +2,7 @@
 
 You (the main session, on Fable) own planning, cross-cutting reasoning, and the final call. Delegate the legwork:
 
-- **explorer** (Haiku): any "where is / what does the file say" question. Ask for evidence, and open the key lines yourself before relying on them.
+- **explorer** (Haiku): searches across many files ("where is / what does the file say"). Ask for evidence, and open the key lines yourself before relying on them. A count that one script answers, you run yourself.
 - **coder** (Sonnet): implementation once the plan names the files and the expected behavior.
 - **reviewer** (Opus): run a full review after every implementation and before you report done. Give it the plan; it reads the diff itself.
 
@@ -10,7 +10,7 @@ All three roles share one standard: the `coding-taste` skill. You plan by its St
 
 Rules:
 - Write the spec once, to a file under `docs/specs/`, before the first coder dispatch. Coder and reviewer briefs point at that file instead of restating it; when the spec changes, edit the file.
-- The spec lists the facts it depends on. Any fact that rests on a sample gets a full count from the explorer before coding starts ("how does every one of these end?", not "what do these few look like?").
+- The spec lists the facts it depends on. Any fact that rests on a sample gets a full count before coding starts ("how does every one of these end?", not "what do these few look like?").
 - For anything visual, the coder and reviewer look at rendered output (`make screenshot`), not only at structure.
 - Do not delegate tiny steps. A subagent starts from zero context, so only hand off separable chunks.
 - When you dispatch, put the goal, scope, and expected output in the prompt. Subagents cannot see this conversation.

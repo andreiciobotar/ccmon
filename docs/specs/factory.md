@@ -68,7 +68,7 @@ One function builds the lead's launch command. That is the only place a differen
 
 ## Relay
 Native session messaging only.
-- Lead to dispatcher: `SendMessage` to the dispatcher's session name. The first line starts with one of `QUESTION:`, `BLOCKED:`, `OVERTIME:`, `SPLIT:`, `DONE:`, followed by the slug. A lead that asks a question ends its turn and waits.
+- Lead to dispatcher: `SendMessage` to the dispatcher's session name. The first line starts with one of `QUESTION:`, `BLOCKED:`, `OVERTIME:`, `SPLIT:`, `DONE:`, followed by the slug. A lead that asks a question ends its turn and waits. A `QUESTION:` is an escalation and rare: a lead takes a plainly sensible decision itself and records the key ones (those a reviewer of the pull request or a later re-review would want to know were made) in the outbox with `factory feedback decide`, one line of what and why.
 - Dispatcher to human: every `QUESTION`, `BLOCKED`, `OVERTIME` and `SPLIT` is shown in the lead's own words, with the slug, never summarised away or answered on the human's behalf.
 - Human to lead: the dispatcher sends the human's answer or question to the lead by slug, in the human's words plus any context the lead lacks.
 - The human can always `claude attach <slug>` and talk to a lead directly.
@@ -88,12 +88,14 @@ A task may build on another open task instead of waiting for its pull request to
 - The dispatcher keeps stacks shallow (three deep at most, as a rule of thumb) and lands them bottom-up.
 
 ## Lead lifecycle
-1. **Plan:** read the brief and the repo; write `docs/specs/<slug>.md` including the facts it depends on; get a full count for any fact that rests on a sample; choose the approach a strong practitioner would choose today, checked against current documentation and prior art rather than assumed.
+1. **Plan:** read the brief and the repo; write `docs/specs/<slug>.md` including the facts it depends on; get a full count for any fact that rests on a sample (the lead runs it when one script answers it; the explorer is for searches across many files); choose the approach a strong practitioner would choose today, checked against current documentation and prior art rather than assumed.
 2. **Build:** coder against the spec file, one writer in the worktree at a time. Work that splits cleanly along an interface written in the spec may use parallel coders in child worktrees (`isolation: worktree`), merged back by the lead.
 3. **Review:** full review by the reviewer after each implementation; a commit per coder round; blocker fixes re-reviewed by a fresh reviewer on the commit range; minor-only rounds checked by the lead.
 4. **Quality assessment** (the lead's own, beyond the reviewer): state of the art, blind spots, regressions, undocumented behavior, simplicity, operability. Each item states what was verified, how, and what remains unverified.
 5. **Land:** fetch; rebase onto the default branch; run the full tests; final review scaled to what the default branch did (unchanged: none; changed without overlap and tests pass: light; conflicts or overlap: full review of the affected area); push; open a draft pull request against the task's base; send `DONE:` with the URL. The body is written for a decision in one or two minutes: outcome title, what changes (one to three bullets), where to look (one to three `path:line` spots and why), verified (one line), not verified or risks (one line), about 120 words in all; the spec link, the full quality assessment and test output sit below in a collapsed section. If pushing or opening the pull request is denied, the lead writes the pull request body to `docs/specs/<slug>.pr.md`, commits it and sends `BLOCKED:`; the dispatcher shows the human and, on their word, pushes and opens the pull request from the attended session.
-A task that turns out to be several is reported with `SPLIT:` and one brief per proposed task; the dispatcher starts them.
+A task that turns out to be several is reported with `SPLIT:` and one brief per task the lead is not keeping; the dispatcher starts them. The lead carries on with the part it keeps.
+
+Every role runs one plain command per Bash call, because worktree isolation refuses compound commands that mention git; a longer step is a script file under the job's temporary directory (lead, coder) or `python3 -c` (explorer and reviewer, which have no Write tool).
 
 ## Dispatcher's critique duty
 The dispatcher watches how the factory performs (lead reports, `factory status`, and `ccmon --json` when installed) and tells the human what to change: where review loops pile up, which briefs split badly, which rules leads trip over, what the tokens bought. It proposes edits to the plugin's files; the human decides.
