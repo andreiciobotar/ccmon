@@ -27,7 +27,8 @@ ITEM_RE = re.compile(r"(?:[-*]|\d+\.)\s+")
 LINK_RE = re.compile(r"[a-z][a-z0-9+.-]*://")
 STATES = ("working", "blocked", "handed-over", "acknowledged", "dismissed")
 SETTLED = ("acknowledged", "dismissed")
-KINDS = ("QUESTION", "BLOCKED", "OVERTIME", "SPLIT", "DONE")
+STOPS = ("QUESTION", "BLOCKED", "OVERTIME")
+KINDS = (*STOPS, "SPLIT", "DONE")
 STATUSES = ("open", "accepted", "rejected", "done")
 DECISION = "DECISION:"
 DECISION_MAX = 200
@@ -815,7 +816,7 @@ def cmd_hook(args):
         message = tool_input.get("message") if isinstance(tool_input, dict) else None
         message = message if isinstance(message, str) else ""
         fields = {k: p[k] for k in COPIED.get(event, ()) if k in p}
-        text = None
+        text, tag = None, tags(p)
         if event == "UserPromptSubmit":
             fields["from"] = next((v for start, v in PROMPT_FROM if str(p.get("prompt")).startswith(start)), "human")
         elif event == "Stop" and isinstance(p.get("background_tasks"), list):
@@ -826,7 +827,12 @@ def cmd_hook(args):
             fields["to"] = tool_input.get("to") if isinstance(tool_input, dict) else None
             fields["kind"] = next((k for k in KINDS if message.startswith(k + ":")), None)
             text = message if fields["kind"] == "DONE" else None
-        tag = tags(p)
+            if fields["kind"] in STOPS:
+                why = message[len(fields["kind"]) + 1:].lstrip()
+                if tag["slug"] and re.match(re.escape(tag["slug"]) + r"(?![\w-])", why):
+                    why = why[len(tag["slug"]):]
+                if why := "".join(why.lstrip(" \t\r\n:-–—.,").splitlines()[:1]).strip()[:200]:
+                    fields["summary"] = why
         log("events", {**tag, "event": event, **fields})
         if isinstance(text, str) and (lines := feedback_section(text)) is not None:
             file_feedback(lines, tag)

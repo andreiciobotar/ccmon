@@ -99,7 +99,7 @@ Unsuffixed `events.jsonl`, `retros.jsonl` and `feedback.jsonl` from older versio
 | `Notification` | `notification_type`, `message` |
 | `PermissionRequest` | `tool_name` |
 | `PermissionDenied` | `tool_name`, `reason` |
-| `PostToolUse` (`SendMessage`, `SubagentHandback`) | `tool_name`, `agent_id`; for `SendMessage` also `to` and `kind` (`QUESTION`, `BLOCKED`, `OVERTIME`, `SPLIT`, `DONE` or null) |
+| `PostToolUse` (`SendMessage`, `SubagentHandback`) | `tool_name`, `agent_id`; for `SendMessage` also `to` and `kind` (`QUESTION`, `BLOCKED`, `OVERTIME`, `SPLIT`, `DONE` or null); for a `QUESTION`, `BLOCKED` or `OVERTIME` also `summary`: the message's first line after the `KIND: <slug>` prefix (the next line when the first is only the prefix), cut to 200 characters and left out when empty. Nothing else of a message is stored |
 | `TaskStarted` | `base`, `lead_model` |
 | `TaskRemoved` | |
 
