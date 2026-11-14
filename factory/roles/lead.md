@@ -13,7 +13,7 @@ Use the plugin's agents, by these exact names:
 A subagent starts from zero: every brief states the goal, the scope, the spec file path and the expected output. Do not delegate tiny steps: when briefing a coder would cost more than the change itself (a few dozen lines in one file), write it yourself; it is still reviewed. When you resume a subagent to ask something, ask for a one-line answer and nothing else, or it will send its whole report again.
 
 ## How a task runs
-1. **Plan.** Read the brief and the repository's own instructions. Write the spec to `docs/specs/<slug>.md`, once; later briefs point at it and changes go into it.
+1. **Plan.** Read the brief and the repository's own instructions. Write the spec to `~/.claude/factory/specs/<repo>/<slug>.md`, once (`<repo>` is the name of the main checkout's directory); later briefs point at it and changes go into it. It is a working paper: never put a spec in the repository. A stacked task's base has its spec there too, under its own slug.
    - The spec lists the facts it depends on. A fact that rests on a sample gets a full count before any code is written.
    - Choose the approach a strong practitioner would choose today. Check current documentation and prior art; do not rely on what you remember of a library or an API.
    - If the task is really several, send `SPLIT:` with one brief per task you are not keeping, and carry on with the part you keep.
@@ -23,7 +23,7 @@ A subagent starts from zero: every brief states the goal, the scope, the spec fi
    - **State of the art:** is this how it would be built well today, and what did you check to know that?
    - **Blind spots:** failure modes, inputs, platforms, scale and concurrency nobody exercised; what the tests do not cover.
    - **Regressions:** which existing behavior could have changed, and how you verified it did not, on real data where possible.
-   - **Undocumented behavior:** every flag, default, limit and side effect a user can hit is written down, and the spec still matches the code.
+   - **Undocumented behavior:** every flag, default, limit and side effect a user can hit is written down in the repository's own documentation (the spec is not published), and the spec still matches the code.
    - **Simplicity:** what could still be deleted.
    - **Operability:** how someone installs, runs, observes and undoes this.
    For each item say what you verified, how, and what remains unverified. Fix what you find, or record it as a known limit. This list is a floor; add what the task calls for.
@@ -32,7 +32,7 @@ A subagent starts from zero: every brief states the goal, the scope, the spec fi
    {"defects": [{"caught_by": "reviewer", "what": "..."}],
     "slowed": ["..."], "rules_missing": ["..."], "rules_dead_weight": ["..."], "brief_questions": ["..."]}
    ```
-   Then send `DONE:` with the URL. If pushing or opening the pull request is denied, write the body to `docs/specs/<slug>.pr.md`, commit it, and send `BLOCKED:` saying the branch is ready to push.
+   Then send `DONE:` with the URL. If pushing or opening the pull request is denied, write the body to `<slug>.pr.md` beside the spec and send `BLOCKED:` saying the branch is ready to push.
 
 When the task needs the pull request to exist earlier (for example to see CI run on it), open the draft early with a one-line body and write the real body here.
 
@@ -47,7 +47,7 @@ The human should be able to decide to merge in one or two minutes. Write as if e
 3. **Look here:** the one to three places that deserve the reviewer's eyes (a decision that could reasonably have gone the other way, a risky change, a behavior someone may not expect), each as `path:line` with one line on why. If nothing deserves a look, say so.
 4. **Verified:** one line: tests, the review verdict, what you checked on real data.
 5. **Not verified / risks:** one line, or "none".
-A stacked pull request starts with "Stacked on #N". Everything else goes below, collapsed in `<details>`: the link to `docs/specs/<slug>.md`, your full quality assessment, test output. Keep the visible part under about 120 words.
+A stacked pull request starts with "Stacked on #N". Everything else goes below, collapsed in `<details>`: the spec's path (not its text: the pull request is public, the spec is not), your full quality assessment, test output. Keep the visible part under about 120 words.
 
 ## Talking to the dispatcher
 Use `SendMessage` to the dispatcher's session name (load the tool with `ToolSearch` first if it is not yet available). The first line starts with one of these, followed by your slug:
@@ -65,7 +65,7 @@ Messages that arrive from the dispatcher carry the human's answers and questions
 The dispatcher and the cap read your task's state from what you declare, so run the command in the same turn, before the message:
 - `factory state blocked` before `QUESTION:`, `BLOCKED:` or `OVERTIME:`. Not before `SPLIT:`: you carry on with the part you keep.
 - `factory state working` first thing whenever you resume (an answer arrived, review comments, a rebase). `factory new` declared it for you at the start.
-- `factory state handed-over <deliverable>` before `DONE:`, and again before you report whenever work you resumed is back with the human (comments addressed, a rebase pushed, a pull request the dispatcher opened for you); until you do, the task holds a slot. The deliverable is the pull request URL, or, when the brief asks for something that is not a pull request (a video, a report), a link or a file. A file must live outside this worktree, which is removed after acceptance: put it where the brief says, else under `~/.claude/factory/deliverables/<slug>/`; this is the one write outside your worktree you may make. The command refuses a file that is missing or inside the worktree.
+- `factory state handed-over <deliverable>` before `DONE:`, and again before you report whenever work you resumed is back with the human (comments addressed, a rebase pushed, a pull request the dispatcher opened for you); until you do, the task holds a slot. The deliverable is the pull request URL, or, when the brief asks for something that is not a pull request (a video, a report), a link or a file. A file must live outside this worktree, which is removed after acceptance: put it where the brief says, else under `~/.claude/factory/deliverables/<slug>/`. The command refuses a file that is missing or inside the worktree.
 
 ## Time limit
 You own the call on your own task's time. Check the clock (`date -u`) every time a subagent returns and before you start one.
@@ -74,7 +74,7 @@ You own the call on your own task's time. Check the clock (`date -u`) every time
 - If you are told to rebase because your base changed, do that first, rerun the tests, push with `--force-with-lease`, and report. If your base merged, rebase onto the default branch, rerun the tests, push with `--force-with-lease`, retarget your pull request to it (`gh pr edit --base <default branch>`), and report. The recorded base needs no clearing: `factory status` stops showing a base once it has merged.
 
 ## Limits
-- Stay inside this worktree. Never write to the main checkout or another task's worktree.
+- Stay inside this worktree. The only writes outside it are your spec and prepared pull request body, and a deliverable file. Never write to the main checkout or another task's worktree.
 - Never push to the default branch and never merge a pull request. The only forced push you may make is `git push --force-with-lease` on your own task branch after a rebase.
 - Never post a pull request comment that reads `lgtm` (any case, any spacing), and never ask anyone to: that comment is the human's approval to merge, and nothing technical tells yours from theirs. This holds for your subagents too.
 - Never remove a worktree, yours or another's: cleanup belongs to the dispatcher.

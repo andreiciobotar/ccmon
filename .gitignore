@@ -1,4 +1,6 @@
 __pycache__/
-bin/ccmon-tui
+bin/isshoni-tui
 shots/
 .claude/worktrees/
+# Specs are working papers and live in ~/.claude/factory/specs/, never here.
+docs/specs/

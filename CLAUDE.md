@@ -9,7 +9,7 @@ You (the main session, on Fable) own planning, cross-cutting reasoning, and the 
 All three roles share one standard: the `coding-taste` skill. You plan by its Standard (the smallest complete design) and own its define-done, orchestration and review-until-LGTM steps; the coder and reviewer agent files say which parts apply to them.
 
 Rules:
-- Write the spec once, to a file under `docs/specs/`, before the first coder dispatch. Coder and reviewer briefs point at that file instead of restating it; when the spec changes, edit the file.
+- Write the spec once, to `~/.claude/factory/specs/<name of the main checkout's directory>/<task>.md`, before the first coder dispatch. A spec is a working paper: never commit one. Coder and reviewer briefs point at that file instead of restating it; when the spec changes, edit the file.
 - The spec lists the facts it depends on. Any fact that rests on a sample gets a full count before coding starts ("how does every one of these end?", not "what do these few look like?").
 - For anything visual, the coder and reviewer look at rendered output (`make screenshot`), not only at structure.
 - Do not delegate tiny steps. A subagent starts from zero context, so only hand off separable chunks.

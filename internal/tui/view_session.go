@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"ccmon/internal/data"
+	"isshoni/internal/data"
 )
 
 type sessLayout struct {

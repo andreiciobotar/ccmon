@@ -1,4 +1,4 @@
-// Package tui is the ccmon live terminal dashboard.
+// Package tui is the isshoni live terminal dashboard.
 package tui
 
 import (
@@ -82,7 +82,7 @@ func (th *Theme) gradientAt(t float64) color.Color {
 }
 
 // agentRole is the role of an agent type: a plugin's agent is named <plugin>:<name>
-// and counts as <name> (the same rule as role() in ccmon/metrics.py).
+// and counts as <name> (the same rule as role() in isshoni/metrics.py).
 func agentRole(agent string) string {
 	return agent[strings.LastIndex(agent, ":")+1:]
 }

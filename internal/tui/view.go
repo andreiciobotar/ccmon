@@ -2,17 +2,26 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 )
 
+// The name the dashboard shows. The kanji (three double-width cells) joins the header
+// from kanjiMinWidth columns, where it never pushes the clock out of the bar.
+const (
+	brand         = "Isshoni"
+	brandKanji    = "一緒に"
+	kanjiMinWidth = 120
+)
+
 // View renders the current frame.
 func (m *model) View() tea.View {
 	v := tea.NewView(m.Render())
 	v.AltScreen = true
-	v.WindowTitle = "ccmon"
+	v.WindowTitle = brand
 	if !m.th.NoColor {
 		// Bubble Tea sets the terminal's own background too, so any cell the frame
 		// does not cover (and the margins on resize) match the theme.
@@ -51,6 +60,8 @@ func (m *model) frame() []string {
 		body = m.sessionBody(p, w, bh)
 	case viewAgents:
 		body = m.agentsBody(p, w, bh)
+	case viewFactory:
+		body = m.factoryBody(p, w, bh)
 	default:
 		body = m.dashBody(p, w, bh)
 	}
@@ -70,7 +81,10 @@ func (m *model) frame() []string {
 func (m *model) header(p paint) string {
 	th := m.th
 	bar := p.on(th.Surface)
-	title := bar.gradient(" ccmon ", true)
+	title := bar.gradient(" "+brand+" ", true)
+	if m.w >= kanjiMinWidth {
+		title += bar.t(brandKanji+" ", th.Muted)
+	}
 	tab := func(n int, label string, v viewID, short string) string {
 		txt := fmt.Sprintf("%d %s", n, label)
 		if m.w < 100 {
@@ -84,7 +98,7 @@ func (m *model) header(p paint) string {
 		}
 		return bar.t(" "+txt+" ", th.Muted)
 	}
-	tabs := tab(1, "Dashboard", viewDashboard, "Dash") + tab(2, "Session", viewSession, "Sess") + tab(3, "Agents", viewAgents, "Agents")
+	tabs := tab(1, "Dashboard", viewDashboard, "Dash") + tab(2, "Session", viewSession, "Sess") + tab(3, "Agents", viewAgents, "Agents") + tab(4, "Factory", viewFactory, "Factory")
 
 	var chips []string
 	for i, r := range ranges {
@@ -121,6 +135,7 @@ func (m *model) header(p paint) string {
 		{rangeStr, liveStr, state},
 		{rangeStr, liveStr},
 		{rangeStr},
+		{chips[m.rangeIdx]},
 	}
 	left := title + tabs
 	for _, c := range cands {
@@ -150,6 +165,8 @@ func (m *model) subheader(p paint) string {
 			name = s.Label() + " › " + short8(s.ID)
 		}
 		left = p.t("Dashboard › ", th.Faint) + p.b(name, th.Text)
+	case m.view == viewFactory:
+		left = m.factorySubheader(p)
 	case m.view == viewAgents:
 		n := 0
 		if m.agents != nil {
@@ -227,7 +244,7 @@ func short8(id string) string {
 func (m *model) smallScreen(p paint) []string {
 	th := m.th
 	msg := block{
-		p.gradient("ccmon", true),
+		p.gradient(brand, true),
 		"",
 		p.b("Make the window a little larger", th.Text),
 		p.t(fmt.Sprintf("need at least %dx%d, have %dx%d", minWidth, minHeight, m.w, m.h), th.Muted),
@@ -280,7 +297,7 @@ func (m *model) loadingScreen(p paint) []string {
 		sb.WriteString(p.t("━", mix(th.Border, th.gradientAt(float64(i)/float64(max(1, bw-1))), k)))
 	}
 	msg := block{
-		p.gradient("c c m o n", true),
+		p.gradient("I s s h o n i", true) + p.t("  "+brandKanji, th.Muted),
 		"",
 		sb.String(),
 		"",
@@ -293,15 +310,15 @@ func (m *model) loadingScreen(p paint) []string {
 func (m *model) fatalScreen(p paint) []string {
 	th := m.th
 	lines := []string{
-		p.b("ccmon-tui can't reach the ccmon CLI", th.Red),
+		p.b("isshoni-tui can't reach the isshoni CLI", th.Red),
 		"",
 	}
 	for _, l := range wrapPlain(m.fatal.Error(), min(m.w-12, 64)) {
 		lines = append(lines, p.t(l, th.Text))
 	}
 	lines = append(lines, "",
-		p.t("It needs Python 3.11+ on PATH and the repo's ccmon/ package.", th.Muted),
-		p.t("Set CCMON_ROOT to the repo root if the binary was moved.", th.Muted),
+		p.t("It needs Python 3.11+ on PATH and the repo's isshoni/ package.", th.Muted),
+		p.t("Set ISSHONI_ROOT to the repo root if the binary was moved.", th.Muted),
 		"", p.b("q", th.Purple)+p.t(" quit", th.Muted))
 	bw := 0
 	for _, l := range lines {
@@ -328,7 +345,7 @@ func (m *model) errorScreen(p paint) []string {
 
 func (m *model) helpScreen(p paint) []string {
 	th := m.th
-	lines := []string{p.gradient("ccmon", true) + p.t("  keys", th.Muted)}
+	lines := []string{p.gradient(brand, true) + p.t(" "+brandKanji+"  keys", th.Muted)}
 	for _, g := range helpGroups() {
 		lines = append(lines, "")
 		for _, b := range g {
@@ -338,7 +355,8 @@ func (m *model) helpScreen(p paint) []string {
 	lines = append(lines, "",
 		p.t("r cycles 24h · 7d · 30d · all; on the error screen it retries.", th.Faint),
 		p.t("s sorts by recent · cost · subagent share.", th.Faint),
-		p.t("A dot pulses on sessions written in the last 30 seconds.", th.Faint))
+		p.t("A dot pulses on sessions written in the last 30 seconds.", th.Faint),
+		p.t("The factory view refreshes every 30 s while shown.", th.Faint))
 	bw := 0
 	for _, l := range lines {
 		bw = max(bw, width(l))
@@ -350,6 +368,9 @@ func (m *model) helpScreen(p paint) []string {
 			path = append([]rune("…"), path[max(0, len(path)-max(room, 1)+1):]...)
 		}
 		lines[1] = p.t(pre+string(path)+post, th.Faint) // in place of the blank line under the title: no extra row
+	}
+	if len(lines)+2 > m.h {
+		lines = slices.DeleteFunc(lines, func(l string) bool { return l == "" }) // too short for the gaps
 	}
 	bw = min(m.w-2, bw+4)
 	bh := min(m.h, len(lines)+2)

@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"ccmon/internal/data"
+	"isshoni/internal/data"
 )
 
 const cardH = 4 // three lines and a gap

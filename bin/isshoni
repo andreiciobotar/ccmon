@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Shim: put the repo root on sys.path and run ccmon.cli.main()."""
+"""Shim: put the repo root on sys.path and run isshoni.cli.main()."""
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
 
-from ccmon.cli import main  # noqa: E402
+from isshoni.cli import main  # noqa: E402
 
 sys.exit(main())

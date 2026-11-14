@@ -1,5 +1,5 @@
 """Convert truecolor ANSI text on stdin to an HTML page on stdout (for `make screenshot`)."""
-import re,sys,html
+import re,sys,html,unicodedata
 data=sys.stdin.read()
 out=[];st={}
 def span(t):
@@ -11,7 +11,10 @@ def span(t):
     if st.get('f'): css.append('opacity:.6')
     if st.get('i'): css.append('font-style:italic')
     if st.get('u'): css.append('text-decoration:underline')
-    out.append('<span style="%s">%s</span>'%(';'.join(css),html.escape(t)))
+    # a double-width character takes exactly two cells, whatever the fallback font's advance
+    body=''.join('<span style="display:inline-block;width:2ch;text-align:center">%s</span>'%c
+                 if unicodedata.east_asian_width(c) in 'WF' else html.escape(c) for c in t)
+    out.append('<span style="%s">%s</span>'%(';'.join(css),body))
 pos=0
 for m in re.finditer(r'\x1b\[([0-9;]*)m',data):
     span(data[pos:m.start()]); pos=m.end()
