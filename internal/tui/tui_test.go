@@ -874,3 +874,33 @@ func TestScrollPullsBackWhenTheWindowGrows(t *testing.T) {
 		t.Fatalf("top %d after growing: group rows above are hidden", m.top)
 	}
 }
+
+// The kanji is three double-width cells: the header stays exactly as wide as the
+// window, and from kanjiMinWidth the kanji never costs the clock, even with every
+// right-hand part showing (live sessions, reloading).
+func TestHeaderBrand(t *testing.T) {
+	for _, noColor := range []bool{true, false} {
+		for _, w := range []int{minWidth, 80, 100, kanjiMinWidth - 1, kanjiMinWidth, 140} {
+			m := fakeModel(noColor, w, 30)
+			m.loading, m.lastUpdate = true, m.now()
+			for id := range m.sessions {
+				m.seen[id] = m.now()
+			}
+			raw := strings.SplitN(m.Render(), "\n", 2)[0]
+			head := ansi.Strip(raw)
+			name := fmt.Sprintf("noColor=%v w=%d", noColor, w)
+			if width(raw) != w {
+				t.Errorf("%s: header is %d cells: %q", name, width(raw), head)
+			}
+			if !strings.Contains(head, " Isshoni ") {
+				t.Errorf("%s: no name: %q", name, head)
+			}
+			if got, want := strings.Contains(head, "一緒に"), w >= kanjiMinWidth; got != want {
+				t.Errorf("%s: kanji shown=%v, want %v: %q", name, got, want, head)
+			}
+			if w >= kanjiMinWidth && !(strings.Contains(head, "3 live") && strings.Contains(head, "reloading") && strings.Contains(head, m.lastUpdate.Local().Format("15:04:05"))) {
+				t.Errorf("%s: the kanji pushed something out: %q", name, head)
+			}
+		}
+	}
+}

@@ -8,11 +8,19 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
+// The name the dashboard shows. The kanji (three double-width cells) joins the header
+// from kanjiMinWidth columns, where it never pushes the clock out of the bar.
+const (
+	brand         = "Isshoni"
+	brandKanji    = "一緒に"
+	kanjiMinWidth = 110
+)
+
 // View renders the current frame.
 func (m *model) View() tea.View {
 	v := tea.NewView(m.Render())
 	v.AltScreen = true
-	v.WindowTitle = "isshoni"
+	v.WindowTitle = brand
 	if !m.th.NoColor {
 		// Bubble Tea sets the terminal's own background too, so any cell the frame
 		// does not cover (and the margins on resize) match the theme.
@@ -70,7 +78,10 @@ func (m *model) frame() []string {
 func (m *model) header(p paint) string {
 	th := m.th
 	bar := p.on(th.Surface)
-	title := bar.gradient(" isshoni ", true)
+	title := bar.gradient(" "+brand+" ", true)
+	if m.w >= kanjiMinWidth {
+		title += bar.t(brandKanji+" ", th.Muted)
+	}
 	tab := func(n int, label string, v viewID, short string) string {
 		txt := fmt.Sprintf("%d %s", n, label)
 		if m.w < 100 {
@@ -221,7 +232,7 @@ func short8(id string) string {
 func (m *model) smallScreen(p paint) []string {
 	th := m.th
 	msg := block{
-		p.gradient("isshoni", true),
+		p.gradient(brand, true),
 		"",
 		p.b("Make the window a little larger", th.Text),
 		p.t(fmt.Sprintf("need at least %dx%d, have %dx%d", minWidth, minHeight, m.w, m.h), th.Muted),
@@ -274,7 +285,7 @@ func (m *model) loadingScreen(p paint) []string {
 		sb.WriteString(p.t("━", mix(th.Border, th.gradientAt(float64(i)/float64(max(1, bw-1))), k)))
 	}
 	msg := block{
-		p.gradient("c c m o n", true),
+		p.gradient("I s s h o n i", true) + p.t("  "+brandKanji, th.Muted),
 		"",
 		sb.String(),
 		"",
@@ -322,7 +333,7 @@ func (m *model) errorScreen(p paint) []string {
 
 func (m *model) helpScreen(p paint) []string {
 	th := m.th
-	lines := []string{p.gradient("isshoni", true) + p.t("  keys", th.Muted)}
+	lines := []string{p.gradient(brand, true) + p.t(" "+brandKanji+"  keys", th.Muted)}
 	for _, g := range helpGroups() {
 		lines = append(lines, "")
 		for _, b := range g {
