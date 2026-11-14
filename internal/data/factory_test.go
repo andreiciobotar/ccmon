@@ -46,11 +46,14 @@ func TestFactoryStatusDecodesNulls(t *testing.T) {
 	if st.Cap != 7 || st.InMotion != 2 || st.Blocked != 1 || st.InReview != 1 || st.Settled != 1 || len(st.Rows) != 4 {
 		t.Fatalf("status %+v", st)
 	}
-	if a := st.Rows[0]; a.Elapsed != nil || a.Slug != "cost-in-money" || a.PRState != "unknown" {
+	if a := st.Rows[0]; a.Elapsed != nil || a.Waited != nil || a.StopKind != "" || a.StopSummary != "" || a.Slug != "cost-in-money" || a.PRState != "unknown" {
 		t.Fatalf("row with nulls: %+v", a)
 	}
 	if b := st.Rows[1]; b.Elapsed == nil || *b.Elapsed != 252 || !b.Overtime || !b.Stale || b.PRURL == "" {
 		t.Fatalf("row: %+v", b)
+	}
+	if c := st.Rows[2]; c.Waited == nil || *c.Waited != 600 || c.StopKind != "QUESTION" || c.StopSummary != "Which database should it use?" {
+		t.Fatalf("the blocked row's wait and stop: %+v", c)
 	}
 	if c, d := st.Rows[2], st.Rows[3]; c.Phase != "blocked" || c.Deliverable != "" || d.Phase != "settled" || d.Deliverable != "/r/docs/specs/write-up.md" {
 		t.Fatalf("blocked and settled rows: %+v %+v", c, d)

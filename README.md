@@ -53,7 +53,7 @@ bin/isshoni agents --since 7d      # per agent type: cost, tokens, p50/p90, repe
 
 Cost is the API list price, from [isshoni/prices.toml](isshoni/prices.toml); edit it when prices change. Python 3.11+, no dependencies. Add `--json` for machine-readable output; [docs/isshoni.md](docs/isshoni.md) has the rest.
 
-`isshoni-tui` is the same data as a live terminal dashboard: sessions grouped by repository and task, a timeline per session, and what is running now. Its factory view (`4`) lists each repository's factory tasks with their phase and how many hold a slot against the cap, and `c` there changes the cap: the one thing the dashboard writes (`worktree_cap` in `~/.claude/factory/settings.json`). Its kaizen view (`5`) shows from `isshoni kaizen` whether the factory is getting better: cost, speed, review rounds, defects and the feedback outbox.
+`isshoni-tui` is the same data as a live terminal dashboard: sessions grouped by repository and task, a timeline per session, and what is running now. Its factory view (`4`) lists what waits on you across repositories, then each repository's factory tasks with their phase and how many hold a slot against the cap, and `c` there changes the cap: the one thing the dashboard writes (`worktree_cap` in `~/.claude/factory/settings.json`). Its kaizen view (`5`) shows from `isshoni kaizen` whether the factory is getting better: cost, speed, review rounds, defects and the feedback outbox.
 
 ```sh
 make install    # needs Go 1.27+ and Python 3.11+; builds bin/isshoni-tui

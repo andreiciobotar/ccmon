@@ -313,11 +313,34 @@ def collect(repo, sessions, limit_hours):
         row["pr_state"], row["pr_url"], row["pr_head"], row["pr_base"] = prs.get(branch, ("unknown", "", "", ""))
         row["state"] = declared.get(slug, {}).get("state")
         row["deliverable"] = declared.get(slug, {}).get("deliverable")
+        since = epoch(declared.get(slug, {}).get("ts"))
+        row["waited"] = None if since is None else max(0, int(now - since))
         row["phase"] = phase(row["pr_state"], mine if placed else None, row["state"])
         times = [t for t in (row["last_commit"], started and started / 1000) if t]
         row["stale"] = bool(times) and now - max(times) > STALE_SECONDS
         rows.append(row)
+    stops(repo, declared, rows)
     return rows
+
+
+def stops(repo, declared, rows):
+    """Set stop_kind and stop_summary on every row: those of the last stop event a blocked task's lead sent
+    after declaring it, None for the rest and for all of them when the events log cannot be read."""
+    for row in rows:
+        row["stop_kind"] = row["stop_summary"] = None
+    blocked = {r["slug"]: str(declared[r["slug"]].get("ts")) for r in rows if r["state"] == "blocked"}
+    if not blocked:
+        return
+    by_slug = {r["slug"]: r for r in rows}
+    try:
+        for e in read_log("events", since=min(blocked.values())):
+            slug, ts, summary = e.get("slug"), e.get("ts"), e.get("summary")
+            if e.get("repo") == repo.root and e.get("kind") in STOPS and isinstance(slug, str) and slug in blocked \
+                    and isinstance(ts, str) and ts >= blocked[slug]:
+                by_slug[slug]["stop_kind"] = e["kind"]
+                by_slug[slug]["stop_summary"] = summary if isinstance(summary, str) else None
+    except (OSError, ValueError):  # ValueError: a file that is not UTF-8
+        pass
 
 
 # ---- telemetry --------------------------------------------------------------

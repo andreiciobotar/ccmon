@@ -5,6 +5,7 @@ import (
 	"image/color"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -50,6 +51,22 @@ func manyTasks(n int) []data.FactoryTask {
 	return rows
 }
 
+// delta waits on the human in every other way: a deliverable that is a file, one that is a
+// link, a blocked lead without a reason, an overtime stop, a long summary in wide characters.
+func delta() factoryRepo {
+	file, link, bare := ftask("design-review", "review"), ftask("video-cut", "review"), ftask("stuck-on-keys", "blocked")
+	slow, wide := ftask("slow-import", "blocked"), ftask("wide-ask", "blocked")
+	file.Deliverable, link.Deliverable, link.Waited = "/r/delta/docs/design.md", "https://example.com/cut/v2", ptr(int64(1800))
+	bare.Waited = ptr(int64(90))
+	slow.Waited, slow.StopKind, slow.StopSummary = ptr(int64(300)), "OVERTIME", "ran 3h of 2h: split it?"
+	wide.Waited, wide.StopKind = ptr(int64(7200)), "BLOCKED"
+	wide.StopSummary = "データベースの接続情報が見つかりません。どの環境のものを使えばよいですか？ 本番ではない方でお願いします。"
+	return factoryRepo{name: "delta-docs", path: "/r/delta", st: fstatus(5, file, link, bare, slow, wide)}
+}
+
+// waitingRepos is the fixture with every kind of waiting task.
+func waitingRepos() []factoryRepo { return append(fakeFactoryRepos(), delta()) }
+
 // alpha has all five phases, an overtime and a stale task, a stacked one, a closed pull
 // request, and deliverables without a pull request (a link and a file).
 func alpha() factoryRepo {
@@ -61,7 +78,8 @@ func alpha() factoryRepo {
 	ask, notes := ftask("needs-an-answer", "blocked"), ftask("release-notes", "settled")
 	ask.Session, ask.Elapsed, ask.Deliverable = "done", ptr(int64(640)), "https://example.com/design/doc"
 	notes.Session, notes.Elapsed, notes.Deliverable = "done", ptr(int64(3000)), "/r/alpha/docs/release-notes.md"
-	limits.PRState, limits.PRURL, limits.Elapsed = "open", "https://github.com/o/alpha/pull/42", ptr(int64(5400))
+	limits.PRState, limits.PRURL, limits.Elapsed, limits.Waited = "open", "https://github.com/o/alpha/pull/42", ptr(int64(5400)), ptr(int64(10800))
+	ask.Waited, ask.StopKind, ask.StopSummary = ptr(int64(2700)), "QUESTION", "Should the export keep the legacy column order?"
 	docs.PRState, docs.PRURL, docs.Stale = "closed", "https://github.com/o/alpha/pull/40", true
 	old.PRState, old.PRURL, old.Elapsed = "merged", "https://github.com/o/alpha/pull/31", ptr(int64(61))
 	return factoryRepo{name: "alpha", path: "/r/alpha", st: fstatus(5, stacked, old, docs, quiet, limits, login, ask, notes)}
@@ -117,6 +135,10 @@ func TestFactoryRenderVariants(t *testing.T) {
 		},
 		"narrow meter": func(m *model) {
 			setFactory(m, factoryRepo{name: "mid-size-nam", path: "/r/mid", st: fstatus(17, manyTasks(4)...)})
+		},
+		"band": func(m *model) { setFactory(m, waitingRepos()...) },
+		"quiet": func(m *model) {
+			setFactory(m, factoryRepo{name: "calm", path: "/r/calm", st: fstatus(5, ftask("a", "motion"))})
 		},
 		"editing": func(m *model) { setFactory(m, fakeFactoryRepos()...); m.fac.editing, m.fac.field = true, "12" },
 		"edit err": func(m *model) {
@@ -217,7 +239,7 @@ func TestFactoryTableColumnsAndPhaseLabels(t *testing.T) {
 		t.Errorf("below 100 columns the labels are short:\n%s", short)
 	}
 	narrow := plain(factoryModel(true, 60, 20, alpha()))
-	for _, gone := range []string{"BASE", "PR "} {
+	for _, gone := range []string{"BASE", "ELAPSED  PR"} {
 		if strings.Contains(narrow, gone) {
 			t.Errorf("60 columns should have dropped %q:\n%s", gone, narrow)
 		}
@@ -251,6 +273,171 @@ func TestFactoryRowOrder(t *testing.T) {
 	}
 	if want := "b zz aa mm r merged-one done p q"; strings.Join(got, " ") != want {
 		t.Fatalf("order %q, want %q", strings.Join(got, " "), want)
+	}
+}
+
+// ---- the band ---------------------------------------------------------------------
+
+func bandLines(out string) []string {
+	var band []string
+	for _, l := range strings.Split(out, "\n") {
+		if strings.Contains(l, "worktree cap") {
+			break
+		}
+		band = append(band, l)
+	}
+	return band
+}
+
+func TestFactoryWaitingOrder(t *testing.T) {
+	m := factoryModel(true, 140, 40, waitingRepos()...)
+	var got []string
+	for _, it := range m.waiting() {
+		got = append(got, it.task.Slug)
+	}
+	if want := "api-rate-limits wide-ask needs-an-answer video-cut slow-import stuck-on-keys design-review"; strings.Join(got, " ") != want {
+		t.Fatalf("oldest first, an unknown wait last: %q, want %q", strings.Join(got, " "), want)
+	}
+	tie := func(slug string) data.FactoryTask { x := ftask(slug, "review"); x.Waited = ptr(int64(60)); return x }
+	m = factoryModel(true, 140, 40, factoryRepo{name: "b", st: fstatus(5, tie("y"), tie("a"))}, factoryRepo{name: "a", st: fstatus(5, tie("z"))})
+	got = nil
+	for _, it := range m.waiting() {
+		got = append(got, it.repo+"/"+it.task.Slug)
+	}
+	if want := "a/z b/a b/y"; strings.Join(got, " ") != want {
+		t.Fatalf("ties by repository then slug: %q, want %q", strings.Join(got, " "), want)
+	}
+	if len(factoryModel(true, 140, 40, factoryRepo{name: "m", st: fstatus(5, ftask("a", "motion"), ftask("b", "merged"), ftask("c", "settled"))}).waiting()) != 0 {
+		t.Fatal("only review and blocked tasks wait on the human")
+	}
+}
+
+func TestFactoryWaitingWhatAndDo(t *testing.T) {
+	rows := map[string]data.FactoryTask{}
+	for _, r := range append(delta().st.Rows, alpha().st.Rows...) {
+		rows[r.Slug] = r
+	}
+	for slug, want := range map[string][2]string{
+		"api-rate-limits": {"review PR", "#42 https://github.com/o/alpha/pull/42"},
+		"design-review":   {"see deliverable", "/r/delta/docs/design.md"},
+		"video-cut":       {"see deliverable", "https://example.com/cut/v2"},
+		"needs-an-answer": {"answer question", "Should the export keep the legacy column order?"},
+		"wide-ask":        {"unblock", rows["wide-ask"].StopSummary},
+		"slow-import":     {"decide: overtime", "ran 3h of 2h: split it?"},
+		"stuck-on-keys":   {"blocked", ""},
+	} {
+		if what, do := (waitItem{"r", rows[slug]}).todo(); what != want[0] || do != want[1] {
+			t.Errorf("%s: %q %q, want %q %q", slug, what, do, want[0], want[1])
+		}
+	}
+	if what, do := (waitItem{"r", ftask("x", "review")}).todo(); what != "review" || do != "" {
+		t.Errorf("review without anything to show: %q %q", what, do)
+	}
+	multi := ftask("x", "blocked")
+	multi.StopKind, multi.StopSummary = "QUESTION", "two\nlines  of text"
+	if _, do := (waitItem{"r", multi}).todo(); do != "two lines of text" {
+		t.Errorf("a summary is one line: %q", do)
+	}
+	out := plain(factoryModel(true, 140, 40, waitingRepos()...))
+	for _, want := range []string{"▲ Needs you  7", "◆ delta-docs  design-review", "▲ delta-docs  stuck-on-keys    blocked", "no reason recorded: ask its lead", "-  /r/delta/docs/design.md"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("band lacks %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestFactoryBandWhenNothingWaitsIsOneLineBeforeTheSettings(t *testing.T) {
+	lines := strings.Split(plain(factoryModel(true, 100, 30, factoryRepo{name: "calm", st: fstatus(5, ftask("a", "motion"))})), "\n")
+	if !strings.HasPrefix(lines[2], " ✓ nothing waits on you") || !strings.HasPrefix(lines[3], " worktree cap") {
+		t.Fatalf("one line, then the settings line:\n%s", strings.Join(lines[:5], "\n"))
+	}
+	if out := plain(factoryModel(true, 100, 30)); strings.Contains(out, "nothing waits") || strings.Contains(out, "Needs you") {
+		t.Errorf("no repositories, no band:\n%s", out)
+	}
+	m := fakeModel(true, 100, 30)
+	m.view = viewFactory
+	if out := plain(m); strings.Contains(out, "nothing waits") {
+		t.Errorf("no band while loading:\n%s", out)
+	}
+}
+
+func TestFactoryBandDoCellWrapsWhenNarrowAndTruncates(t *testing.T) {
+	narrow := bandLines(plain(factoryModel(true, 60, 40, waitingRepos()...)))
+	i := slices.IndexFunc(narrow, func(l string) bool { return strings.Contains(l, "stuck-on-keys") })
+	if i < 0 || i+1 >= len(narrow) {
+		t.Fatalf("no stuck-on-keys row with a line under it:\n%s", strings.Join(narrow, "\n"))
+	}
+	slug := len([]rune(narrow[i][:strings.Index(narrow[i], "stuck-on-keys")]))
+	if !strings.HasPrefix(narrow[i+1], strings.Repeat(" ", slug)+"no reason recorded") {
+		t.Errorf("a do cell under 30 cells goes under the slug column:\n%s", strings.Join(narrow, "\n"))
+	}
+	for _, w := range []int{100, 140} {
+		var wide string
+		for _, l := range bandLines(plain(factoryModel(true, w, 40, waitingRepos()...))) {
+			if strings.Contains(l, "wide-ask") {
+				wide = l
+			}
+		}
+		if !strings.Contains(wide, "データベース") || !strings.Contains(wide, "…") {
+			t.Errorf("%d columns: a long wide-character summary is cut with an ellipsis:\n%s", w, wide)
+		}
+	}
+}
+
+// At 80 columns five tabs leave the badge no room beside "N live": the word goes, the count stays.
+func TestFactoryTabBadgeKeepsTheLiveCountAt80Columns(t *testing.T) {
+	for _, n := range []int{0, 7, 12, 123} {
+		for _, v := range []viewID{viewDashboard, viewFactory} {
+			m := fakeModel(true, 80, 24)
+			m.view = v
+			for _, s := range m.sessions {
+				m.seen[s.ID] = m.now()
+			}
+			rows := make([]data.FactoryTask, n)
+			for i := range rows {
+				rows[i] = ftask(fmt.Sprintf("t%d", i), "review")
+			}
+			m.fac.repos, m.fac.doneAt = []factoryRepo{{name: "r", st: fstatus(5, rows...)}}, m.now()
+			live := m.liveCount()
+			head := strings.Split(plain(m), "\n")[0]
+			badge, count := fmt.Sprintf("4 Factory ▲%d", n), fmt.Sprintf("● %d ", live)
+			if n == 0 {
+				badge, count = "4 Factory", fmt.Sprintf("● %d live", live)
+			}
+			if live == 0 || !strings.Contains(head, badge) || !strings.Contains(head, count) || !strings.Contains(head, "[7d]") {
+				t.Errorf("view %d, %d waiting, %d live: %q", v, n, live, head)
+			}
+		}
+	}
+}
+
+func TestFactoryTabBadge(t *testing.T) {
+	for _, v := range []viewID{viewDashboard, viewSession, viewAgents, viewFactory, viewKaizen} {
+		m := fakeModel(true, 140, 40)
+		m.view = v
+		m.fac.repos, m.fac.doneAt = waitingRepos(), m.now()
+		head := strings.Split(plain(m), "\n")[0]
+		want := " 4 Factory ▲7 "
+		if v == viewFactory {
+			want = "[4 Factory ▲7]"
+		}
+		if !strings.Contains(head, want) {
+			t.Errorf("view %d: header %q lacks %q", v, head, want)
+		}
+		m.fac.repos = []factoryRepo{{name: "calm", st: fstatus(5, ftask("a", "motion"))}}
+		if head = strings.Split(plain(m), "\n")[0]; strings.Contains(head, "▲") {
+			t.Errorf("view %d: nothing waits, no badge: %q", v, head)
+		}
+	}
+	m := fakeModel(false, 140, 40)
+	m.fac.repos = fakeFactoryRepos()
+	if want := m.th.on(m.th.Surface).b(" ▲2", m.th.Orange); !strings.Contains(m.Render(), want) {
+		t.Error("the badge is bold orange")
+	}
+	m = fakeModel(true, 80, 24)
+	m.fac.repos = fakeFactoryRepos()
+	if head := strings.Split(plain(m), "\n")[0]; !strings.Contains(head, "4 Factory ▲2") {
+		t.Errorf("short tab labels keep the badge: %q", head)
 	}
 }
 
@@ -447,7 +634,7 @@ func TestFactoryHelpAndFooter(t *testing.T) {
 	}
 	m.fac.editing, m.help = false, true
 	out := plain(m)
-	for _, want := range []string{"1 2 3 4 5", "dashboard · session · agents · factory · kaizen", "←→/hl", "kaizen page", "c", "edit cap", "refreshes every 30 s while shown"} {
+	for _, want := range []string{"1 2 3 4 5", "dashboard · session · agents · factory · kaizen", "←→/hl", "kaizen page", "c", "edit cap", "refreshes every 30 s while shown, every 2 min otherwise"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("help lacks %q:\n%s", want, out)
 		}
@@ -464,9 +651,12 @@ func TestGoldenFactory(t *testing.T) {
 		set  func(m *model)
 		gold bool
 	}{
-		{"factory-140x40", 140, 40, func(m *model) { setFactory(m, fakeFactoryRepos()...) }, true},
-		{"factory-100x30", 100, 30, func(m *model) { setFactory(m, fakeFactoryRepos()...) }, true},
-		{"factory-80x24", 80, 24, func(m *model) { setFactory(m, fakeFactoryRepos()...) }, true},
+		{"factory-140x40", 140, 40, func(m *model) { setFactory(m, waitingRepos()...) }, true},
+		{"factory-100x30", 100, 30, func(m *model) { setFactory(m, waitingRepos()...) }, true},
+		{"factory-80x24", 80, 24, func(m *model) { setFactory(m, waitingRepos()...) }, true},
+		{"factory-quiet-80x24", 80, 24, func(m *model) {
+			setFactory(m, factoryRepo{name: "calm", path: "/r/calm", st: fstatus(5, manyTasks(2)...)})
+		}, true},
 		{"factory-empty-80x24", 80, 24, func(m *model) { setFactory(m) }, true},
 		{"factory-edit-100x30", 100, 30, func(m *model) { setFactory(m, fakeFactoryRepos()...); m.fac.editing, m.fac.field = true, "12" }, false},
 		{"factory-busy-140x40", 140, 40, func(m *model) {
@@ -576,11 +766,52 @@ func TestFactoryCadence(t *testing.T) {
 
 	send(m, "1")
 	*now = now.Add(time.Hour)
-	if got := only[factoryMsg](upd(m, tickMsg{})); len(got) != 0 {
-		t.Fatal("nothing runs while another view is shown")
-	}
 	if got := only[factoryMsg](upd(m, press("4"))); len(got) != 1 {
 		t.Fatal("entering after a long time refreshes")
+	}
+}
+
+func TestFactoryRefreshesOffViewEveryTwoMinutes(t *testing.T) {
+	m, dir, now := factoryStubModel(t)
+	first := only[factoryMsg](upd(m, tickMsg{}))
+	if len(first) != 1 || m.view != viewDashboard {
+		t.Fatalf("the first result is fetched off the view: %d", len(first))
+	}
+	upd(m, first[0])
+	calls := factoryCalls(t, dir)
+	*now = now.Add(factoryIdleEvery - time.Second)
+	if got := only[factoryMsg](upd(m, tickMsg{})); len(got) != 0 {
+		t.Fatal("a tick before 2 min starts nothing off the view")
+	}
+	*now = now.Add(2 * time.Second)
+	got := only[factoryMsg](upd(m, tickMsg{}))
+	if len(got) != 1 || factoryCalls(t, dir) != calls+2 {
+		t.Fatalf("a tick after 2 min starts one refresh: %d, %d calls", len(got), factoryCalls(t, dir)-calls)
+	}
+	upd(m, got[0])
+	if m.fac.doneAt != *now {
+		t.Fatal("the off-view result is applied")
+	}
+	m.loaded = false
+	*now = now.Add(time.Hour)
+	if got := only[factoryMsg](upd(m, tickMsg{})); len(got) != 0 {
+		t.Fatal("no refresh before the sessions have loaded")
+	}
+	m.loaded, m.sessions = true, nil
+	got = only[factoryMsg](upd(m, tickMsg{}))
+	if len(got) != 1 {
+		t.Fatal("a range without sessions still refreshes")
+	}
+	upd(m, got[0])
+	if len(m.fac.repos) != 0 {
+		t.Fatalf("a range without sessions clears the count: %d repositories", len(m.fac.repos))
+	}
+}
+
+func TestFactoryQuietLineSaysWhenARepositoryDidNotAnswer(t *testing.T) {
+	out := plain(factoryModel(true, 100, 30, factoryRepo{name: "calm", st: fstatus(5)}, factoryRepo{name: "gone", err: "boom"}))
+	if !strings.Contains(out, " nothing waits on you in the repositories that answered") || strings.Contains(out, "✓") {
+		t.Fatalf("the quiet line must not vouch for a repository that failed:\n%s", out)
 	}
 }
 
@@ -861,7 +1092,7 @@ func TestSnapshotFactory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"[4 Factory]", "proj", "stacked", "cost-in-money", "in motion ▲●○○○○○ 2/7", "write-up.md", "needs-an-answer", "worktree cap  7"} {
+	for _, want := range []string{"proj", "stacked", "cost-in-money", "in motion ▲●○○○○○ 2/7", "write-up.md", "needs-an-answer", "worktree cap  7", "[4 Factory ▲2]", "▲ Needs you  2", "review PR", "1h30m", "answer question", "Which database should it use?"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("snapshot lacks %q:\n%s", want, out)
 		}

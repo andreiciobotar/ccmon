@@ -194,7 +194,12 @@ VIEW=... SIZE=...` turns it into a PNG under `shots/` (needs Chrome).
 - **Factory:** for each repository seen in the range that has task worktrees, what
   `factory status --json` reports: the tasks holding a slot against the cap, and every
   task with its phase, elapsed time, pull request or deliverable, base, and `overtime`
-  or `stale`. It refreshes every 30 seconds while shown. `c` sets `worktree_cap` (1 to
+  or `stale`. At the top, a band lists everything that waits on you across repositories,
+  oldest first: tasks in review (the pull request or deliverable to look at) and blocked
+  tasks (what they asked), each with how long it has waited; when nothing waits it says
+  so. The `4 Factory` tab carries `▲N` for the number waiting on every view (in a narrow
+  header the live count then shows as `● N`, without the word). It refreshes every 30
+  seconds while shown, every 2 minutes otherwise. `c` sets `worktree_cap` (1 to
   999) in `~/.claude/factory/settings.json`, leaving the other keys as they were; a file
   that is not a JSON object is never overwritten. See [factory.md](factory.md).
 - **Kaizen:** whether the factory is getting better, across all repositories, from what

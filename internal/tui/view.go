@@ -96,19 +96,26 @@ func (m *model) header(p paint) string {
 		if m.w < 110 {
 			txt = fmt.Sprintf("%d %s", n, short)
 		}
+		badge := ""
+		if v == viewFactory {
+			if n := len(m.waiting()); n > 0 {
+				badge = fmt.Sprintf(" ▲%d", n)
+			}
+		}
 		if m.view == v {
 			if th.NoColor {
 				if compact {
-					return " [" + txt + "]" // the space a plain tab would have before it
+					return " [" + txt + badge + "]" // the space a plain tab would have before it
 				}
-				return "[" + txt + "]"
+				return "[" + txt + badge + "]"
 			}
-			return p.on(th.Raised).b(" "+txt+" ", th.Text)
+			on := p.on(th.Raised)
+			return on.b(" "+txt, th.Text) + on.b(badge, th.Orange) + on.b(" ", th.Text)
 		}
 		if compact {
-			return bar.t(" "+txt, th.Muted) // five tabs, the range and the live count share 80 columns
+			return bar.t(" "+txt, th.Muted) + bar.b(badge, th.Orange) // five tabs, the range and the live count share 80 columns
 		}
-		return bar.t(" "+txt+" ", th.Muted)
+		return bar.t(" "+txt, th.Muted) + bar.b(badge, th.Orange) + bar.t(" ", th.Muted)
 	}
 	tabs := tab(1, "Dashboard", viewDashboard, "Dash") + tab(2, "Session", viewSession, "Sess") + tab(3, "Agents", viewAgents, "Agents") + tab(4, "Factory", viewFactory, "Factory") + tab(5, "Kaizen", viewKaizen, "Kaizen")
 
@@ -134,9 +141,10 @@ func (m *model) header(p paint) string {
 	}
 
 	live := m.liveCount()
-	liveStr := bar.t("○ idle", th.Faint)
+	liveStr, liveShort := bar.t("○ idle", th.Faint), bar.t("○", th.Faint) // the short one when the tab badge takes its room
 	if live > 0 {
 		liveStr = bar.dot(th.Green, m.pulse()) + bar.b(fmt.Sprintf(" %d live", live), th.Green)
+		liveShort = bar.dot(th.Green, m.pulse()) + bar.b(fmt.Sprintf(" %d", live), th.Green)
 	}
 	clock := ""
 	if !m.lastUpdate.IsZero() {
@@ -153,6 +161,7 @@ func (m *model) header(p paint) string {
 		{rangeStr, liveStr, state, clock},
 		{rangeStr, liveStr, state},
 		{rangeStr, liveStr},
+		{rangeStr, liveShort},
 		{rangeStr},
 		{chips[m.rangeIdx]},
 	}
@@ -381,7 +390,7 @@ func (m *model) helpScreen(p paint) []string {
 		p.t("s sorts by recent · cost · subagent share.", th.Faint),
 		p.t("Mix panels follow the cursor row; the tiles total every session.", th.Faint),
 		p.t("A dot pulses on sessions written in the last 30 seconds.", th.Faint),
-		p.t("The factory view refreshes every 30 s while shown.", th.Faint))
+		p.t("The factory view refreshes every 30 s while shown, every 2 min otherwise.", th.Faint))
 	bw := 0
 	for _, l := range lines {
 		bw = max(bw, width(l))

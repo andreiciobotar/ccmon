@@ -1,5 +1,14 @@
- Isshoni 一緒に  1 Dashboard  2 Session  3 Agents [4 Factory] 5 Kaizen                                           24h [7d] 30d  all   ○ idle 
- Factory  8 in motion (1 blocked) · 1 waiting for review · 1 merged, not cleaned · 1 settled  · as of 11:00:00                              
+ Isshoni 一緒に  1 Dashboard  2 Session  3 Agents [4 Factory ▲7] 5 Kaizen                                        24h [7d] 30d  all   ○ idle 
+ Factory  11 in motion (4 blocked) · 3 waiting for review · 1 merged, not cleaned · 1 settled  · as of 11:00:00                             
+ ▲ Needs you  7                                                                                                                             
+ ◆ alpha       api-rate-limits  review PR          3h00m  #42 https://github.com/o/alpha/pull/42                                            
+ ▲ delta-docs  wide-ask         unblock            2h00m  データベースの接続情報が見つかりません。どの環境のものを使えばよいですか？ 本番…  
+ ▲ alpha       needs-an-answer  answer question   45m00s  Should the export keep the legacy column order?                                   
+ ◆ delta-docs  video-cut        see deliverable   30m00s  https://example.com/cut/v2                                                        
+ ▲ delta-docs  slow-import      decide: overtime   5m00s  ran 3h of 2h: split it?                                                           
+ ▲ delta-docs  stuck-on-keys    blocked            1m30s  no reason recorded: ask its lead                                                  
+ ◆ delta-docs  design-review    see deliverable        -  /r/delta/docs/design.md                                                           
+                                                                                                                                            
  worktree cap  5  per repo   c edit                                                                         ~/.claude/factory/settings.json 
                                                                                                                                             
  alpha                                                                                in motion ▲●●●● 5/5   review 1   merged 1   settled 1 
@@ -22,19 +31,10 @@
  gamma                                                                                                                                      
   ⚠ not inside a git repository                                                                                                             
                                                                                                                                             
-                                                                                                                                            
-                                                                                                                                            
-                                                                                                                                            
-                                                                                                                                            
-                                                                                                                                            
-                                                                                                                                            
-                                                                                                                                            
-                                                                                                                                            
-                                                                                                                                            
-                                                                                                                                            
-                                                                                                                                            
-                                                                                                                                            
-                                                                                                                                            
-                                                                                                                                            
-                                                                                                                                            
+ delta-docs                                                                                       in motion ▲▲▲○○ 3/5   review 2   merged 0 
+  SLUG              PHASE                   ELAPSED  PR                      BASE          FLAGS                                            
+  slow-import       ▲ blocked, needs you          -  -                       main                                                           
+  stuck-on-keys     ▲ blocked, needs you          -  -                       main                                                           
+  wide-ask          ▲ blocked, needs you          -  -                       main                                                           
+ +2 more lines · ↓ to scroll                                                                                                                
  ↑↓/jk move  ·  c edit cap  ·  r range  ·  tab next view  ·  ? help  ·  q quit                                                              

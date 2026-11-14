@@ -102,7 +102,6 @@ func Snapshot(so SnapshotOptions) (string, error) {
 		m.view = viewAgents
 	case "factory":
 		m.view = viewFactory
-		m.applyFactory(m.factoryJob()())
 	case "kaizen", "kaizen-flow", "kaizen-board":
 		m.view = viewKaizen
 		m.kz.page = map[string]kaizenPage{"kaizen": pagePulse, "kaizen-flow": pageFlow, "kaizen-board": pageBoard}[so.View]
@@ -122,6 +121,7 @@ func Snapshot(so SnapshotOptions) (string, error) {
 			}
 		}
 	}
+	m.applyFactory(m.factoryJob()())
 	m.normalizeSelection()
 	if m.view == viewDashboard && so.Row > 0 && len(m.rows()) > 0 {
 		rows := m.rows()

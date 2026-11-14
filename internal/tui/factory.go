@@ -20,8 +20,10 @@ import (
 const (
 	factoryEvery = 30 * time.Second // from the end of one refresh to the start of the next
 	factoryFresh = 5 * time.Second  // entering the view within this of a result starts no refresh
-	capDigits    = 3
-	capMax       = 999
+	// factoryIdleEvery is the refresh interval while another view is shown: the tab badge needs the count.
+	factoryIdleEvery = 2 * time.Minute
+	capDigits        = 3
+	capMax           = 999
 )
 
 // factoryRepo is one repository with a worktrees directory and what `factory status`
@@ -98,16 +100,23 @@ func (m *model) factoryJob() func() factoryMsg {
 	}
 }
 
-// refreshFactory starts a refresh when the view is shown, none is in flight and the
-// last result is older than minAge. A refresh asked for while one runs follows it.
+// refreshFactory starts a refresh when none is in flight and the last result is older
+// than minAge. Off the factory view it waits factoryIdleEvery whatever minAge is, and
+// only once the sessions have loaded. A refresh asked for while one runs follows it.
 func (m *model) refreshFactory(minAge time.Duration) tea.Cmd {
 	f := &m.fac
-	if m.view != viewFactory || m.runner == nil || m.fatal != nil {
+	if m.runner == nil || m.fatal != nil {
 		return nil
 	}
 	if f.busy {
 		f.again = f.again || minAge == 0
 		return nil
+	}
+	if m.view != viewFactory {
+		if !m.loaded {
+			return nil
+		}
+		minAge = factoryIdleEvery
 	}
 	if !f.doneAt.IsZero() && m.now().Sub(f.doneAt) < minAge {
 		return nil

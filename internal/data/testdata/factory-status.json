@@ -4,6 +4,7 @@
       "slug": "cost-in-money", "branch": null, "path": "/r/.claude/worktrees/cost-in-money",
       "session_id": null, "session": "none", "blocked": null, "stacked_on": null, "base": "origin/main",
       "state": null, "deliverable": null,
+      "waited": null, "stop_kind": null, "stop_summary": null,
       "elapsed": null, "overtime": false, "dirty": null, "behind": null, "ahead": null,
       "head": "abc", "last_commit": null, "pr_state": "unknown", "pr_url": "", "pr_head": "", "pr_base": "",
       "phase": "motion", "stale": false
@@ -12,6 +13,7 @@
       "slug": "stacked", "branch": "worktree-stacked", "path": "/r/.claude/worktrees/stacked",
       "session_id": "726710c0", "session": "working", "blocked": "busy", "stacked_on": "worktree-cost-in-money", "base": "worktree-cost-in-money",
       "state": "handed-over", "deliverable": "https://github.com/o/r/pull/12",
+      "waited": 5400, "stop_kind": null, "stop_summary": null,
       "elapsed": 252, "overtime": true, "dirty": false, "behind": 0, "ahead": 2,
       "head": "def", "last_commit": 1794647916, "pr_state": "open", "pr_url": "https://github.com/o/r/pull/12", "pr_head": "h", "pr_base": "b",
       "phase": "review", "stale": true
@@ -20,6 +22,7 @@
       "slug": "needs-an-answer", "branch": "worktree-needs-an-answer", "path": "/r/.claude/worktrees/needs-an-answer",
       "session_id": "a1b2c3d4", "session": "done", "blocked": null, "stacked_on": null, "base": "origin/main",
       "state": "blocked", "deliverable": null,
+      "waited": 600, "stop_kind": "QUESTION", "stop_summary": "Which database should it use?",
       "elapsed": 640, "overtime": false, "dirty": false, "behind": 0, "ahead": 1,
       "head": "aaa", "last_commit": 1794647000, "pr_state": "none", "pr_url": "", "pr_head": "", "pr_base": "",
       "phase": "blocked", "stale": false
@@ -28,6 +31,7 @@
       "slug": "write-up", "branch": "worktree-write-up", "path": "/r/.claude/worktrees/write-up",
       "session_id": "b2c3d4e5", "session": "done", "blocked": null, "stacked_on": null, "base": "origin/main",
       "state": "acknowledged", "deliverable": "/r/docs/specs/write-up.md",
+      "waited": 86400, "stop_kind": null, "stop_summary": null,
       "elapsed": 3000, "overtime": false, "dirty": false, "behind": 0, "ahead": 0,
       "head": "bbb", "last_commit": 1794646000, "pr_state": "none", "pr_url": "", "pr_head": "", "pr_base": "",
       "phase": "settled", "stale": false

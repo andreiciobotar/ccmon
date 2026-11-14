@@ -37,6 +37,10 @@ type FactoryTask struct {
 	Session  string `json:"session"`
 
 	Deliverable string `json:"deliverable"` // a link or an absolute file path; empty when null
+
+	Waited      *int64 `json:"waited"`       // seconds since the last declared record; nil when undeclared
+	StopKind    string `json:"stop_kind"`    // QUESTION, BLOCKED or OVERTIME for a blocked task; empty when null
+	StopSummary string `json:"stop_summary"` // why it stopped; empty when null
 }
 
 // FactoryStatus is what `factory status --json` prints for one repository.
