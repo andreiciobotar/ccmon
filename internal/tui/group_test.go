@@ -132,7 +132,7 @@ func TestColumnsDropInOrder(t *testing.T) {
 		for _, f := range []struct {
 			on   bool
 			name string
-		}{{c.sig, "sig"}, {c.subPct, "sub%"}, {c.bad, "bad"}} {
+		}{{c.sig, "sig"}, {c.showTok, "tok"}, {c.subPct, "sub%"}, {c.bad, "bad"}} {
 			if f.on {
 				state += f.name + " "
 			}
@@ -140,12 +140,18 @@ func TestColumnsDropInOrder(t *testing.T) {
 		if len(seen) == 0 || seen[len(seen)-1] != state {
 			seen = append(seen, state)
 		}
-		if prev.sig && !c.sig || prev.subPct && !c.subPct || prev.showStart && !c.showStart || prev.bad && !c.bad {
+		if prev.sig && !c.sig || prev.showTok && !c.showTok || prev.subPct && !c.subPct || prev.showStart && !c.showStart || prev.bad && !c.bad {
 			t.Fatalf("iw %d: columns not monotonic: %+v after %+v", iw, c, prev)
+		}
+		if !strings.Contains(c.header("ACTIVE"), "COST") {
+			t.Fatalf("iw %d: no COST column", iw)
 		}
 		prev = c
 	}
-	if got, want := strings.Join(seen, "|"), "|sig |sig sub% |sig sub% bad "; got != want {
+	if c := m.tableCols(56); !c.sig || c.showStart { // a 60-column terminal
+		t.Fatalf("the minimum terminal keeps the signals and drops the time: %+v", c)
+	}
+	if got, want := strings.Join(seen, "|"), "|sig |sig tok |sig tok sub% |sig tok sub% bad "; got != want {
 		t.Fatalf("columns appear as %q, want %q", got, want)
 	}
 	if c := m.tableCols(200); c.split != 16 || c.name != maxName {
@@ -270,12 +276,12 @@ func TestGroupTotalsMatchTheJSON(t *testing.T) {
 				t.Errorf("%s/%s: go sums %+v, json %+v", fx, name, g, j)
 			}
 			if g.cost > 0 {
-				if got := costShare(g.subCost, g.cost); got != pct(j.Cost.SubagentPct) {
+				if got := share(g.subCost, g.cost); got != pct(j.Cost.SubagentPct) {
 					t.Errorf("%s/%s: SUB%% %s, json %s", fx, name, got, pct(j.Cost.SubagentPct))
 				}
 			}
 			if j.Recheck.Rate != nil {
-				if got := share(int64(g.rechecked), int64(g.candidates)); got != pct(100**j.Recheck.Rate) {
+				if got := share(float64(g.rechecked), float64(g.candidates)); got != pct(100**j.Recheck.Rate) {
 					t.Errorf("%s/%s: RCHK %s, json %s", fx, name, got, pct(100**j.Recheck.Rate))
 				}
 			} else if g.candidates != 0 {

@@ -358,7 +358,7 @@ func (m *model) tableCols(iw int) tableCols {
 		avail -= w
 		return true
 	}
-	c.sig = add(true, sigW+1, 12) // an indented session id still fits at the smallest terminal
+	c.sig = add(true, sigW+1, 10) // kept at the 60-column minimum, where an indented id is cut
 	c.showStart = add(c.sig, c.start+1, minName)
 	c.showTok = add(c.showStart, c.tok+1, want)
 	c.subPct = add(c.showTok, 5, want)
@@ -495,7 +495,7 @@ func (m *model) treeLine(r treeRow, selected bool, c tableCols, iw int, base pai
 	}
 	line += q.stack(c.split, []seg{{t.mainCost, th.Yellow}, {t.subCost, th.Purple}})
 	if c.subPct {
-		line += q.sp(1) + q.t(cell(costShare(t.subCost, t.cost), 4, true), th.Muted)
+		line += q.sp(1) + q.t(cell(share(t.subCost, t.cost), 4, true), th.Muted)
 	}
 	line += q.sp(1) + q.t(cell(fmt.Sprintf("%d", t.dispatches), c.dis, true), th.Muted)
 	if c.sig {
@@ -528,23 +528,15 @@ func recheckCell(q paint, t totals) string {
 	case t.rechecked == 0:
 		return q.t(cell("0%", 4, true), th.Muted)
 	}
-	return q.t(cell(share(int64(t.rechecked), int64(t.candidates)), 4, true), th.Orange)
+	return q.t(cell(share(float64(t.rechecked), float64(t.candidates)), 4, true), th.Orange)
 }
 
-// share is n of d as a whole percent, from summed counts; "-" when d is 0.
-// costShare is share for money.
-func costShare(n, d float64) string {
+// share is n of d as a whole percent, from summed counts or money; "-" when d is 0.
+func share(n, d float64) string {
 	if d == 0 {
 		return "-"
 	}
 	return pct(100 * n / d)
-}
-
-func share(n, d int64) string {
-	if d == 0 {
-		return "-"
-	}
-	return pct(100 * float64(n) / float64(d))
 }
 
 // ---- mix panels -----------------------------------------------------------------------

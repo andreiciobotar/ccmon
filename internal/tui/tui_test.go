@@ -201,16 +201,6 @@ func TestHelpSaysWherePricesComeFrom(t *testing.T) {
 	}
 }
 
-func TestTokensColumnDropsBeforeCost(t *testing.T) {
-	m := fakeModel(true, 140, 40)
-	if c := m.tableCols(136); !c.showTok || !strings.Contains(c.header("ACTIVE"), "COST") {
-		t.Fatalf("140 columns hold both: %+v", c)
-	}
-	if c := m.tableCols(76); c.showTok || !strings.Contains(c.header("ACTIVE"), "COST") || !c.showStart {
-		t.Fatalf("at 80 columns tokens go, cost and the time stay: %+v", c)
-	}
-}
-
 func TestFmtDuration(t *testing.T) {
 	cases := map[time.Duration]string{0: "0s", 42 * time.Second: "42s", 90 * time.Second: "1m30s", 5 * time.Minute: "5m00s", 62 * time.Minute: "1h02m", -time.Second: "0s"}
 	for in, want := range cases {
@@ -850,7 +840,7 @@ func TestTreeOrderUnderEachSort(t *testing.T) {
 	}{
 		// recent: beta ends last; in alpha the sessions without a task come first, then tasks by latest activity
 		{sortRecent, "beta b1000000,alpha ×4,  a1000000,  zz a4000000,  ci ×2,    a3000000,    a2000000"},
-		// cost: alpha 5.4k before beta 300; tasks by summed cost, zz 5000 before ci 400
+		// cost (the fakes price every token alike, so it follows tokens): alpha before beta; zz before ci
 		{sortCost, "alpha ×4,  a1000000,  zz a4000000,  ci ×2,    a3000000,    a2000000,beta b1000000"},
 		// subagent share: ci 50% first among tasks; repositories by summed share (alpha ~3.6%, beta 0)
 		{sortShare, "alpha ×4,  a1000000,  ci ×2,    a3000000,    a2000000,  zz a4000000,beta b1000000"},
