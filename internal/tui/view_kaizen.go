@@ -207,11 +207,7 @@ func (m *model) trendSub(sp paint, pair func(*data.KaizenTrend) data.Pair, n int
 			return "\x00" + sp.t(text, col)
 		}
 	}
-	noun := "tasks"
-	if n == 1 {
-		noun = "task"
-	}
-	return "\x00" + sp.t(fmt.Sprintf("%d %s", n, noun), th.Muted)
+	return "\x00" + sp.t(plural(n, "task"), th.Muted)
 }
 
 func (m *model) kaizenTiles(p paint, w int) block {
@@ -393,11 +389,7 @@ func (m *model) chartBox(p paint, s kzSeries, bw int) block {
 	in := p.on(th.Surface)
 	iw := bw - 4
 	if len(s.vals) < 2 {
-		noun := "tasks"
-		if len(s.vals) == 1 {
-			noun = "task"
-		}
-		lines := []string{in.t(fmt.Sprintf("%d landed %s: charts start at 2", len(s.vals), noun), th.Muted)}
+		lines := []string{in.t(plural(len(s.vals), "landed task")+": charts start at 2", th.Muted)}
 		if len(s.vals) == 1 {
 			lines = append(lines, in.t("the one value: ", th.Faint)+in.b(s.label(s.vals[0]), s.accent))
 		}
