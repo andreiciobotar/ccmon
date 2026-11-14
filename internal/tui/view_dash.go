@@ -10,7 +10,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"ccmon/internal/data"
+	"isshoni/internal/data"
 )
 
 type dashLayout struct {

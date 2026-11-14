@@ -18,15 +18,15 @@ import (
 // ErrPython means python3 could not be found.
 var ErrPython = errors.New("python3 not found on PATH")
 
-// ErrPackage means the ccmon Python package could not be located.
-var ErrPackage = errors.New("ccmon Python package not found")
+// ErrPackage means the isshoni Python package could not be located.
+var ErrPackage = errors.New("isshoni Python package not found")
 
 // callTimeout bounds one python call when Runner.Timeout is unset.
 const callTimeout = 2 * time.Minute
 
-// Runner shells out to `python3 -m ccmon`.
+// Runner shells out to `python3 -m isshoni`.
 type Runner struct {
-	Root        string        // repo root (working directory, contains ccmon/__init__.py)
+	Root        string        // repo root (working directory, contains isshoni/__init__.py)
 	Python      string        // interpreter; default python3
 	ProjectsDir string        // absolute; passed through when non-empty
 	AgentsDir   string        // absolute; passed through when non-empty
@@ -68,14 +68,14 @@ func (r *Runner) begin() bool {
 	return true
 }
 
-// LocateRoot finds the repo root: $CCMON_ROOT, else walking up from the executable
-// (bin/ccmon-tui -> ..), else walking up from the working directory.
+// LocateRoot finds the repo root: $ISSHONI_ROOT, else walking up from the executable
+// (bin/isshoni-tui -> ..), else walking up from the working directory.
 func LocateRoot() (string, error) {
-	if env := os.Getenv("CCMON_ROOT"); env != "" {
+	if env := os.Getenv("ISSHONI_ROOT"); env != "" {
 		if isRoot(env) {
 			return env, nil
 		}
-		return env, fmt.Errorf("%w: CCMON_ROOT=%s has no ccmon/__init__.py", ErrPackage, env)
+		return env, fmt.Errorf("%w: ISSHONI_ROOT=%s has no isshoni/__init__.py", ErrPackage, env)
 	}
 	var starts []string
 	if exe, err := os.Executable(); err == nil {
@@ -97,11 +97,11 @@ func LocateRoot() (string, error) {
 			}
 		}
 	}
-	return "", fmt.Errorf("%w: set CCMON_ROOT to the repo root (searched from %s)", ErrPackage, strings.Join(starts, ", "))
+	return "", fmt.Errorf("%w: set ISSHONI_ROOT to the repo root (searched from %s)", ErrPackage, strings.Join(starts, ", "))
 }
 
 func isRoot(dir string) bool {
-	_, err := os.Stat(filepath.Join(dir, "ccmon", "__init__.py"))
+	_, err := os.Stat(filepath.Join(dir, "isshoni", "__init__.py"))
 	return err == nil
 }
 
@@ -137,7 +137,7 @@ func (r *Runner) run(ctx context.Context, out any, args ...string) error {
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	full := []string{"-m", "ccmon"}
+	full := []string{"-m", "isshoni"}
 	full = append(full, args...)
 	full = append(full, "--json")
 	if r.ProjectsDir != "" {
@@ -160,14 +160,14 @@ func (r *Runner) run(ctx context.Context, out any, args ...string) error {
 		}
 		msg := strings.TrimSpace(se.String())
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return fmt.Errorf("ccmon %s timed out after %s", args[0], timeout)
+			return fmt.Errorf("isshoni %s timed out after %s", args[0], timeout)
 		} else if ctx.Err() != nil {
 			return ctx.Err()
 		}
 		if msg == "" {
 			msg = err.Error()
 		}
-		if strings.Contains(msg, "No module named ccmon") {
+		if strings.Contains(msg, "No module named isshoni") {
 			return fmt.Errorf("%w: %s", ErrPackage, r.Root)
 		}
 		if i := strings.LastIndex(msg, "\n"); i >= 0 {
@@ -176,7 +176,7 @@ func (r *Runner) run(ctx context.Context, out any, args ...string) error {
 		return errors.New(msg)
 	}
 	if err := json.Unmarshal(so.Bytes(), out); err != nil {
-		return fmt.Errorf("decode ccmon output: %w", err)
+		return fmt.Errorf("decode isshoni output: %w", err)
 	}
 	return nil
 }
@@ -188,7 +188,7 @@ func sinceArgs(since string) []string {
 	return []string{"--since", since}
 }
 
-// Sessions runs `ccmon sessions [--since X] --json`.
+// Sessions runs `isshoni sessions [--since X] --json`.
 func (r *Runner) Sessions(ctx context.Context, since string) (*SessionsResult, error) {
 	var out SessionsResult
 	args := append([]string{"sessions"}, sinceArgs(since)...)
@@ -198,7 +198,7 @@ func (r *Runner) Sessions(ctx context.Context, since string) (*SessionsResult, e
 	return &out, nil
 }
 
-// Session runs `ccmon session <id> --json`.
+// Session runs `isshoni session <id> --json`.
 func (r *Runner) Session(ctx context.Context, id string) (*Session, error) {
 	var out Session
 	if err := r.run(ctx, &out, "session", id); err != nil {
@@ -207,7 +207,7 @@ func (r *Runner) Session(ctx context.Context, id string) (*Session, error) {
 	return &out, nil
 }
 
-// Agents runs `ccmon agents [--since X] --json`.
+// Agents runs `isshoni agents [--since X] --json`.
 func (r *Runner) Agents(ctx context.Context, since string) (*Agents, error) {
 	var out Agents
 	args := append([]string{"agents"}, sinceArgs(since)...)

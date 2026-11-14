@@ -3,8 +3,8 @@ import tempfile
 import unittest
 
 from tests.support import PRICES
-from ccmon import prices
-from ccmon.transcript import SessionError
+from isshoni import prices
+from isshoni.transcript import SessionError
 
 # Fixture rates: opus 5/10/15(5m)/20(1h)/0.5; haiku 1/2/3/4/0.1, over 100 tokens 10/20/30/40/1.
 OPUS = "claude-opus-5-5"

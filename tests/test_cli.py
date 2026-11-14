@@ -9,7 +9,7 @@ import unittest
 from datetime import datetime, timedelta, timezone
 
 from tests.support import AGENTS, PRICES_PATH, PROJECTS, ROOT
-from ccmon import cli
+from isshoni import cli
 
 BASE = ["--projects-dir", PROJECTS, "--agents-dir", AGENTS, "--prices", PRICES_PATH]
 
@@ -130,7 +130,7 @@ class CliTests(unittest.TestCase):
 
     def test_default_prices_file_and_bad_file(self):
         rc, out, _ = run("sessions", "--json", "--projects-dir", PROJECTS, "--agents-dir", AGENTS)
-        self.assertEqual(json.loads(out)["prices"]["path"], os.path.join(ROOT, "ccmon", "prices.toml"))
+        self.assertEqual(json.loads(out)["prices"]["path"], os.path.join(ROOT, "isshoni", "prices.toml"))
         rc, _, err = run("sessions", "--projects-dir", PROJECTS, "--prices", "/nonexistent.toml")
         self.assertEqual(rc, 2)
         self.assertIn("/nonexistent.toml", err)
@@ -171,7 +171,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(cli.fmt_duration(45000), "45s")
 
     def test_shim_json_is_clean(self):
-        p = subprocess.run([sys.executable, os.path.join(ROOT, "bin", "ccmon"), "session", "fixture", "--json", *BASE],
+        p = subprocess.run([sys.executable, os.path.join(ROOT, "bin", "isshoni"), "session", "fixture", "--json", *BASE],
                            capture_output=True, text=True)
         self.assertEqual(p.returncode, 0, p.stderr)
         json.loads(p.stdout)

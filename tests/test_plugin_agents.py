@@ -1,10 +1,10 @@
-"""A plugin's agents (<plugin>:<name>) count as their role; see docs/ccmon.md."""
+"""A plugin's agents (<plugin>:<name>) count as their role; see docs/isshoni.md."""
 import os
 import tempfile
 import unittest
 
 from tests.support import AGENTS, HERE, PRICES, by_desc
-from ccmon import metrics, transcript
+from isshoni import metrics, transcript
 
 SESSION = os.path.join(HERE, "fixtures", "plugin", "-plug-proj", "plug-0001.jsonl")
 

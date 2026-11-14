@@ -14,7 +14,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
-	"ccmon/internal/data"
+	"isshoni/internal/data"
 )
 
 const (

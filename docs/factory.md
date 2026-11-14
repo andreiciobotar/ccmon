@@ -60,7 +60,7 @@ The cap (`worktree_cap`) counts slots per repository. Only `new` checks it, so a
 
 | Key | Default | |
 |---|---|---|
-| `worktree_cap` | 5 | tasks holding a slot, per repository; `ccmon-tui` can edit it |
+| `worktree_cap` | 5 | tasks holding a slot, per repository; `isshoni-tui` can edit it |
 | `lead_model` | `fable` | |
 | `lead_permission_mode` | `auto` | `acceptEdits`, `auto`, `bypassPermissions`, `manual`, `dontAsk`, `plan` |
 | `task_time_limit_hours` | 2 | after it `status` shows `overtime`; the lead stops and reports |
