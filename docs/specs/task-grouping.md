@@ -40,9 +40,9 @@ Known limits, to state in the README: a session started in a subdirectory of a r
   - a repository row: name in bold, totals of its visible sessions (tokens, main│sub bar, dispatches, signal pills; the time column shows the latest activity when sorted by recent, the earliest start otherwise; no session id);
   - its sessions without a task, indented two, named by 8-character id;
   - each task row, indented two, in the purple used for projects elsewhere, with the task's totals; its sessions indented four, named by 8-character id.
-  - The `SESSION` id column is removed (the id is now the row name).
+  - The `SESSION` id column is removed (the id is now the row name). The name column fits the longest row name over all rows (14 to 30 cells); signals take what is left, up to 28 cells, and drop out below 10; the name column absorbs any slack.
 - Only session rows are selectable: `j`/`k`, arrows, `g`/`G`, page keys, `enter`, follow mode and the row flash behave as before and skip group rows. Scrolling counts display rows; when the selection moves up to the first session of a group, the group rows directly above it stay in view. No new keys.
-- Sort (`s`) applies at each level with the group's aggregate: recent = latest activity in the group, tokens = summed tokens, subagent share = share of the summed tokens; ties by name. Sessions without a task come before the repository's tasks.
+- Sort (`s`) applies at each level with the group's aggregate: recent = latest activity in the group, tokens = summed tokens, subagent share = share of the summed tokens; ties by latest activity, then name. Sessions without a task come before the repository's tasks.
 - Filter (`/`) matches the label, the project and the id. KPI tiles, agent mix and model mix keep following the visible sessions, so filtering to `ccmon/ci-workflow` shows that task's tokens by agent and model.
 - The table title stays `Sessions N`; the subheader gains the repository and task counts.
 - Group totals reuse the existing `totals` computation, refactored to take a session list.

@@ -705,23 +705,30 @@ func TestTickOnlyWhenNeeded(t *testing.T) {
 
 // ---- grouped table ---------------------------------------------------------------------------
 
+func groupSession(id, repo, path, task string, startMin int, main, sub int64) *data.Session {
+	s := fakeSession(id, repo, startMin, main, sub)
+	s.Repo, s.RepoPath, s.Task = repo, path, task
+	return s
+}
+
+func modelOf(w, h int, ss ...*data.Session) *model {
+	m := newFake(Options{NoColor: true}, w, h)
+	m.sessions = map[string]*data.Session{}
+	m.preload(ss, nil, fakeAgents())
+	return m
+}
+
 // groupedModel holds: repo alpha (a1 without a task, task ci with a2 and a3, task zz with a4) and repo beta (b1).
 func groupedModel(w, h int) *model {
-	m := newFake(Options{NoColor: true}, w, h)
 	mk := func(id, repo, task string, startMin int, main, sub int64) *data.Session {
-		s := fakeSession(id, repo, startMin, main, sub)
-		s.Repo, s.Task = repo, task
-		return s
+		return groupSession(id, repo, "/r/"+repo, task, startMin, main, sub)
 	}
-	m.sessions = map[string]*data.Session{}
-	m.preload([]*data.Session{
+	return modelOf(w, h,
 		mk("a1000000", "alpha", "", 0, 100, 0),
 		mk("a2000000", "alpha", "ci", 10, 100, 100),
 		mk("a3000000", "alpha", "ci", 20, 100, 100),
 		mk("a4000000", "alpha", "zz", 30, 5000, 0),
-		mk("b1000000", "beta", "", 40, 300, 0),
-	}, nil, fakeAgents())
-	return m
+		mk("b1000000", "beta", "", 40, 300, 0))
 }
 
 func rowNames(m *model) string {
@@ -813,5 +820,54 @@ func TestGroupedRenderFitsEverySize(t *testing.T) {
 				t.Fatalf("%dx%d line %d is %d wide", sz[0], sz[1], i, width(line))
 			}
 		}
+	}
+}
+
+func TestSortUsesGroupSums(t *testing.T) {
+	m := modelOf(120, 40,
+		groupSession("p1000000", "r", "/r", "p", 10, 300, 0),
+		groupSession("p2000000", "r", "/r", "p", 20, 300, 0),
+		groupSession("q1000000", "r", "/r", "q", 30, 500, 0))
+	m.sortBy = sortTokens
+	if got, want := rowNames(m), "r,  p,    p2000000,    p1000000,  q,    q1000000"; got != want {
+		t.Fatalf("got %s, want %s", got, want)
+	}
+}
+
+func TestSameNameRepositoriesStaySeparate(t *testing.T) {
+	m := modelOf(120, 40,
+		groupSession("x1000000", "app", "/one/app", "", 10, 100, 0),
+		groupSession("y1000000", "app", "/two/app", "", 20, 100, 0))
+	if got, want := rowNames(m), "app,  y1000000,app,  x1000000"; got != want {
+		t.Fatalf("got %s, want %s", got, want)
+	}
+}
+
+func TestHiddenSelectionNeverSelectsAGroupRow(t *testing.T) {
+	m := groupedModel(120, 40)
+	m.selID = "a2000000"
+	m.filter = "beta"
+	rows := m.rows()
+	if cur, _ := m.cursorRow(rows); rows[cur].s == nil {
+		t.Fatalf("row %d is a group row", cur)
+	}
+	m.follow = true
+	m.followTarget()
+	if m.selID != "b1000000" {
+		t.Fatalf("follow picked %s from outside the filter", m.selID)
+	}
+}
+
+func TestScrollPullsBackWhenTheWindowGrows(t *testing.T) {
+	m := groupedModel(120, 20)
+	m.sortBy = sortTokens
+	send(m, "G")
+	if m.top == 0 {
+		t.Fatal("the test needs a scrolled table")
+	}
+	m.h = 60
+	m.fixScroll()
+	if m.top != 0 {
+		t.Fatalf("top %d after growing: group rows above are hidden", m.top)
 	}
 }

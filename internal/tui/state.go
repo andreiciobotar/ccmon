@@ -471,8 +471,15 @@ func shownGroups(rows []treeRow) (repos, tasks int) {
 // cursorRow is the display row of the selected session, and the first row of
 // the group rows directly above it (which stay in view with it).
 func (m *model) cursorRow(rows []treeRow) (cur, first int) {
+	found := false
 	for i, r := range rows {
-		if r.s != nil && r.s.ID == m.selID {
+		if r.s == nil {
+			continue
+		}
+		if !found {
+			cur, found = i, true // a selection that is not shown falls back to the first session
+		}
+		if r.s.ID == m.selID {
 			cur = i
 			break
 		}
@@ -493,10 +500,10 @@ func (m *model) cursor(vis []*data.Session) int {
 	return 0
 }
 
-// mostRecent is the session with the latest activity.
+// mostRecent is the visible session with the latest activity.
 func (m *model) mostRecent() *data.Session {
 	var best *data.Session
-	for _, s := range m.sessions {
+	for _, s := range m.visible() {
 		if best == nil || m.activity(s).After(m.activity(best)) {
 			best = s
 		}
@@ -1255,7 +1262,5 @@ func (m *model) fixScroll() {
 	m.top = keep(cur, m.top, n)
 	m.dtop = keep(m.dcursor, m.dtop, m.sessRows())
 	m.atop = keep(m.acursor, m.atop, m.agentRows())
-	if m.top > max(0, len(rows)-1) {
-		m.top = 0
-	}
+	m.top = min(m.top, max(0, len(rows)-n))
 }

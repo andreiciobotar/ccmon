@@ -347,15 +347,19 @@ func (m *model) tableCols(iw int) tableCols {
 		fixed += c.start + 1
 	}
 	rest := iw - fixed - 1
-	c.sig = 0
-	if rest >= 30 {
-		c.sig = min(28, rest-15)
+	// the name column fits the longest indent+name over all rows (not the scroll window), 14..30 cells:
+	// room for a four-cell indent and an 8-character id
+	want := 14
+	for _, r := range m.rows() {
+		want = max(want, 2*r.depth+width(r.name))
 	}
-	c.name = rest - c.sig
-	if c.sig > 0 {
-		c.name--
+	c.name = min(want, 30)
+	if sig := rest - c.name - 1; sig >= 10 {
+		c.sig = min(28, sig)
+		c.name = rest - c.sig - 1 // the name column takes what signals leave
+	} else {
+		c.name = max(rest, 14)
 	}
-	c.name = max(14, min(c.name, 30)) // room for a four-cell indent and an 8-character id
 	return c
 }
 
