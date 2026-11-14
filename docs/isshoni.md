@@ -145,10 +145,10 @@ VIEW=... SIZE=...` turns it into a PNG under `shots/` (needs Chrome).
 |---|---|
 | `tab` `shift+tab`, `1` `2` `3` `4` `5` | switch view: dashboard, session, agents, factory, kaizen |
 | `↑` `↓` `j` `k`, `g` `G`, `pgup` `pgdn` | move, first and last, page |
-| `←` `→` `h` `l` | dashboard: collapse the repository the cursor is in (the cursor moves to its row), expand it |
+| `←` `→` `h` `l` | dashboard: collapse the repository the cursor is in (the cursor moves to its row), expand it. A collapsed row (`▸`) keeps its totals, and the tiles and follow mode still count what is inside; a filter leaves it collapsed, counting the matches. Folding turns follow mode off and is forgotten on exit |
 | `enter`, `esc` | open the session under the cursor; on `all`, a repository or a task, the most recently active session in it (a message names it); back |
 | `r` | range: 24h, 7d, 30d, all (on the error screen: retry) |
-| `s` | sort: recent, cost, subagent share |
+| `s` | sort: recent, cost, subagent share; within a repository, tasks and sessions without a task are one list |
 | `/` | filter by `repo`, `repo/task`, project or session id |
 | `f` | follow the most recently active session |
 | `←` `→`, `h` `l` | kaizen view: previous and next page (Pulse, Flow, Board) |
