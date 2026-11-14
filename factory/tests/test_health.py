@@ -58,7 +58,9 @@ class Home(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.home = Path(self.tmp.name)
-        patcher = mock.patch.dict(os.environ, {"HOME": self.tmp.name, "CLAUDE_CODE_SESSION_ID": "sid-d"})
+        patcher = mock.patch.dict(os.environ, {"HOME": self.tmp.name, "XDG_CONFIG_HOME": "",
+                                                "PATH": "/usr/bin:/opt/bin:/home/u/.local/bin:/bin",
+                                                "CLAUDE_CODE_SESSION_ID": "sid-d"})
         patcher.start()
         self.addCleanup(patcher.stop)
         self.store = self.home / ".claude" / "factory"
@@ -422,7 +424,12 @@ class Harness(Home):
         self.criteria_path = self.home / "criteria.json"
         self.use(*self.CRITERIA)
         self.clock = NOW
-        for patcher in (mock.patch.object(factory, "CRITERIA_PATH", self.criteria_path),
+        self.tools = {"git": "/usr/bin/git", "gh": "/opt/bin/gh", "claude": "/home/u/.local/bin/claude",
+                      "crontab": "/usr/bin/crontab", "notify-send": "/usr/bin/notify-send"}
+        for patcher in (mock.patch.object(factory.sys, "platform", "darwin"),
+                        mock.patch.object(factory.shutil, "which", lambda tool: self.tools.get(tool)),
+                        mock.patch.object(factory, "FACTORY", Path("/plug/factory/bin/factory")),
+                        mock.patch.object(factory, "CRITERIA_PATH", self.criteria_path),
                         mock.patch.object(factory, "ROLE_PATH", self.role),
                         mock.patch.object(factory, "now", lambda: iso(self.clock)),
                         mock.patch.object(factory.time, "time", lambda: self.clock)):
@@ -479,9 +486,9 @@ class TimedRun(FakeRun):
         super().__init__(answers)
         self.timeouts = []
 
-    def __call__(self, argv, cwd=None, timeout=None):
+    def __call__(self, argv, cwd=None, timeout=None, input=None):
         self.timeouts.append(timeout)
-        return super().__call__(argv, cwd)
+        return super().__call__(argv, cwd, input)
 
 
 def fired(fid, criterion="past-limit", escalate="always", subject="x", ts=NOW - 10 * HOUR, repo=ROOT):
@@ -747,15 +754,34 @@ class WatchTests(Harness):
         self.assertIn("blocked-unanswered", self.claude_runs()[0][-1])
         self.assertNotIn("dispatcher-missing", self.claude_runs()[0][-1])
 
-    def test_a_failed_notification_leaves_it_undecided_for_the_next_tick(self):
+    def test_a_failed_notification_is_written_to_the_watch_log_and_recorded(self):
         self.seed("tasks", [{"repo": ROOT, "slug": "x", "state": "blocked", "ts": iso(NOW - 2 * HOUR)}])
         failing = {("osascript",): (1, "", "no display")}
         code, out, _ = self.cli("watch", sessions=[], entries=["x"], answers=failing)
         self.assertEqual(code, 0)
-        self.assertEqual([r for r in self.records() if "decision" in r], [])
-        self.assertIn("dispatcher-missing  -  undecided", out)
+        self.assertIn("notify: factory: repo: 0 unfinished sessions named dispatcher-repo\n", out)
+        [decision] = [r for r in self.records() if "decision" in r]
+        self.assertEqual((decision["decision"], decision["by"]), ("escalated", "watch"))
+        self.assertIn("written to the watch log", decision["reason"])
         self.cli("watch", sessions=[], entries=["x"], answers=failing, at=NOW + 1800)
-        self.assertTrue(self.fake.ran("osascript"))
+        self.assertFalse(self.fake.ran("osascript"))
+
+    def test_the_notice_off_macos_uses_notify_send_or_the_log(self):
+        self.seed("tasks", [{"repo": ROOT, "slug": "x", "state": "blocked", "ts": iso(NOW - 2 * HOUR)}])
+        with mock.patch.object(factory.sys, "platform", "linux"):
+            self.cli("watch", sessions=[], entries=["x"], answers={("notify-send",): (0, "", "")})
+            self.assertEqual([c for c in self.fake.calls if c[0] == "notify-send"],
+                             [["notify-send", "factory: repo", "0 unfinished sessions named dispatcher-repo"]])
+
+    def test_without_a_notification_service_the_notice_goes_to_the_log(self):
+        self.seed("tasks", [{"repo": ROOT, "slug": "x", "state": "blocked", "ts": iso(NOW - 2 * HOUR)}])
+        self.tools.pop("notify-send")
+        with mock.patch.object(factory.sys, "platform", "linux"):
+            _, out, _ = self.cli("watch", sessions=[], entries=["x"])
+        self.assertFalse(self.fake.ran("notify-send"))
+        self.assertIn("notify: factory: repo: 0 unfinished sessions named dispatcher-repo\n", out)
+        [decision] = [r for r in self.records() if "decision" in r]
+        self.assertIn("written to the watch log", decision["reason"])
 
     def test_a_timed_out_run_exits_1(self):
         code, out, err = self.tick(answers={("claude", "-p"): (124, "", "timed out")})
@@ -901,42 +927,114 @@ class FiringsTests(Harness):
         self.assertEqual((summary["precision"], summary["recall"]), (None, 0.0))
 
 
-class ScheduleTests(Harness):
-    LABEL = "com.claude.factory.watch.repo"
+class SchedHarness(Harness):
+    """Harness with the launchd job of the repository: its label, plist and `launchctl` calls."""
 
-    def schedule(self, *argv, platform="darwin", answers=None, path="/plug/factory/bin/factory"):
-        with mock.patch.object(factory.sys, "platform", platform), mock.patch.object(factory, "FACTORY", Path(path)):
-            return self.cli("schedule", *argv, answers={("launchctl",): (0, "", ""), **(answers or {})})
+    LABEL = factory.job_label(ROOT)
+    LEGACY = "com.claude.factory.watch.repo"
+
+    def cli(self, *argv, answers=None, **kw):
+        return super().cli(*argv, answers={("launchctl",): (0, "", ""), **(answers or {})}, **kw)
 
     def launchctl(self):
         return [c for c in self.fake.calls if c[0] == "launchctl"]
 
-    @property
-    def plist(self):
-        return self.home / "Library" / "LaunchAgents" / f"{self.LABEL}.plist"
+    def plist(self, label=None):
+        return self.home / "Library" / "LaunchAgents" / f"{label or self.LABEL}.plist"
+
+    def put_plist(self, label=None, **job):
+        self.plist(label).parent.mkdir(parents=True, exist_ok=True)
+        self.plist(label).write_bytes(plistlib.dumps({"Label": label or self.LABEL, **job}))
+
+
+class JobTests(unittest.TestCase):
+    def test_a_percent_or_dollar_in_a_path_is_escaped_for_systemd_and_cron(self):
+        calls = []
+
+        def run(argv, **kw):
+            calls.append((argv, kw.get("input")))
+            return 0, "", ""
+        with tempfile.TemporaryDirectory() as home, mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": home}), \
+                mock.patch.object(factory, "run", run):
+            factory.Systemd().install("job", ["/py", "/a$b/f%y"], "/re%po", "/bin", "/lo%g")
+            unit = (Path(home) / "systemd" / "user" / "job.service").read_text()
+            factory.Cron().install("job", ["/py", "/f%y"], "/re%po", "/bin", "/lo%g")
+        self.assertIn("WorkingDirectory=/re%%po\n", unit)
+        self.assertIn("ExecStart=/py '/a$$b/f%%y'\n", unit)
+        self.assertIn("StandardOutput=append:/lo%%g\n", unit)
+        self.assertEqual(calls[-1][1], "*/30 * * * * cd /re\\%po && PATH=/bin /py /f\\%y >> /lo\\%g 2>&1 # job\n")
+
+    def test_two_folders_with_one_name_get_two_labels(self):
+        a, b = factory.job_label("/a/repo"), factory.job_label("/b/repo")
+        self.assertNotEqual(a, b)
+        self.assertRegex(a, r"^com\.claude\.factory\.watch\.repo-[0-9a-f]{8}$")
+        self.assertEqual(a, factory.job_label("/a/repo"))
+
+    def test_the_path_holds_only_what_the_job_needs(self):
+        found = {"git": "/usr/bin/git", "gh": "/opt/bin/gh", "claude": "/home/u/.local/bin/claude"}
+        with mock.patch.object(factory.shutil, "which", found.get), \
+                mock.patch.object(factory.sys, "executable", "/py/bin/python3"), \
+                mock.patch.dict(os.environ, {"PATH": "/home/u/.local/bin:/junk:/opt/bin:/usr/bin"}):
+            self.assertEqual(factory.job_path(),  # the caller's order, so the job finds the same copies
+                             "/home/u/.local/bin:/opt/bin:/usr/bin:/py/bin:/bin:/usr/sbin:/sbin")
+            for tool in found:
+                with mock.patch.object(factory.shutil, "which", {**found, tool: None}.get):
+                    with self.assertRaises(factory.Fail) as raised:
+                        factory.job_path()
+                    self.assertEqual(str(raised.exception), f"schedule: {tool} is not on PATH")
+
+    def test_the_notifier_asks_the_platform(self):
+        with mock.patch.object(factory.sys, "platform", "darwin"):
+            self.assertEqual(factory.notify_argv('t"', 'a\\"b'),
+                             ["osascript", "-e", 'display notification "a\\\\\\"b" with title "t\\""'])
+        with mock.patch.object(factory.sys, "platform", "linux"):
+            with mock.patch.object(factory.shutil, "which", {"notify-send": "/usr/bin/notify-send"}.get):
+                self.assertEqual(factory.notify_argv("t", "x"), ["notify-send", "t", "x"])
+            with mock.patch.object(factory.shutil, "which", lambda tool: None):
+                self.assertIsNone(factory.notify_argv("t", "x"))
+
+    def test_the_scheduler_is_chosen_at_run_time(self):
+        def chosen(platform, systemd, crontab):
+            fake = FakeRun({("systemctl",): (0 if systemd else 1, "", "")})
+            with mock.patch.object(factory.sys, "platform", platform), mock.patch.object(factory, "run", fake), \
+                    mock.patch.object(factory.shutil, "which", lambda tool: "/usr/bin/crontab" if crontab else None):
+                return factory.scheduler().name
+        self.assertEqual(chosen("darwin", True, True), "launchd")
+        self.assertEqual(chosen("linux", True, True), "systemd")
+        self.assertEqual(chosen("linux", False, True), "cron")
+        with self.assertRaises(factory.Fail) as raised:
+            chosen("linux", False, False)
+        self.assertIn("no scheduler here", str(raised.exception))
+
+
+class ScheduleTests(SchedHarness):
+    def schedule(self, *argv, platform="darwin", answers=None, path="/plug/factory/bin/factory"):
+        with mock.patch.object(factory.sys, "platform", platform), mock.patch.object(factory, "FACTORY", Path(path)):
+            return self.cli("schedule", *argv, answers=answers)
 
     def test_install_writes_the_plist_and_replaces_the_job(self):
-        with mock.patch.dict(os.environ, {"PATH": "/opt/bin:/usr/bin"}):
-            code, out, err = self.schedule("install")
-        self.assertEqual((code, err), (0, ""))
-        job = plistlib.loads(self.plist.read_bytes())
+        code, out, err = self.schedule("install")
+        self.assertEqual((code, err, out), (0, "", f"installed {self.LABEL} (launchd)\n"))
+        job = plistlib.loads(self.plist().read_bytes())
         log = str(self.store / "watch.log")
         self.assertEqual(job, {"Label": self.LABEL,
                                "ProgramArguments": [factory.sys.executable, "/plug/factory/bin/factory", "watch",
                                                     "--dispatcher", "dispatcher-repo"],
                                "WorkingDirectory": ROOT, "StartInterval": 1800,
-                               "EnvironmentVariables": {"PATH": "/opt/bin:/usr/bin"},
+                               "EnvironmentVariables": {"PATH": "/usr/bin:/opt/bin:/home/u/.local/bin:"
+                                                        + os.path.dirname(factory.sys.executable)
+                                                        + ":/bin:/usr/sbin:/sbin"},
                                "StandardOutPath": log, "StandardErrorPath": log})
         uid = os.getuid()
         self.assertEqual(self.launchctl(), [["launchctl", "bootout", f"gui/{uid}/{self.LABEL}"],
-                                            ["launchctl", "bootstrap", f"gui/{uid}", str(self.plist)]])
+                                            ["launchctl", "bootstrap", f"gui/{uid}", str(self.plist())]])
 
     def test_install_with_a_named_dispatcher_and_a_failing_bootstrap(self):
         code, _, err = self.schedule("install", "--dispatcher", "boss", answers={
             ("launchctl", "bootstrap"): (5, "", "Bootstrap failed")})
         self.assertEqual(code, 1)
         self.assertIn("Bootstrap failed", err)
-        self.assertEqual(plistlib.loads(self.plist.read_bytes())["ProgramArguments"][-1], "boss")
+        self.assertEqual(plistlib.loads(self.plist().read_bytes())["ProgramArguments"][-1], "boss")
 
     def test_install_from_a_worktree_warns(self):
         _, _, err = self.schedule("install", path=f"{WT}/y/factory/bin/factory")
@@ -944,30 +1042,317 @@ class ScheduleTests(Harness):
         _, _, err = self.schedule("install")
         self.assertNotIn("worktree", err)
 
-    def test_install_off_macos_prints_the_cron_line(self):
-        code, _, err = self.schedule("install", "--dispatcher", "boss", platform="linux")
-        self.assertEqual(code, 2)
-        self.assertIn(f"*/30 * * * * cd {ROOT} && {factory.sys.executable} /plug/factory/bin/factory watch "
-                      f"--dispatcher boss >> {self.store / 'watch.log'} 2>&1", err)
-        self.assertEqual(self.launchctl(), [])
-        self.assertFalse(self.plist.exists())
-
-    def test_remove(self):
-        code, out, _ = self.schedule("remove")
-        self.assertEqual((code, "nothing installed" in out, self.launchctl()), (0, True, []))
+    def test_install_drops_the_job_of_the_old_label_that_belongs_to_this_repository(self):
+        self.put_plist(self.LEGACY, WorkingDirectory=ROOT)
+        other = "com.claude.factory.watch.other"
+        self.put_plist(other, WorkingDirectory="/elsewhere")
         self.schedule("install")
+        self.assertFalse(self.plist(self.LEGACY).exists())
+        self.assertTrue(self.plist(other).exists())
+        uid = os.getuid()
+        self.assertEqual(self.launchctl()[0], ["launchctl", "bootout", f"gui/{uid}/{self.LEGACY}"])
+        self.assertTrue(self.plist().exists())
+
+    def test_install_without_a_tool_the_job_needs_fails(self):
+        self.tools.pop("gh")
+        code, _, err = self.schedule("install")
+        self.assertEqual(code, 2)
+        self.assertIn("gh is not on PATH", err)
+        self.assertFalse(self.plist().exists())
+
+    def test_remove_unlinks_the_plist_before_it_boots_the_job_out(self):
         code, out, _ = self.schedule("remove")
-        self.assertEqual(code, 0)
-        self.assertFalse(self.plist.exists())
-        self.assertEqual(self.launchctl(), [["launchctl", "bootout", f"gui/{os.getuid()}/{self.LABEL}"]])
+        self.assertEqual((code, out), (0, f"nothing installed: {self.LABEL}\n"))
+        self.schedule("install")
+        seen = []
+        code, out, _ = self.schedule("remove", answers={
+            ("launchctl", "bootout"): lambda: seen.append(self.plist().exists()) or (0, "", "")})
+        self.assertEqual((code, out, seen), (0, f"removed {self.LABEL}\n", [False]))
+
+    def test_remove_also_drops_the_old_label(self):
+        self.put_plist(self.LEGACY, WorkingDirectory=ROOT)
+        _, out, _ = self.schedule("remove")
+        self.assertEqual(out, f"removed {self.LABEL}\n")
+        self.assertFalse(self.plist(self.LEGACY).exists())
 
     def test_status(self):
         _, out, _ = self.schedule("status")
-        self.assertEqual(out, f"{self.LABEL}: plist absent, loaded\n")
+        self.assertEqual(out, f"{self.LABEL}: launchd job absent, loaded\n")
         self.schedule("install")
         _, out, _ = self.schedule("status", answers={("launchctl", "print"): (113, "", "not found")})
-        self.assertEqual(out, f"{self.LABEL}: plist present, not loaded\n")
-        self.assertEqual(self.launchctl(), [["launchctl", "print", f"gui/{os.getuid()}/{self.LABEL}"]])
+        self.assertEqual(out, f"{self.LABEL}: launchd job present, not loaded\n")
+        self.assertEqual(self.launchctl()[-1], ["launchctl", "print", f"gui/{os.getuid()}/{self.LABEL}"])
+
+
+class SystemdTests(SchedHarness):
+    ANSWERS = {("systemctl",): (0, "", ""), ("loginctl",): (0, "Linger=yes\n", "")}
+
+    def schedule(self, *argv, answers=None):
+        with mock.patch.object(factory.sys, "platform", "linux"):
+            return self.cli("schedule", *argv, answers={**self.ANSWERS, **(answers or {})})
+
+    def systemctl(self):
+        return [c[1:] for c in self.fake.calls if c[0] == "systemctl"]
+
+    def unit(self, kind):
+        return self.home / ".config" / "systemd" / "user" / f"{self.LABEL}.{kind}"
+
+    def test_install_writes_the_units_and_enables_the_timer(self):
+        code, out, err = self.schedule("install")
+        self.assertEqual((code, err, out), (0, "", f"installed {self.LABEL} (systemd)\n"))
+        log = self.store / "watch.log"
+        path = "/usr/bin:/opt/bin:/home/u/.local/bin:" + os.path.dirname(factory.sys.executable) + ":/bin:/usr/sbin:/sbin"
+        self.assertEqual(self.unit("service").read_text(),
+                         f"[Unit]\nDescription=factory watch {ROOT}\n\n[Service]\nType=oneshot\n"
+                         f"WorkingDirectory={ROOT}\nEnvironment=\"PATH={path}\"\n"
+                         f"ExecStart={factory.sys.executable} /plug/factory/bin/factory watch --dispatcher dispatcher-repo\n"
+                         f"StandardOutput=append:{log}\nStandardError=append:{log}\n")
+        self.assertEqual(self.unit("timer").read_text(),
+                         f"[Unit]\nDescription=factory watch {ROOT}\n\n[Timer]\nOnActiveSec=1800\n"
+                         "OnUnitActiveSec=1800\n\n[Install]\nWantedBy=timers.target\n")
+        self.assertEqual(self.systemctl(), [["--user", "show-environment"], ["--user", "daemon-reload"],
+                                            ["--user", "enable", "--now", f"{self.LABEL}.timer"]])
+        self.assertEqual([c[0] for c in self.fake.calls if c[0] == "launchctl"], [])
+
+    def test_install_honors_xdg_config_home_and_says_what_linger_means(self):
+        xdg = self.home / "xdg"
+        with mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": str(xdg)}):
+            _, out, _ = self.schedule("install", answers={("loginctl",): (0, "Linger=no\n", "")})
+        self.assertTrue((xdg / "systemd" / "user" / f"{self.LABEL}.timer").exists())
+        self.assertFalse(self.unit("timer").exists())
+        self.assertIn("loginctl enable-linger", out.splitlines()[1])
+        self.assertEqual(len(out.splitlines()), 2)
+
+    def test_a_failing_enable_exits_1(self):
+        code, _, err = self.schedule("install", answers={("systemctl", "--user", "enable"): (1, "", "no bus")})
+        self.assertEqual(code, 1)
+        self.assertIn("no bus", err)
+
+    def test_remove_and_status(self):
+        _, out, _ = self.schedule("remove")
+        self.assertEqual(out, f"nothing installed: {self.LABEL}\n")
+        self.schedule("install")
+        _, out, _ = self.schedule("status")
+        self.assertEqual(out, f"{self.LABEL}: systemd job present, loaded\n")
+        _, out, _ = self.schedule("status", answers={("systemctl", "--user", "is-active"): (3, "inactive", "")})
+        self.assertEqual(out, f"{self.LABEL}: systemd job present, not loaded\n")
+        _, out, _ = self.schedule("remove")
+        self.assertEqual(out, f"removed {self.LABEL}\n")
+        self.assertEqual(self.systemctl()[-2:], [["--user", "disable", "--now", f"{self.LABEL}.timer"],
+                                                 ["--user", "daemon-reload"]])
+        self.assertFalse(self.unit("timer").exists() or self.unit("service").exists())
+
+
+class CronTests(SchedHarness):
+    OTHER = "0 5 * * * backup --all"
+
+    def schedule(self, *argv, crontab="", answers=None):
+        answers = {("systemctl",): (1, "", "no bus"), ("crontab", "-l"): (0, crontab, ""),
+                   ("crontab", "-"): (0, "", ""), **(answers or {})}
+        with mock.patch.object(factory.sys, "platform", "linux"):
+            return self.cli("schedule", *argv, answers=answers)
+
+    def written(self):
+        return [i for c, i in zip(self.fake.calls, self.fake.inputs) if c == ["crontab", "-"]]
+
+    def test_install_appends_one_marked_line_and_keeps_the_others(self):
+        old = f"*/30 * * * * stale # {self.LABEL}"
+        code, out, err = self.schedule("install", crontab=f"{self.OTHER}\n{old}\n")
+        self.assertEqual((code, err, out), (0, "", f"installed {self.LABEL} (cron)\n"))
+        path = "/usr/bin:/opt/bin:/home/u/.local/bin:" + os.path.dirname(factory.sys.executable) + ":/bin:/usr/sbin:/sbin"
+        self.assertEqual(self.written(), [f"{self.OTHER}\n*/30 * * * * cd {ROOT} && PATH={path} {factory.sys.executable} "
+                                          f"/plug/factory/bin/factory watch --dispatcher dispatcher-repo "
+                                          f">> {self.store / 'watch.log'} 2>&1 # {self.LABEL}\n"])
+
+    def test_install_without_a_crontab_yet(self):
+        code, _, _ = self.schedule("install", answers={("crontab", "-l"): (1, "", "no crontab for u")})
+        self.assertEqual(code, 0)
+        self.assertEqual(len(self.written()[0].splitlines()), 1)
+
+    def test_a_failing_crontab_exits_1(self):
+        code, _, err = self.schedule("install", answers={("crontab", "-"): (1, "", "bad time")})
+        self.assertEqual(code, 1)
+        self.assertIn("bad time", err)
+
+    def test_remove_and_status(self):
+        line = f"*/30 * * * * x # {self.LABEL}"
+        _, out, _ = self.schedule("remove", crontab=f"{self.OTHER}\n")
+        self.assertEqual((out, self.written()), (f"nothing installed: {self.LABEL}\n", []))
+        _, out, _ = self.schedule("remove", crontab=f"{self.OTHER}\n{line}\n")
+        self.assertEqual((out, self.written()), (f"removed {self.LABEL}\n", [f"{self.OTHER}\n"]))
+        _, out, _ = self.schedule("remove", crontab=f"{line}\n")
+        self.assertEqual(self.written()[-1], "")
+        _, out, _ = self.schedule("status", crontab=f"{line}\n")
+        self.assertEqual(out, f"{self.LABEL}: cron job present, loaded\n")
+        _, out, _ = self.schedule("status", crontab=f"{self.OTHER}\n")
+        self.assertEqual(out, f"{self.LABEL}: cron job absent, not loaded\n")
+
+    def test_without_any_scheduler_it_says_so(self):
+        self.tools.pop("crontab")
+        code, _, err = self.schedule("status")
+        self.assertEqual(code, 2)
+        self.assertIn("no scheduler here", err)
+
+
+class HookTests(SchedHarness):
+    DISPATCHER_SESSION = DISPATCHER | {"name": "dispatcher-repo"}
+
+    def hook(self, event, *, sessions=(DISPATCHER_SESSION,), cwd=ROOT, answers=None, **payload):
+        stdin = json.dumps({"hook_event_name": event, "session_id": "sid-d", "cwd": cwd, **payload})
+        with mock.patch.object(factory.sys, "stdin", io.StringIO(stdin)):
+            result = self.cli("hook", sessions=sessions, answers=answers)
+        self.assertEqual(result, (0, "", ""))
+
+    def listed(self):
+        return self.fake.ran("claude", "agents")
+
+    def test_a_prompt_of_the_dispatcher_installs_the_job_when_there_is_none(self):
+        self.hook("UserPromptSubmit", prompt="hi")
+        self.assertTrue(self.plist().exists())
+        self.assertEqual(plistlib.loads(self.plist().read_bytes())["ProgramArguments"][-2:],
+                         ["--dispatcher", "dispatcher-repo"])
+        self.assertTrue(self.fake.ran("launchctl", "bootstrap"))
+
+    def test_a_prompt_does_not_list_sessions_while_the_job_is_there(self):
+        self.put_plist()
+        self.hook("UserPromptSubmit", prompt="hi")
+        self.hook("SessionStart", source="compact")
+        self.assertFalse(self.listed())
+        self.assertFalse(self.fake.ran("launchctl", "bootstrap"))
+
+    def test_startup_and_resume_replace_the_job(self):
+        for source in ("startup", "resume"):
+            with self.subTest(source):
+                self.put_plist(StartInterval=1)
+                self.hook("SessionStart", source=source)
+                self.assertTrue(self.listed())
+                self.assertEqual(plistlib.loads(self.plist().read_bytes())["StartInterval"], 1800)
+
+    def test_a_session_that_is_not_the_dispatcher_starts_nothing(self):
+        other = [DISPATCHER | {"name": "someone"}]
+        elsewhere = [DISPATCHER | {"name": "dispatcher-repo", "cwd": "/elsewhere"}]
+        cases = {"another name": dict(sessions=other), "another repository": dict(sessions=elsewhere),
+                 "not listed": dict(sessions=[]), "a subagent": dict(agent_id="a1"),
+                 "a task worktree": dict(cwd=f"{WT}/x"), "not a repository": dict(
+                     answers={("git", "worktree", "list"): (128, "", "fatal: not a git repository")}),
+                 "another event": dict(event="Stop")}
+        for what, kw in cases.items():
+            with self.subTest(what):
+                self.hook(kw.pop("event", "UserPromptSubmit"), **kw)
+                self.assertFalse(self.plist().exists())
+                self.assertFalse(self.fake.ran("launchctl", "bootstrap"))
+
+    def test_the_last_session_ending_removes_the_job(self):
+        self.put_plist()
+        self.hook("SessionEnd", reason="other")
+        self.assertFalse(self.plist().exists())
+        self.assertTrue(self.fake.ran("launchctl", "bootout"))
+
+    def test_an_ending_session_that_is_no_longer_listed_is_known_by_its_title(self):
+        self.put_plist()
+        self.hook("SessionEnd", sessions=[], session_title="someone")
+        self.assertTrue(self.plist().exists())
+        self.hook("SessionEnd", sessions=[], session_title="dispatcher-repo")
+        self.assertFalse(self.plist().exists())
+
+    def test_a_clear_does_not_end_the_dispatcher(self):
+        self.put_plist()
+        self.hook("SessionEnd", reason="clear")
+        self.assertTrue(self.plist().exists())
+
+    def test_a_job_that_is_present_but_not_loaded_is_installed_again(self):
+        self.put_plist(StartInterval=1)
+        self.hook("UserPromptSubmit", answers={("launchctl", "print"): (113, "", "not found")})
+        self.assertEqual(plistlib.loads(self.plist().read_bytes())["StartInterval"], 1800)
+
+    def test_another_live_dispatcher_keeps_the_job(self):
+        twin = DISPATCHER | {"name": "dispatcher-repo", "sessionId": "sid-2", "cwd": f"{ROOT}/sub"}
+        self.put_plist()
+        self.hook("SessionEnd", sessions=[self.DISPATCHER_SESSION, twin])
+        self.assertTrue(self.plist().exists())
+
+    def test_sessions_that_are_not_live_dispatchers_of_this_repository_do_not_keep_the_job(self):
+        done = DISPATCHER | {"name": "dispatcher-repo", "sessionId": "sid-2", "kind": "background", "state": "done"}
+        away = DISPATCHER | {"name": "dispatcher-repo", "sessionId": "sid-3", "cwd": "/elsewhere"}
+        self.put_plist()
+        self.hook("SessionEnd", sessions=[self.DISPATCHER_SESSION, done, away])
+        self.assertFalse(self.plist().exists())
+
+    def test_a_failing_install_is_swallowed(self):
+        self.hook("UserPromptSubmit", answers={("launchctl", "bootstrap"): (5, "", "Bootstrap failed")})
+        self.tools.pop("gh")
+        self.hook("UserPromptSubmit")
+
+    def test_the_event_is_still_logged(self):
+        self.hook("UserPromptSubmit", prompt="hi")
+        [month] = self.store.glob("events-*.jsonl")
+        self.assertEqual([json.loads(line)["event"] for line in month.read_text().splitlines()], ["UserPromptSubmit"])
+
+
+class OrphanTests(SchedHarness):
+    """The tick that finds no dispatcher session takes the job away."""
+
+    def setUp(self):
+        super().setUp()
+        self.put_plist()
+        self.seed("tasks", [{"repo": ROOT, "slug": "x", "state": "blocked", "ts": iso(NOW - 2 * HOUR)}])
+
+    def watch(self, sessions, entries=("x",), **kw):
+        return self.cli("watch", sessions=sessions, entries=list(entries), **kw)
+
+    def test_with_live_tasks_it_notifies_once_and_removes_the_job(self):
+        notice = {("osascript",): (0, "", "")}
+        _, out, _ = self.watch([], answers=notice)
+        self.assertFalse(self.plist().exists())
+        self.assertIn(f"no dispatcher session for {ROOT}: removing the schedule", out)
+        self.assertEqual(len([c for c in self.fake.calls if c[0] == "osascript"]), 1)
+        [decision] = [r for r in self.records() if "decision" in r]
+        self.assertIn("notified on this machine", decision["reason"])
+        self.watch([], answers=notice, at=NOW + 1800)
+        self.assertFalse(self.fake.ran("osascript"))
+
+    def test_without_tasks_it_removes_silently(self):
+        _, out, _ = self.watch([], entries=[])
+        self.assertFalse(self.plist().exists())
+        self.assertFalse(self.fake.ran("osascript"))
+        self.assertIn("nothing new", out)
+        self.assertEqual([r for r in self.records() if "decision" in r], [])
+
+    def test_it_neither_merges_nor_starts_the_site_manager(self):
+        self.use("past-limit")
+        with mock.patch.object(factory, "watch_lgtm", side_effect=AssertionError("lgtm ran")):
+            _, out, _ = self.watch([self.overtime()])
+        self.assertEqual(self.claude_runs(), [])
+        self.assertIn("past-limit", out)
+        self.assertFalse(self.plist().exists())
+
+    def test_it_stays_while_the_missing_dispatcher_could_not_be_judged(self):
+        unplaced = {"sessionId": "u", "kind": "interactive"}
+        _, out, _ = self.watch([unplaced])
+        self.assertIn("not evaluated: dispatcher-missing", out)
+        self.assertNotIn("removing the schedule", out)
+        self.assertTrue(self.plist().exists())
+
+    def test_it_stays_when_the_sessions_cannot_be_listed(self):
+        _, out, _ = self.watch([], answers={("claude", "agents"): (1, "", "boom")})
+        self.assertTrue(self.plist().exists())
+        self.assertNotIn("removing the schedule", out)
+
+    def test_it_stays_while_a_dispatcher_lives(self):
+        _, out, _ = self.watch([DISPATCHER | {"name": "dispatcher-repo"}])
+        self.assertTrue(self.plist().exists())
+        self.assertNotIn("removing the schedule", out)
+
+    def test_a_dispatcher_of_another_repository_does_not_count(self):
+        self.watch([DISPATCHER | {"name": "dispatcher-repo", "cwd": "/elsewhere"}], entries=[])
+        self.assertFalse(self.plist().exists())
+
+    def test_two_dispatchers_fire_the_missing_dispatcher_and_the_job_stays(self):
+        twin = DISPATCHER | {"name": "dispatcher-repo", "sessionId": "sid-2"}
+        self.watch([DISPATCHER | {"name": "dispatcher-repo"}, twin], answers={("osascript",): (0, "", "")})
+        [notice] = [c for c in self.fake.calls if c[0] == "osascript"]
+        self.assertIn("2 unfinished sessions named dispatcher-repo", notice[2])
+        self.assertTrue(self.plist().exists())
 
 
 if __name__ == "__main__":
