@@ -899,6 +899,10 @@ class CleanTests(unittest.TestCase):
             "session turns busy before removal": (
                 dict(extra={("claude", "agents"): [(0, "[]", ""), (0, json.dumps([bg(status="busy", state="working")]), "")]}),
                 "not finished \\(status busy"),
+            "exited lead is rechecked before removal": (
+                dict(extra={("claude", "agents"): [(0, json.dumps([EXITED]), ""),
+                                                   (0, json.dumps([EXITED | {"state": "failed"}]), "")]}),
+                "status missing, state failed"),
             "interactive session": (dict(sessions=[{"sessionId": "i1", "cwd": f"{WT}/x", "kind": "interactive"}]),
                                     "interactive session"),
             "interactive session in a subdirectory": (
