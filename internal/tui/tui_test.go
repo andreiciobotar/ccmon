@@ -663,6 +663,9 @@ func TestGradientAndAgentColors(t *testing.T) {
 		key24(th.AgentColor("coder")) != key24(th.Blue) || key24(th.AgentColor("reviewer")) != key24(th.Pink) {
 		t.Fatal("fixed agent colors")
 	}
+	if key24(th.AgentColor("factory:coder")) != key24(th.Blue) || key24(th.AgentColor("factory:reviewer")) != key24(th.Pink) {
+		t.Fatal("a plugin's agent has the color of its role")
+	}
 	if key24(th.AgentColor("mystery")) != key24(th.AgentColor("mystery")) {
 		t.Fatal("unknown agent colors must be stable")
 	}

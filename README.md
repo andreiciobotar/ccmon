@@ -43,6 +43,13 @@ started in a subdirectory of a repository, outside any worktree, shows that
 subdirectory as its repository; review loops are detected inside one session, so a
 task's count is the sum over its sessions.
 
+Plugin agents: a plugin's agent is dispatched as `<plugin>:<name>` (`factory:coder`)
+and counts as `<name>` for review loops, re-checks and repeats, and for its colour and
+position in the dashboard. Its full name is shown, and it keeps its own row in `agents`
+and its own `by_agent` key, apart from a bare `coder`. Its model is not checked by
+default, because a transcript does not record where a plugin's definitions were loaded
+from; pass `--agents-dir <plugin>/agents` to check it against `<name>.md` there.
+
 For a resumed agent (`SendMessage`), duration covers dispatch to first return while
 tokens include the resumed work. `running` means no completion (hand-back or
 task-notification) was found in the transcript.

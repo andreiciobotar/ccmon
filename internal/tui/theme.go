@@ -81,9 +81,15 @@ func (th *Theme) gradientAt(t float64) color.Color {
 	return mix(th.Purple, th.Pink, (t-0.5)*2)
 }
 
-// AgentColor is the one stable color of an agent type.
+// agentRole is the role of an agent type: a plugin's agent is named <plugin>:<name>
+// and counts as <name> (the same rule as role() in ccmon/metrics.py).
+func agentRole(agent string) string {
+	return agent[strings.LastIndex(agent, ":")+1:]
+}
+
+// AgentColor is the one stable color of an agent type; a plugin's agent has the color of its role.
 func (th *Theme) AgentColor(agent string) color.Color {
-	switch agent {
+	switch agentRole(agent) {
 	case "main":
 		return th.Yellow
 	case "explorer":
@@ -108,9 +114,10 @@ func (th *Theme) AgentColor(agent string) color.Color {
 var agentOrder = []string{"main", "coder", "reviewer", "explorer", "general-purpose", "Explore", "Plan", "fork"}
 
 // agentLess is the one agent ordering: the known types in agentOrder, then any other
-// type alphabetically. Never by usage, so a colour keeps its place between sessions.
+// type alphabetically; a plugin's agent sorts by its role, right after the bare type. Never by usage, so a colour keeps its place between sessions.
 func agentLess(a, b string) bool {
-	ra, rb := slices.Index(agentOrder, a), slices.Index(agentOrder, b)
+	oa, ob := agentRole(a), agentRole(b)
+	ra, rb := slices.Index(agentOrder, oa), slices.Index(agentOrder, ob)
 	if ra < 0 {
 		ra = len(agentOrder)
 	}
@@ -119,6 +126,12 @@ func agentLess(a, b string) bool {
 	}
 	if ra != rb {
 		return ra < rb
+	}
+	if oa != ob {
+		return oa < ob
+	}
+	if len(a) != len(b) { // same role: the bare type first
+		return len(a) < len(b)
 	}
 	return a < b
 }
