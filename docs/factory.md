@@ -72,7 +72,7 @@ Leads and the dispatcher talk through Claude Code's `SendMessage`, by session na
 `new --base <slug>` branches the worktree from the base task's branch and records it in `git config branch.worktree-<slug>.factoryBase`; the pull request targets that branch. The record is never cleared: `status` stops showing a base once it has merged into the default branch, and `clean` stops treating a merged task as stacked. When a base merges, the stacked lead rebases onto the default branch and retargets its pull request.
 
 ## Logs
-All under `~/.claude/factory/`, JSON lines, append-only, mode 0600. Except where noted, a record carries `ts` (UTC, `2026-11-14T00:01:02Z`), `repo` (the main checkout's path), `slug`, `role` (`lead`, `dispatcher`, a subagent's type without the `factory:` prefix such as `coder`, `subagent` when it has none, else `other`), `model`, `version` (the plugin's), `session`.
+All under `~/.claude/factory/`, JSON lines, append-only, mode 0600. Except where noted, a record carries `ts` (UTC, `2026-11-14T00:01:02Z`), `repo` (the main checkout's path), `slug`, `role` (`lead`, `dispatcher`, a subagent's type without the `factory:` prefix such as `coder`, `subagent` when it has none, else `other`; `feedback add` stores the `--role` it is given), `model`, `version` (the plugin's), `session`.
 
 | Log | Files | Written by | Kept |
 |---|---|---|---|
@@ -113,7 +113,7 @@ Unsuffixed `events.jsonl`, `retros.jsonl` and `feedback.jsonl` from older versio
 **Task state** adds `state` and, from the hand-over on, `deliverable`. A task's state is its last record.
 
 ## Site manager
-Optional. `factory schedule install`, run in the main checkout on macOS, loads a launchd job (`~/Library/LaunchAgents/com.claude.factory.watch.<repository directory name>.plist`, output appended to `~/.claude/factory/watch.log`) that runs `factory watch` every 30 minutes; `remove` undoes it, `status` shows it. Elsewhere `install` exits 2 and prints the cron line to add by hand.
+Optional. `factory schedule install`, run in the main checkout on macOS, loads a launchd job (`~/Library/LaunchAgents/com.claude.factory.watch.<repository directory name>.plist`, output appended to `~/.claude/factory/watch.log`) that runs `factory watch` every 30 minutes; `remove` undoes it, `status` shows it. The job keeps the `PATH` and the dispatcher name of the moment it was installed (`gh` and `claude` must be on that `PATH`), so install again after renaming the dispatcher, and also when launchd refuses an install over a job still loaded. Install from the main checkout or the installed plugin: a job installed from a task worktree breaks when the worktree is removed. Elsewhere `install` exits 2 and prints the cron line to add by hand.
 
 `health` evaluates the criteria and prints what fires now; it writes nothing. `watch` does the same, logs each new firing, and only when there is something new to send starts one headless Sonnet run (no shell, no file tools, 10 minute timeout, about $0.15) under `factory/roles/site-manager.md`. The run gets the evidence in its prompt and either messages the dispatcher (first line `ESCALATION: <repository directory name>`) or suppresses the firing with a reason. `always` firings cannot be suppressed. Nothing is escalated twice while its condition lasts; a suppression is looked at again after two hours. `dispatcher-missing` becomes a desktop notification instead, and holds everything else back until a dispatcher exists.
 
@@ -127,7 +127,7 @@ Criteria are `factory/criteria.json`, one entry per line: `name`, `escalate` (`a
 | `quiet` | judgment | 20 min | a working lead wrote nothing and committed nothing for that long |
 | `ended-undeclared` | judgment | 10 min | a lead's session ended with no hand-over or block declared |
 | `blocked-unanswered` | judgment | 30 min | a task has been `blocked` that long |
-| `handover-unacknowledged` | judgment | 24 h | a task has been in `review` that long |
+| `handover-unacknowledged` | judgment | 24 h | a task was declared `handed-over` that long ago and is still in `review` |
 | `review-loops` | judgment | 3 | a task had that many reviewer dispatches since it started |
 | `wrong-model` | judgment | | a lead or subagent ran on a model other than the one pinned for its role |
 | `ci-red-handover` | judgment | | a handed-over pull request has a failing check |

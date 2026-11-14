@@ -58,8 +58,9 @@ task-notification) was found in the transcript.
 
 `make up` builds and runs it. It shows what `ccmon --json` reports, re-reading a
 session when its transcript changes (checked every second). The only file it writes
-under `~/.claude` is the factory's settings, when you save the cap. It finds the Python package from `CCMON_ROOT`, else from the binary's own
-location. It needs a terminal of at least 60x16.
+under `~/.claude` is the factory's settings, when you save the cap. It finds the
+Python package from `CCMON_ROOT`, else from the binary's own location. It needs a
+terminal of at least 60x16.
 ```
 bin/ccmon-tui [--range 24h|7d|30d|all] [--follow] [--no-color]
               [--projects-dir DIR] [--agents-dir DIR] [--prices PATH]
