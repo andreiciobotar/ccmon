@@ -1,0 +1,2 @@
+{"type": "user", "timestamp": "2026-01-13T09:00:00.000Z", "message": {"role": "user", "content": "start"}}
+{"type": "assistant", "uuid": "u-msg_c1000001_0", "timestamp": "2026-01-13T09:00:05.000Z", "requestId": "req-msg_c1000001_0", "message": {"id": "msg_c1000001_0", "model": "claude-fable-5-2", "role": "assistant", "content": [{"type": "text", "text": "working"}], "stop_reason": null, "usage": {"input_tokens": 18, "output_tokens": 28, "cache_creation_input_tokens": 38, "cache_read_input_tokens": 48}}}

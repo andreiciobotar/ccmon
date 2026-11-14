@@ -98,6 +98,8 @@ def load_all(args):
         s = transcript.load_session(p)
         if cutoff is not None and s.last_ts is not None and s.last_ts < cutoff:
             continue
+        if getattr(args, "repo", None) not in (None, s.repo) or getattr(args, "task", None) not in (None, s.task):
+            continue
         metrics.analyze(s, args.agents_dir, args.repeat_threshold)
         sessions.append(s)
     sessions.sort(key=lambda s: s.first_ts or transcript.EPOCH)
@@ -109,20 +111,33 @@ def load_all(args):
 def cmd_sessions(args):
     sessions = load_all(args)
     sums = [metrics.session_summary(s) for s in sessions]
+    repos = metrics.group_repos(sessions)
+    malformed = sum(x["malformed"] for x in sums)
     if args.json:
-        emit_json({"sessions": sums, "malformed": sum(x["malformed"] for x in sums)})
+        emit_json({"sessions": sums, "repos": repos, "malformed": malformed})
         return 0
-    headers = ["id", "project", "start (UTC)", "total", "main%", "sub%", "disp", "repeat",
+    headers = ["repo / task / session", "start (UTC)", "total", "main%", "sub%", "disp", "repeat",
                "loops", "recheck", "warn", "malformed"]
-    rows = []
-    for x in sums:
+    by_id = {x["id"]: x for x in sums}
+
+    def row(label, x):
         t = x["tokens"]
-        rows.append([x["id"][:8], x["project"][:24], x["start"] and fmt_dt(datetime.fromisoformat(x["start"])) or "-",
-                     human(t["total"]), "%.0f" % t["main_pct"], "%.0f" % t["subagent_pct"],
-                     x["dispatch_count"], x["repeats"], x["review_loops"],
-                     fmt_rate(x["recheck"]["rate"]), x["warn_count"], x["malformed"]])
-    print(table(headers, rows, left=("id", "project", "start (UTC)")))
-    print("\n%d sessions, %d malformed lines" % (len(sums), sum(x["malformed"] for x in sums)))
+        return [label, x["start"] and fmt_dt(datetime.fromisoformat(x["start"])) or "-",
+                human(t["total"]), "%.0f" % t["main_pct"], "%.0f" % t["subagent_pct"],
+                x["dispatch_count"], x["repeats"], x["review_loops"],
+                fmt_rate(x["recheck"]["rate"]), x["warn_count"], x["malformed"]]
+
+    rows = []
+    for r in repos:
+        rows.append(row(r["repo"], r))
+        in_task = {i for t in r["tasks"] for i in t["sessions"]}
+        rows.extend(row("  " + i[:8], by_id[i]) for i in r["sessions"] if i not in in_task)
+        for t in r["tasks"]:
+            rows.append(row("  " + t["task"], t))
+            rows.extend(row("    " + i[:8], by_id[i]) for i in t["sessions"])
+    print(table(headers, rows, left=("repo / task / session", "start (UTC)")))
+    print("\n%d repositories, %d tasks, %d sessions, %d malformed lines" % (
+        len(repos), sum(len(r["tasks"]) for r in repos), len(sums), malformed))
     return 0
 
 
@@ -141,7 +156,9 @@ def cmd_session(args):
         return 0
     t = x["tokens"]
     print("session   %s" % x["id"])
-    print("project   %s (%s)" % (x["project"], x["cwd"] or x["project_dir"]))
+    others = [w for w in x["worktrees"] if w != x["task"]]
+    print("repo      %s (%s)" % (x["repo"], x["repo_path"] or x["project_dir"]))
+    print("task      %s%s" % (x["task"] or "-", " (also entered: %s)" % ", ".join(others) if others else ""))
     print("span      %s .. %s UTC" % (fmt_dt(s.first_ts), fmt_dt(s.last_ts)))
     print("tokens    total %s, main %s (%.1f%%), subagents %s (%.1f%%)" % (
         human(t["total"]), human(t["main"]), t["main_pct"], human(t["subagents"]), t["subagent_pct"]))
@@ -222,12 +239,15 @@ def build_parser():
     sub = p.add_subparsers(dest="command", required=True)
     since = argparse.ArgumentParser(add_help=False)
     since.add_argument("--since", help="Nd, Nh, Nw or an ISO date")
-    s = sub.add_parser("sessions", parents=[_common(True), since], help="one row per session")
+    scope = argparse.ArgumentParser(add_help=False)
+    scope.add_argument("--repo", help="only this repository (name)")
+    scope.add_argument("--task", help="only this task (worktree name)")
+    s = sub.add_parser("sessions", parents=[_common(True), since, scope], help="one row per session")
     s.set_defaults(func=cmd_sessions)
     s = sub.add_parser("session", parents=[_common(True)], help="one session in detail")
     s.add_argument("id", help="session id or unique prefix")
     s.set_defaults(func=cmd_session)
-    s = sub.add_parser("agents", parents=[_common(True), since], help="per agent type aggregates")
+    s = sub.add_parser("agents", parents=[_common(True), since, scope], help="per agent type aggregates")
     s.set_defaults(func=cmd_agents)
     return p
 

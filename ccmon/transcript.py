@@ -134,6 +134,9 @@ class Session:
         self.first_ts = None
         self.last_ts = None
         self.mtime = None
+        self.repo_path = None
+        self.task = None
+        self.worktrees = []
         # filled by metrics
         self.warnings = []
         self.review_loops = 0
@@ -146,6 +149,46 @@ class Session:
         if self.cwd:
             return os.path.basename(self.cwd.rstrip("/")) or self.cwd
         return self.project_dir
+
+    @property
+    def repo(self):
+        if self.repo_path:
+            return os.path.basename(self.repo_path) or self.repo_path
+        return self.project_dir
+
+
+_WT_MARK = "/.claude/worktrees/"
+_AGENT_WT = re.compile(r"agent-[0-9a-f]+")
+
+
+def _locate(path, name=None, origin=None):
+    """(repository path, task) for a worktree path, or for a plain cwd when name is None."""
+    if _WT_MARK in path:
+        repo, rest = path.split(_WT_MARK, 1)
+        task = rest.split("/")[0]
+        return repo, (None if not task or _AGENT_WT.fullmatch(task) else task)
+    if name:  # worktree made by a hook, outside .claude/worktrees
+        return (origin if isinstance(origin, str) and origin else path), name
+    return path.rstrip("/"), None
+
+
+def attribute(states, cwd):
+    """(repo_path, task, worktrees) from the main transcript's worktree-state records and first cwd.
+
+    states: [(worktreePath, worktreeName, originalCwd)] in file order. The session belongs to the
+    last worktree it entered; with none, to its first cwd. Nothing here touches git or the disk.
+    """
+    entered = []
+    for path, name, origin in states:
+        if _AGENT_WT.fullmatch(name) or (entered and entered[-1][0] == path):
+            continue
+        entered.append((path, name, origin))
+    located = [_locate(*e) for e in entered]
+    worktrees = [t for _, t in located if t]
+    if not located and cwd:
+        located = [_locate(cwd)]
+    repo, task = located[-1] if located else (None, None)
+    return repo, task, worktrees
 
 
 class _Scan:
@@ -165,6 +208,7 @@ class _Scan:
         self.last_ts = None
         self.malformed = 0
         self.cwd = None
+        self.worktree_states = []
 
 
 _NOTE_RE = {
@@ -215,6 +259,11 @@ def _scan(path, seen, depth, agent_id):
             sc.malformed += 1
             continue
         typ = obj["type"]
+        if typ == "worktree-state":
+            ws = obj.get("worktreeSession")
+            if isinstance(ws, dict) and all(isinstance(ws.get(k), str) for k in ("worktreePath", "worktreeName")):
+                sc.worktree_states.append((ws["worktreePath"], ws["worktreeName"], ws.get("originalCwd")))
+            continue
         if typ == "attachment":
             att = obj.get("attachment")
             if isinstance(att, dict) and att.get("type") == "queued_command":
@@ -371,6 +420,7 @@ def load_session(path):
         agent_files.append((aid, meta, sc))
         if s.cwd is None:
             s.cwd = sc.cwd
+    s.repo_path, s.task, s.worktrees = attribute(main.worktree_states, s.cwd)
     for sc in scans:
         for t in (sc.first_ts, sc.last_ts):
             if t:
