@@ -263,7 +263,7 @@ func TestTruncByDisplayWidth(t *testing.T) {
 
 func TestViewSwitching(t *testing.T) {
 	m := fakeModel(true, 120, 40)
-	send(m, "j") // off the all row: the session view needs a session
+	send(m, "j") // onto the session row
 	send(m, "tab")
 	if m.view != viewSession {
 		t.Fatalf("tab -> %v", m.view)

@@ -77,7 +77,7 @@ func (m *model) footerKeys() []key.Binding {
 	case m.view == viewAgents:
 		return []key.Binding{keys.Down, keys.Range, keys.Next, keys.Back, keys.Help, keys.Quit}
 	}
-	return []key.Binding{keys.Down, keys.Open, keys.Fold, keys.Filter, keys.Sort, keys.Range, keys.Follow, keys.Next, keys.Help, keys.Quit}
+	return []key.Binding{keys.Down, keys.Open, keys.Filter, keys.Fold, keys.Sort, keys.Range, keys.Follow, keys.Next, keys.Help, keys.Quit}
 }
 
 // helpGroups is the help overlay: every binding that has help text.

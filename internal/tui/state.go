@@ -94,10 +94,10 @@ type model struct {
 	agents   *data.Agents
 	prices   data.Prices
 
-	selID      string // key of the row under the dashboard cursor: a session id, or a group row's key
+	selID      string          // key of the row under the dashboard cursor: a session id, or a group row's key
 	folded     map[string]bool // keys of the repository rows collapsed to one row
-	top        int    // first visible table row
-	dcursor    int    // dispatch cursor in session view
+	top        int             // first visible table row
+	dcursor    int             // dispatch cursor in session view
 	dtop       int
 	detailOnly bool // narrow terminals: enter swaps the list for the detail pane
 	acursor    int
@@ -1271,9 +1271,10 @@ func (m *model) openMostRecent(row treeRow) {
 	m.setToast("opened "+short8(best.ID)+", the most recent in "+row.name, false)
 }
 
-// fold collapses the repository the cursor is in to its one row and puts the cursor there (on), or expands
-// the collapsed repository under the cursor. It does nothing on the all row, on a repository of one
-// session, and when the repository is already as asked.
+// fold collapses the repository the cursor is in to its one row (on), or expands the collapsed repository
+// under the cursor; either way the cursor ends on the repository row, which is a cursor move (follow mode
+// goes off). It does nothing on the all row, on a repository of one session, and when the repository is
+// already as asked.
 func (m *model) fold(on bool) {
 	rows := m.rows()
 	if len(rows) == 0 {
@@ -1291,7 +1292,7 @@ func (m *model) fold(on bool) {
 		m.moveTo(i)
 	default:
 		delete(m.folded, r.key)
-		m.selID = r.key
+		m.moveTo(i)
 	}
 }
 

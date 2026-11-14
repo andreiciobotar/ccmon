@@ -127,7 +127,7 @@ func Snapshot(so SnapshotOptions) (string, error) {
 		rows := m.rows()
 		m.selID = rows[min(so.Row, len(rows)-1)].key
 	}
-	if so.Fold {
+	if so.Fold && m.view == viewDashboard {
 		m.fold(true)
 	}
 	return m.finishSnapshot(), nil

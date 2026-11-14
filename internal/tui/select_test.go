@@ -427,6 +427,17 @@ func TestFoldedRepositoryOpensAndFollows(t *testing.T) {
 		t.Fatalf("the folded row opens what is most recent now: selID %q, toast %q", m.selID, m.toast.text)
 	}
 
+	send(m, "2", "2") // inside the session view the key does not pick again
+	if m.selID != "a2000000" || m.toast.text != "opened a2000000, the most recent in alpha" {
+		t.Fatalf("2 in the session view: selID %q, toast %q", m.selID, m.toast.text)
+	}
+	m.seen["a3000000"] = m.activity(m.sessions["a2000000"]).Add(time.Hour)
+	send(m, "2")
+	if m.view != viewSession || m.selID != "a2000000" {
+		t.Fatalf("2 in the session view keeps the session: view %v, selID %q", m.view, m.selID)
+	}
+	delete(m.seen, "a3000000")
+
 	send(m, "esc", "f")
 	if !m.follow || m.selID != "a2000000" {
 		t.Fatalf("follow targets the most recent session, folded or not: follow %v, selID %q", m.follow, m.selID)
@@ -437,6 +448,15 @@ func TestFoldedRepositoryOpensAndFollows(t *testing.T) {
 	}
 	if out := plain(m); !strings.Contains(out, "mix · repo alpha ×4") {
 		t.Fatalf("the mix panels show the folded row\n%s", out)
+	}
+	// unfolding and folding move the cursor to the repository row, so each turns follow mode off
+	for _, k := range []string{"right", "left"} {
+		m.follow = true
+		m.followTarget()
+		send(m, k)
+		if r := m.rows()[mustCursor(m)]; m.follow || m.selID != r.key || r.name != "alpha" {
+			t.Fatalf("%s while following: follow %v, selID %q, cursor on %s", k, m.follow, m.selID, r.label())
+		}
 	}
 }
 
