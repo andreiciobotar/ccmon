@@ -1697,6 +1697,8 @@ def cmd_merge(args):
             print(f"#{pr['number']} skipped: {reason}")
         else:
             selected.append(pr)
+    if not selected:
+        print("nothing to merge")
     selected, merged, failed = bottom_up(selected), set(), False
     for i, pr in enumerate(selected):
         stop = merge_one(p, pr, merged, args.dry_run)

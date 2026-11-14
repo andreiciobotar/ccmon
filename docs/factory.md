@@ -27,6 +27,7 @@ factory schedule install|remove|status [--dispatcher <session-name>]
 factory firing <id> acted|ignored                                        # id or a unique prefix
 factory miss <text> [--slug <slug>] [--firing <id>]
 factory firings [--json]
+factory merge (<number>... | --all) [--dry-run]
 ```
 
 - **`new`** starts a lead: a background session in a new worktree, with `factory/roles/lead.md` appended to its system prompt, declared `working`. The calling session must be named `--dispatcher` (default `dispatcher-<main checkout's directory name>`; set it with `/rename`), and no other session may carry that name. It refuses a slug whose worktree, branch, session or pull request (in any state) already exists (when `gh` cannot say, it warns and goes on), and a repository at its cap. `--base` stacks the task on another open task's branch.
@@ -69,7 +70,7 @@ The cap (`worktree_cap`) counts slots per repository. Only `new` checks it, so a
 Leads and the dispatcher talk through Claude Code's `SendMessage`, by session name. A lead's first line starts with `QUESTION:`, `BLOCKED:`, `OVERTIME:`, `SPLIT:` or `DONE:` and its slug. The human can always `claude attach <slug>`.
 
 ## Stacked tasks
-`new --base <slug>` branches the worktree from the base task's branch and records it in `git config branch.worktree-<slug>.factoryBase`; the pull request targets that branch. The record is never cleared: `status` stops showing a base once it has merged into the default branch, and `clean` stops treating a merged task as stacked. When a base merges, the stacked lead rebases onto the default branch and retargets its pull request.
+`new --base <slug>` branches the worktree from the base task's branch and records it in `git config branch.worktree-<slug>.factoryBase`; the pull request targets that branch. The record is never cleared: `status` stops showing a base once it has merged into the default branch, and `clean` stops treating a merged task as stacked. When a base merges, a lead still working on top of it rebases onto the default branch (the `base-merged` criterion flags it); `merge` retargets a stacked pull request itself when its turn comes.
 
 ## Logs
 All under `~/.claude/factory/`, JSON lines, append-only, mode 0600. Except where noted, a record carries `ts` (UTC, `2026-11-14T00:01:02Z`), `repo` (the main checkout's path), `slug`, `role` (`lead`, `dispatcher`, a subagent's type without the `factory:` prefix such as `coder`, `subagent` when it has none, else `other`; `feedback add` stores the `--role` it is given), `model`, `version` (the plugin's), `session`.
@@ -133,14 +134,45 @@ Criteria are `factory/criteria.json`, one entry per line: `name`, `escalate` (`a
 | `ci-red-handover` | judgment | | a handed-over pull request has a failing check |
 | `deep-stack` | judgment | 3 | a task's stack is deeper than that |
 | `merged-not-cleaned` | judgment | 2 h | a task was merged or settled that long ago and not cleaned |
+| `lgtm-blocked` | always | | a pull request carries the human's `lgtm` and was not merged; subject `#<number>/<kind>` (see Merging) |
+| `base-merged` | always | | a lead is still working (pull request neither merged nor open against the default branch) on a base that has merged, and its worktree lacks that merge commit |
 
 The dispatcher closes the loop: `firing <id> acted|ignored` on each escalation, `miss` for a problem that was not escalated (`--firing` when it had fired and was suppressed). `firings` lists the log, then precision `acted/(acted+ignored)` and recall `acted/(acted+missed)`.
 
 `firings.jsonl` records carry only `ts`, `repo` and one of: a firing (`id`, `criterion`, `escalate`, `slug`, `subject`, `detail`); a decision (`id`, `decision`: `escalated` or `suppressed`, `reason`, `by`: `site-manager` or `watch`); an outcome (`id`, `outcome`); a clearing (`id`, `cleared: true`); a miss (`miss`, `slug`, `firing`).
 
+## Merging
+`factory merge` merges pull requests with no model. It merges only what is mechanical and stops at the first thing that is not. Two things start it:
+- **The dispatcher**, on the human's word: `factory merge <number>...`, or `--all` for every open pull request whose task is handed over (the others print `#N skipped: <why>`; with none left, `nothing to merge`).
+- **The human comments `lgtm`** on the pull request. Each `watch` tick, before the criteria, merges every open pull request that has such a comment; `health` runs the same checks without acting. The comment counts when its whole body, trimmed, in any case, is `lgtm`; its author has `admin` or `write` permission on the repository; and it was created after the head branch last changed (GitHub's activity feed for the branch: the time of the push, not a commit date). Review comments and review bodies do not count. This needs the schedule installed.
+
+**Nothing technical tells the human's `lgtm` from one an agent posts**, because agents act with the human's GitHub credentials. The `lgtm` trigger rests on a rule written into every role file: no agent ever posts one. A separate GitHub identity for the factory would make this a mechanism; that is not built.
+
+Per pull request, bottom-up through a stack (a pull request based on another selected one goes after it). Each check that fails is a blocker with a kind:
+
+| Kind | Blocker |
+|---|---|
+| `fork` | its head is in another repository |
+| `handover` | no task worktree has its head branch; or the task is not in phase `review`; or the worktree's head is not the pull request's head |
+| `base` | its base is neither the default branch nor the head of a pull request merged into it |
+| `ci` | no checks, a failed or cancelled check, or no passed check |
+| `pending` | a check is still running; GitHub has not computed mergeability after 5 asks 3 seconds apart; the base's pull request cannot be read |
+| `conflict` | it conflicts with its base |
+| `stale` | (`lgtm` only) the head changed after the `lgtm`: a fresh one is needed |
+| `head-time` | (`lgtm` only) the activity feed does not name the pull request's head, so when it changed cannot be told |
+| `merge` | a `gh` step failed |
+
+Then it retargets the pull request onto the default branch when its base is a merged one (`gh pr edit --base`), marks a draft ready (`gh pr ready`) and merges with a merge commit, pinned to the head it checked (`gh pr merge --merge --match-head-commit`). Merge commits keep branches stacked on it valid; squash would not. After any merge it runs `clean`.
+
+- `merge` prints `#N merged <url>`, or `#N stopped: <reason>` and `#M not attempted` for the rest; exit 0 when everything merged, 1 on a stop or a failed step, 2 for a number that is not an open pull request. `--dry-run` changes nothing, checks every pull request as if the earlier ones had merged, and prints `#N would merge` or `#N would stop: <reason>`; mergeability of a pull request that would first be retargeted is not checked.
+- In `watch` one pull request's blocker does not stop the others. It prints `#N merged on lgtm <comment url>` or `#N blocked: <reason>`. A blocker other than `pending` fires `lgtm-blocked`; `pending` fires nothing and the next tick tries again. Nothing is merged while phases cannot be trusted (a session with no `cwd`, an unknown pull request state) or once a `gh` read fails; `lgtm-blocked` is then `not evaluated`.
+- Deleting `lgtm-blocked` from `criteria.json` silences the escalation, not the merging. To turn the `lgtm` trigger off, remove the schedule.
+- `clean` keeps the worktree the running plugin lives in: leads started by it load their plugin from there.
+
 ## Known limits
 - Nothing caps what a lead spends; the time limit is checked by the lead between subagent runs.
 - A worktree made by hand under a slug used before inherits that slug's last declared state.
 - A store nobody writes to is never pruned. A month file and `watch.log` have no size limit.
+- Merging: the `lgtm` trigger rests on a rule, not a mechanism (see Merging). Checks are not rerun after a retarget, and GitHub does not test the merge result: mergeable means no conflict. A pull request with no task worktree is a `handover` stop; the human merges it. At most 100 open pull requests are seen. An `lgtm` during a running check waits for the next tick. There is no lock: when a tick and the dispatcher merge at once, the second `gh pr merge` fails and is reported.
 - The site manager's thresholds are first guesses; `quiet` reads file times, so a lead waiting on a long command looks quiet; a run that dies after sending may escalate the same firing again next tick.
 - Two repositories whose directories share a name share a spec folder and a default dispatcher name.
