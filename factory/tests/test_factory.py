@@ -24,10 +24,11 @@ DAY = 86400
 
 
 def porcelain(*entries):
-    """entries: (path, branch or None, prunable)."""
+    """entries: (path, branch or None, prunable[, lock reason; "" is a lock without one])."""
     out = []
-    for path, branch, prunable in entries:
+    for path, branch, prunable, *lock in entries:
         out += [f"worktree {path}", "HEAD abc", f"branch refs/heads/{branch}" if branch else "detached"]
+        out += [f"locked {reason}".rstrip() for reason in lock]
         if prunable:
             out.append("prunable gitdir file points to non-existent location")
         out.append("")
@@ -60,6 +61,9 @@ class FakeRun:
 
 
 DISPATCHER = {"sessionId": "sid-d", "name": "dispatcher-repo", "cwd": ROOT, "kind": "interactive"}
+# The lead of task `x` after its process has exited, as `claude agents --json --all` lists it.
+EXITED = {"id": "ex1", "sessionId": "sid-x", "name": "x", "kind": "background", "state": "done", "cwd": ROOT,
+          "startedAt": 1}
 
 
 def task_rec(slug, state, deliverable=None, repo=ROOT):
@@ -710,6 +714,24 @@ class StatusTests(unittest.TestCase):
         self.assertEqual((row["session"], row["pr_state"], row["dirty"]), ("none", "none", False))
         self.assertIn(["git", "rev-list", "--left-right", "--count", "origin/main...HEAD"], fake.calls)
 
+    def test_exited_lead_is_matched_by_name_at_the_main_checkout(self):
+        exited = EXITED | {"name": "alpha"}
+        pr = [{"state": "OPEN", "url": "u", "headRefOid": "z"}]
+        row = self.status([task_entry("alpha")], [exited], pr=pr)[0]["rows"][0]
+        self.assertEqual((row["session"], row["session_id"], row["phase"], row["overtime"]),
+                         ("done", "ex1", "review", False))
+        for name, other in {"another name": {"name": "beta"}, "another repo": {"cwd": "/other"},
+                            "process alive": {"pid": 7}, "interactive": {"kind": "interactive"},
+                            "no cwd": {"cwd": None}}.items():
+            with self.subTest(name):
+                row = self.status([task_entry("alpha")], [exited | other], pr=pr)[0]["rows"][0]
+                self.assertEqual((row["session"], row["session_id"]), ("none", None))
+
+    def test_worktree_locks_are_parsed(self):
+        entries = factory.parse_worktrees(porcelain((ROOT, "main", False), (f"{WT}/a", "worktree-a", False, ""),
+                                                    (f"{WT}/b", "worktree-b", False, "claude session b (pid 1)")))
+        self.assertEqual([e["locked"] for e in entries], [None, "", "claude session b (pid 1)"])
+
     def test_missing_gh_is_unknown(self):
         doc, _ = self.status([task_entry("alpha")], pr="missing")
         self.assertEqual(doc["rows"][0]["pr_state"], "unknown")
@@ -890,8 +912,19 @@ class CleanTests(unittest.TestCase):
             "waiting session": (dict(sessions=[bg(status="waiting")]), "not finished \\(status waiting, state done\\)"),
             "idle but working": (dict(sessions=[bg(state="working")]), "not finished \\(status idle, state working\\)"),
             "unknown status": (dict(sessions=[bg(status="needs_input")]), "status needs_input, state done"),
-            "missing status": (dict(sessions=[{"id": "ab", "cwd": f"{WT}/x", "kind": "background", "state": "done"}]),
-                               "status missing, state done"),
+            "missing status, process alive": (dict(sessions=[EXITED | {"pid": 7, "cwd": f"{WT}/x"}]),
+                                              "status missing, state done"),
+            "exited, not done": (dict(sessions=[EXITED | {"state": "failed"}]), "status missing, state failed"),
+            "exited, status present": (dict(sessions=[EXITED | {"status": "busy"}]), "status busy, state done"),
+            "two exited sessions carry its name": (dict(sessions=[EXITED, EXITED | {"id": "ex2"}]),
+                                                   "more than one exited session"),
+            "locked, no session": (
+                dict(entries=[task_entry("x") + ("claude session x (pid 7 start Sat)",)]),
+                f"locked \\(claude session x \\(pid 7 start Sat\\)\\) and no session .*run: git worktree unlock {WT}/x$"),
+            "locked without a reason, no session": (
+                dict(entries=[task_entry("x") + ("",)]), f"locked and no session .*run: git worktree unlock {WT}/x$"),
+            "locked, exited session of another name": (
+                dict(entries=[task_entry("x") + ("",)], sessions=[EXITED | {"name": "y"}]), "locked and no session"),
             "missing state": (dict(sessions=[{"id": "ab", "cwd": f"{WT}/x", "kind": "background", "status": "idle"}]),
                               "status idle, state missing"),
             "one finished, one not": (dict(sessions=[bg(), bg(id="cd", state="working")]), "session cd is not finished"),
@@ -901,6 +934,10 @@ class CleanTests(unittest.TestCase):
             "session turns busy before removal": (
                 dict(extra={("claude", "agents"): [(0, "[]", ""), (0, json.dumps([bg(status="busy", state="working")]), "")]}),
                 "not finished \\(status busy"),
+            "exited lead is rechecked before removal": (
+                dict(extra={("claude", "agents"): [(0, json.dumps([EXITED]), ""),
+                                                   (0, json.dumps([EXITED | {"state": "failed"}]), "")]}),
+                "status missing, state failed"),
             "interactive session": (dict(sessions=[{"sessionId": "i1", "cwd": f"{WT}/x", "kind": "interactive"}]),
                                     "interactive session"),
             "interactive session in a subdirectory": (
@@ -1047,6 +1084,22 @@ class CleanTests(unittest.TestCase):
         self.assertIn(["claude", "rm", "ab12"], fake.calls)
         self.assertFalse(fake.ran("git", "worktree", "remove"))
         self.assertFalse(fake.ran("git", "branch"))
+
+    def test_exited_lead_is_removed_with_claude_rm(self):
+        locked = [task_entry("x") + ("claude session x (pid 7 start Sat)",)]
+        for name, kw in {"unlocked": {}, "locked": dict(entries=locked),
+                         "exits between listing and removal": dict(extra={("claude", "agents"): [
+                             (0, json.dumps([EXITED | {"cwd": f"{WT}/x", "pid": 7, "status": "idle"}]), ""),
+                             (0, json.dumps([EXITED]), "")]})}.items():
+            with self.subTest(name):
+                code, out, _, fake = self.clean(sessions=[EXITED], **kw)
+                self.assertEqual((code, out.strip()), (0, "removed x"))
+                self.assertIn(["claude", "rm", "ex1"], fake.calls)
+                self.assertFalse(fake.ran("git", "worktree", "remove"))
+
+    def test_a_lock_is_reported_only_when_the_task_would_otherwise_go(self):
+        code, out, _, _ = self.clean(entries=[task_entry("x") + ("",)], pr=[])
+        self.assertEqual(out.strip(), "kept x: no merged pull request (none)")
 
     def test_dry_run_changes_nothing(self):
         code, out, _, fake = self.clean(dry=True)
