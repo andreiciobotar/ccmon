@@ -859,9 +859,6 @@ func (m *model) applyScan(cur map[string]time.Time) []tea.Cmd {
 			delete(m.retry, id)
 			delete(m.sessions, id)
 			m.agentsDirty = true
-			if m.view == viewSession && m.selID == id {
-				m.view = viewDashboard
-			}
 		}
 	}
 	m.pruneCaches()

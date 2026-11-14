@@ -86,12 +86,14 @@ VIEW=... SIZE=...` turns it into a PNG under `shots/` (needs Chrome).
 - **Dashboard:** totals for the range, the sessions as a tree of repository, task and
   session, the agent and model mix, and every dispatch running now. A group row sums
   its sessions (rates from summed counts, never a mean of rates); a group of one
-  session is a single row. The top row, `all`, sums every session shown. The cursor
-  moves over every row; the agent and model mix show the row under it and name it in
-  their titles, with money and share over that row's cost. The tiles always total every
-  session shown, and a line under them says so. In the mix a plugin's agent counts with
-  its role (`factory:coder` as `coder`); the Agents view keeps them apart. A cursor row
-  that disappears (filtered out, merged away) falls back to `all`. Columns: time (last activity when sorted by
+  session is a single row. The cursor starts on the top row, `all`, which sums every
+  session shown, and moves over every row. The agent and model mix show the row under
+  it and name it, in their titles or, under 120 columns, in the heading above the two
+  strips; money and share are over that row's cost, and a strip ends in `+N` when N
+  entries do not fit. The tiles always total every session shown, and a line under them
+  says so. In the mix a plugin's agent counts with its role (`factory:coder` as
+  `coder`); the Agents view keeps them apart. A cursor row that disappears (filtered
+  out, merged away) falls back to `all`. Columns: time (last activity when sorted by
   recent, else start), `COST`, `TOKENS`, `MAIN│SUB` and `SUB%` (shares of cost), `DISP`
   (dispatches), `REP` (repeats), `LOOP` (review loops), `RCHK` (re-checks), `WARN`
   (model warnings), `BAD` (malformed lines, only when there are any). A narrow

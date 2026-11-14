@@ -93,13 +93,20 @@ func (m *model) dashBody(p paint, w, h int) block {
 	return out
 }
 
+func plural(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
+}
+
 // caption says what the tiles total, since the mix panels follow the cursor instead.
 func (m *model) caption(p paint, w int) string {
 	n := len(m.visible())
 	if n == 0 {
 		return p.sp(w)
 	}
-	return fit(p.t(fmt.Sprintf(" ↑ totals of all %d sessions shown · the mix panels show the selected row", n), m.th.Faint), w, p)
+	return fit(p.t(fmt.Sprintf(" ↑ totals of all %s shown · the mix panels show the selected row", plural(n, "session")), m.th.Faint), w, p)
 }
 
 // label names a row for the mix panels: its kind, its text, its suffix.
@@ -138,16 +145,30 @@ func (m *model) scopeStrip(p paint, label string, rows []kv, total float64, col 
 		segs = append(segs, seg{r.v, col(r.k)})
 	}
 	line := p.sp(1) + p.t(cell(label, 7, false), m.th.Faint) + p.stack(min(max(w/6, 6), 16), segs)
+	var entries []string
 	for i, r := range rows {
 		share := 0.0
 		if total > 0 {
 			share = r.v / total * 100
 		}
-		entry := p.sp(2) + p.swatch(i, col(r.k)) + p.t(" "+name(r.k)+" "+m.money(r.v, r.unpriced)+" "+pct(share), m.th.Muted)
-		if width(line)+width(entry) > w {
+		entries = append(entries, p.sp(2)+p.swatch(i, col(r.k))+p.t(" "+name(r.k)+" "+m.money(r.v, r.unpriced)+" "+pct(share), m.th.Muted))
+	}
+	// keep the most entries that fit with the " +N" marker for the rest; the first is always shown
+	k, used := 0, width(line)
+	for k < len(entries) {
+		marker := 0
+		if more := len(entries) - k - 1; more > 0 {
+			marker = len(fmt.Sprintf(" +%d", more))
+		}
+		if k > 0 && used+width(entries[k])+marker > w {
 			break
 		}
-		line += entry
+		used += width(entries[k])
+		k++
+	}
+	line += strings.Join(entries[:k], "")
+	if k < len(entries) {
+		line += p.t(fmt.Sprintf(" +%d", len(entries)-k), m.th.Faint)
 	}
 	return fit(line, w, p)
 }
@@ -655,7 +676,7 @@ func (m *model) agentMixBox(p paint, label string, t totals, w, h int) block {
 	for _, r := range rows {
 		nameW = max(nameW, width(r.k))
 	}
-	nameW = min(nameW, 12)
+	nameW = min(nameW, 10)
 	var lines []string
 	for i, r := range rows {
 		if i >= h-2 {

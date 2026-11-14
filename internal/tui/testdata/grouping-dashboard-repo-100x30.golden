@@ -23,8 +23,8 @@
 │ nothing running                                                                                  │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
  mix · repo alpha ×7 · $0.01*                                                                       
- agents ████████████████  █ main $0.01 99%  ▓ coder $0* 0%  ▒ reviewer $0.0001 1%                   
- models ████████████████  █ fable-5-2 $0.01 99%  ▓ opus-5-5 $0.0001 1%  ▒ haiku-5-5 <$0.0001 0%     
+ agents ████████████████  █ main $0.01 99%  ▓ coder $0* 0%  ▒ reviewer $0.0001 1% +1                
+ models ████████████████  █ fable-5-2 $0.01 99%  ▓ opus-5-5 $0.0001 1%  ▒ haiku-5-5 <$0.0001 0% +1  
                                                                                                     
                                                                                                     
  ↑↓/jk move  ·  enter open  ·  / filter  ·  s sort  ·  r range  ·  f follow  ·  ? help  ·  q quit   

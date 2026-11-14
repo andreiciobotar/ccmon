@@ -114,8 +114,9 @@ func Snapshot(so SnapshotOptions) (string, error) {
 		}
 	}
 	m.normalizeSelection()
-	if m.view == viewDashboard && so.Row > 0 {
-		m.moveTo(so.Row)
+	if m.view == viewDashboard && so.Row > 0 && len(m.rows()) > 0 {
+		rows := m.rows()
+		m.selID = rows[min(so.Row, len(rows)-1)].key
 	}
 	return m.finishSnapshot(), nil
 }

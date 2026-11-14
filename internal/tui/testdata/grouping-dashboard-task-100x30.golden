@@ -23,8 +23,8 @@
 │ nothing running                                                                                  │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
  mix · task ci ×2 · $0.0044*                                                                        
- agents ████████████████  █ main $0.0042 97%  ▓ coder $0* 0%  ▒ reviewer $0.0001 3%                 
- models ████████████████  █ fable-5-2 $0.0042 97%  ▓ opus-5-5 $0.0001 3%  ▒ haiku-5-5 <$0.0001 0%   
+ agents ████████████████  █ main $0.0042 97%  ▓ coder $0* 0%  ▒ reviewer $0.0001 3% +1              
+ models ████████████████  █ fable-5-2 $0.0042 97%  ▓ opus-5-5 $0.0001 3%  ▒ haiku-5-5 <$0.0001 0% +1
                                                                                                     
                                                                                                     
  ↑↓/jk move  ·  enter open  ·  / filter  ·  s sort  ·  r range  ·  f follow  ·  ? help  ·  q quit   

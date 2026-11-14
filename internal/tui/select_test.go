@@ -117,17 +117,13 @@ func TestMixIsTheRowUnderTheCursor(t *testing.T) {
 				} else if !strings.Contains(out, " mix · "+r.label()+" · "+Money(cost, "USD")) {
 					t.Fatalf("%s: the heading does not name the row", where)
 				}
-				for role, v := range byRole {
-					want := Money(v, "USD") + " " + pct(100*v/cost)
-					if sz[0] >= 120 {
+				if sz[0] >= 120 {
+					for role, v := range byRole {
+						want := Money(v, "USD") + " " + pct(100*v/cost)
 						if ln := lineWith(t, out, "● "+role); !strings.Contains(strings.Join(strings.Fields(ln), " "), want) {
 							t.Fatalf("%s: agent %s: want %q in %q", where, role, want, ln)
 						}
-					} else if ln := lineWith(t, out, "agents "); strings.Contains(ln, role) && !strings.Contains(ln, role+" "+want) {
-						t.Fatalf("%s: agent %s: want %q in %q", where, role, want, ln)
 					}
-				}
-				if sz[0] >= 120 {
 					for k, v := range byModel {
 						want := Money(v, "USD") + " " + pct(100*v/cost)
 						ln := lineWith(t, out, shortModel(k))
@@ -135,9 +131,39 @@ func TestMixIsTheRowUnderTheCursor(t *testing.T) {
 							t.Fatalf("%s: model %s: want %q in %q", where, k, want, ln)
 						}
 					}
+				} else {
+					entries := map[string]string{}
+					for role, v := range byRole {
+						entries[role] = Money(v, "USD") + " " + pct(100*v/cost)
+					}
+					checkStrip(t, where+" agents", lineWith(t, out, "agents "), entries)
+					entries = map[string]string{}
+					for k, v := range byModel {
+						entries[shortModel(k)] = Money(v, "USD") + " " + pct(100*v/cost)
+					}
+					checkStrip(t, where+" models", lineWith(t, out, "models "), entries)
 				}
 			}
 		}
+	}
+}
+
+// checkStrip: the strip holds `name money share` for entries, and says how many it left out with +N.
+func checkStrip(t *testing.T, where, ln string, entries map[string]string) {
+	t.Helper()
+	present := 0
+	for name, want := range entries {
+		if strings.Contains(ln, name+" "+want) {
+			present++
+		}
+	}
+	if present == 0 {
+		t.Fatalf("%s: the first entry is missing: %q", where, ln)
+	}
+	if out := len(entries) - present; out > 0 && !strings.Contains(ln, fmt.Sprintf(" +%d", out)) {
+		t.Fatalf("%s: %d entries left out without a matching +N: %q", where, out, ln)
+	} else if out == 0 && strings.Contains(ln, " +") {
+		t.Fatalf("%s: a +N marker with nothing left out: %q", where, ln)
 	}
 }
 
