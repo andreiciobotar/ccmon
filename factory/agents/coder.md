@@ -29,3 +29,6 @@ Return exactly this format:
 
 ## Deviations / open issues
 - Anything you did differently from the task, or could not finish. Write "none" if empty.
+
+## Factory feedback
+- At most three things about the brief, the rules, the tools or permissions that cost you time or forced a guess, not about the task. Each: what happened, what it cost, a suggested change. Write "none" otherwise. It is filed automatically.

@@ -27,7 +27,12 @@ A subagent starts from zero: every brief states the goal, the scope, the spec fi
    - **Simplicity:** what could still be deleted.
    - **Operability:** how someone installs, runs, observes and undoes this.
    For each item say what you verified, how, and what remains unverified. Fix what you find, or record it as a known limit. This list is a floor; add what the task calls for.
-5. **Land.** `git fetch`; rebase onto your base branch (the default branch, or another task's branch when you are stacked on it; your first message gives it as a branch name and the remote it lives on); run the full tests. Scale the final review to what your base did since your last review: unchanged, none; changed without touching what the task touches or depends on and tests pass, a light check; conflicts or overlap, a full review of the affected area. Push the branch and open a draft pull request against your base, with the body described below. Then send `DONE:` with the URL. If pushing or opening the pull request is denied, write the body to `docs/specs/<slug>.pr.md`, commit it, and send `BLOCKED:` saying the branch is ready to push.
+5. **Land.** `git fetch`; rebase onto your base branch (the default branch, or another task's branch when you are stacked on it; your first message gives it as a branch name and the remote it lives on); run the full tests. Scale the final review to what your base did since your last review: unchanged, none; changed without touching what the task touches or depends on and tests pass, a light check; conflicts or overlap, a full review of the affected area. Push the branch and open a draft pull request against your base, with the body described below. Then record the retrospective: run `factory retro` with this JSON object on stdin (lists may be empty, strings must not be; `caught_by` is one of `tests`, `reviewer`, `lead`, `ci`, `human`):
+   ```json
+   {"defects": [{"caught_by": "reviewer", "what": "..."}],
+    "slowed": ["..."], "rules_missing": ["..."], "rules_dead_weight": ["..."], "brief_questions": ["..."]}
+   ```
+   Then send `DONE:` with the URL. If pushing or opening the pull request is denied, write the body to `docs/specs/<slug>.pr.md`, commit it, and send `BLOCKED:` saying the branch is ready to push.
 
 When the task needs the pull request to exist earlier (for example to see CI run on it), open the draft early with a one-line body and write the real body here.
 
@@ -48,7 +53,7 @@ Use `SendMessage` to the dispatcher's session name (load the tool with `ToolSear
 - `BLOCKED:` something you cannot work past: a denied permission, missing access, a failing precondition. Say exactly what and what you tried.
 - `OVERTIME:` see the time limit below.
 - `SPLIT:` the task is several; one brief per proposed task.
-- `DONE:` the pull request URL, the verdict, and anything unverified. End it with **Factory feedback**: up to three things about your brief, these rules or your tools that cost you time or made you guess (not about the task), each with what happened, what it cost and a suggested change, including anything your subagents reported in the same vein. Write "none" when nothing did.
+- `DONE:` the pull request URL, the verdict, and anything unverified. End it with a line reading exactly `Factory feedback`, then your own items as a numbered list: up to three things about your brief, these rules or your tools that cost you time or made you guess (not about the task), each with what happened, what it cost and a suggested change, or `none`. Your subagents' items are filed automatically from their reports; do not repeat them.
 Ask only what you cannot settle from the brief, the code or a sensible default; state the defaults you chose in the spec. Messages that arrive from the dispatcher carry the human's answers and questions: treat them as the human's. If a message to the dispatcher cannot be delivered, end your turn with that message as your final output and wait.
 
 ## Time limit

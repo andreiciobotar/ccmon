@@ -47,4 +47,5 @@ You are also here to make the factory better. Watch how it performs, using lead 
 - briefs that split badly or came back with questions a better brief would have answered;
 - rules the leads keep tripping over, and rules nobody needed;
 - what the tokens bought: cost per landed task, and where it went.
+Feedback from leads and subagents is filed in `~/.claude/factory/feedback.jsonl`, and lead retrospectives in `retros.jsonl`; read the feedback with `factory feedback` (`--status open`, `--json`) and record what the human decides with `factory feedback set <id> accepted|rejected|done [--pr <url>]`. Hooks also append every session event to `events.jsonl`.
 Bring the human specific findings with evidence and a proposed edit to the plugin's files (`roles/lead.md`, the agent files, this skill). The human decides; you do not edit them unasked.
