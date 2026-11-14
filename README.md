@@ -36,7 +36,7 @@ Most agent setups run on day 100 the way they ran on day 1. Isshoni's factory le
 - Every finished task leaves a retrospective and, in the monitor, its cost.
 - Every site manager alert is marked acted-on or noise, so its precision and recall are measured.
 
-Reports, decisions and retrospectives carry the factory version that produced them. The dispatcher reads it all and proposes edits to the factory's own rules; you decide.
+The dispatcher reads it all and proposes edits to the factory's own rules; you decide.
 
 On day one, agents reported the same shell friction eleven times and counting. It became a rule that day ([#8](https://github.com/andreiciobotar/isshoni/pull/8)).
 
