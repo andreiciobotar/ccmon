@@ -7,11 +7,12 @@ import "charm.land/bubbles/v2/key"
 // is a second key for the one documented before it.
 type keyMap struct {
 	Interrupt, Quit, Help                   key.Binding
-	Next, Prev, Dash, Sess, Agents          key.Binding
+	Next, Prev, Dash, Sess, Agents, Factory key.Binding
 	Down, Up, Top, Bottom, PageDown, PageUp key.Binding
 	Open, Back                              key.Binding
 	Range, Follow, Sort, Filter             key.Binding
 	FilterKeep, FilterClear, Erase, Wipe    key.Binding
+	CapEdit, CapSave, CapCancel             key.Binding
 }
 
 var keys = keyMap{
@@ -19,11 +20,12 @@ var keys = keyMap{
 	Quit:      key.NewBinding(key.WithKeys("q"), key.WithHelp("q", "quit")),
 	Help:      key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
 
-	Next:   key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next view")),
-	Prev:   key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "previous view")),
-	Dash:   key.NewBinding(key.WithKeys("1"), key.WithHelp("1 2 3", "dashboard · session · agents")),
-	Sess:   key.NewBinding(key.WithKeys("2")),
-	Agents: key.NewBinding(key.WithKeys("3")),
+	Next:    key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next view")),
+	Prev:    key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "previous view")),
+	Dash:    key.NewBinding(key.WithKeys("1"), key.WithHelp("1 2 3 4", "dashboard · session · agents · factory")),
+	Sess:    key.NewBinding(key.WithKeys("2")),
+	Agents:  key.NewBinding(key.WithKeys("3")),
+	Factory: key.NewBinding(key.WithKeys("4")),
 
 	Down:     key.NewBinding(key.WithKeys("j", "down"), key.WithHelp("↑↓/jk", "move")),
 	Up:       key.NewBinding(key.WithKeys("k", "up")),
@@ -44,6 +46,10 @@ var keys = keyMap{
 	FilterClear: key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "clear")),
 	Erase:       key.NewBinding(key.WithKeys("backspace")),
 	Wipe:        key.NewBinding(key.WithKeys("ctrl+u")),
+
+	CapEdit:   key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "edit cap")),
+	CapSave:   key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "save")),
+	CapCancel: key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
 }
 
 // footerKeys is what the footer advertises, most useful first; the footer drops from
@@ -52,6 +58,10 @@ func (m *model) footerKeys() []key.Binding {
 	switch {
 	case m.filterIn:
 		return []key.Binding{keys.FilterKeep, keys.FilterClear}
+	case m.fac.editing:
+		return []key.Binding{keys.CapSave, keys.CapCancel}
+	case m.view == viewFactory:
+		return []key.Binding{keys.Down, keys.CapEdit, keys.Range, keys.Next, keys.Help, keys.Quit}
 	case m.view == viewSession:
 		return []key.Binding{keys.Down, keys.Open, keys.Back, keys.Follow, keys.Next, keys.Help, keys.Quit}
 	case m.view == viewAgents:
@@ -65,7 +75,7 @@ func helpGroups() [][]key.Binding {
 	return [][]key.Binding{
 		{keys.Down, keys.Top, keys.PageDown, keys.Open, keys.Back},
 		{keys.Next, keys.Prev, keys.Dash},
-		{keys.Range, keys.Sort, keys.Filter, keys.Follow},
+		{keys.Range, keys.Sort, keys.Filter, keys.Follow, keys.CapEdit},
 		{keys.Help, keys.Quit},
 	}
 }

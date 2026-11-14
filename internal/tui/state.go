@@ -20,6 +20,7 @@ const (
 	viewDashboard viewID = iota
 	viewSession
 	viewAgents
+	viewFactory
 )
 
 type sortMode int
@@ -99,6 +100,7 @@ type model struct {
 	detailOnly bool // narrow terminals: enter swaps the list for the detail pane
 	acursor    int
 	atop       int
+	fac        factoryState
 
 	loading     bool
 	loadGen     int
@@ -662,6 +664,8 @@ func (m *model) animating() bool {
 	switch m.view {
 	case viewDashboard:
 		return len(m.nowRunning()) > 0
+	case viewFactory:
+		return m.fac.busy || m.factoryWorking()
 	case viewSession:
 		if d, s := m.details[m.selID], m.sessions[m.selID]; d != nil && s != nil && m.isLive(s) {
 			for _, x := range d.Dispatches {
@@ -952,6 +956,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, m.ensureDetail())
 		}
 		cmds = append(cmds, m.fetchLive()...)
+		cmds = append(cmds, m.refreshFactory(0))
 		m.fixScroll()
 
 	case agentsMsg:
@@ -967,6 +972,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.agents = msg.res
 		m.agentsDirty = false
+
+	case factoryMsg:
+		cmds = append(cmds, m.applyFactory(msg))
 
 	case detailMsg:
 		delete(m.inflight, msg.id)
@@ -1017,6 +1025,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.agentsDirty && !m.agentsBusy && now.Sub(m.agentsAt) >= agentsEvery {
 			cmds = append(cmds, m.loadAgentsCmd())
 		}
+		cmds = append(cmds, m.refreshFactory(factoryEvery))
 
 	case tea.KeyPressMsg:
 		cmds = append(cmds, m.handleKey(msg))
@@ -1078,6 +1087,8 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return tea.Quit
 	case m.filterIn:
 		return m.filterKey(msg)
+	case m.fac.editing:
+		return m.capKey(msg)
 	case m.help:
 		if key.Matches(msg, keys.Help, keys.Back, keys.Open, keys.Quit) {
 			m.help = false
@@ -1090,15 +1101,17 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case key.Matches(msg, keys.Help):
 		m.help = true
 	case key.Matches(msg, keys.Next):
-		return m.switchView(viewID((int(m.view) + 1) % 3))
+		return m.switchView(m.cycle(1))
 	case key.Matches(msg, keys.Prev):
-		return m.switchView(viewID((int(m.view) + 2) % 3))
+		return m.switchView(m.cycle(-1))
 	case key.Matches(msg, keys.Dash):
 		return m.switchView(viewDashboard)
 	case key.Matches(msg, keys.Sess):
 		return m.switchView(viewSession)
 	case key.Matches(msg, keys.Agents):
 		return m.switchView(viewAgents)
+	case key.Matches(msg, keys.Factory):
+		return m.switchView(viewFactory)
 	case key.Matches(msg, keys.Down):
 		m.move(1)
 	case key.Matches(msg, keys.Up):
@@ -1135,6 +1148,10 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 	case key.Matches(msg, keys.Filter):
 		if m.view == viewDashboard {
 			m.filterIn = true
+		}
+	case key.Matches(msg, keys.CapEdit):
+		if m.view == viewFactory {
+			m.openCap()
 		}
 	}
 	m.fixScroll()
@@ -1177,7 +1194,20 @@ func (m *model) switchView(v viewID) tea.Cmd {
 	}
 	m.view = v
 	m.fixScroll()
+	if v == viewFactory {
+		return m.refreshFactory(factoryFresh)
+	}
 	return nil
+}
+
+// cycle is the next view in a direction; the session view is skipped without a selection.
+func (m *model) cycle(step int) viewID {
+	const n = int(viewFactory) + 1
+	v := viewID((int(m.view) + step + n) % n)
+	if v == viewSession && m.sessions[m.selID] == nil {
+		v = viewID((int(v) + step + n) % n)
+	}
+	return v
 }
 
 // ensureDetail fetches the selected session's dispatches unless they are here or coming.
@@ -1226,6 +1256,8 @@ func (m *model) listLen() int {
 		if m.agents != nil {
 			return len(m.agents.Agents)
 		}
+	case viewFactory:
+		return m.factoryPositions()
 	}
 	return 0
 }
@@ -1245,6 +1277,8 @@ func (m *model) move(delta int) {
 		cur = m.dcursor
 	case viewAgents:
 		cur = m.acursor
+	case viewFactory:
+		cur = m.fac.top
 	}
 	m.moveTo(cur + delta)
 }
@@ -1266,6 +1300,8 @@ func (m *model) moveTo(i int) {
 		m.dcursor = i
 	case viewAgents:
 		m.acursor = i
+	case viewFactory:
+		m.fac.top = i
 	}
 	m.fixScroll()
 }
@@ -1294,4 +1330,7 @@ func (m *model) fixScroll() {
 	m.dtop = keep(m.dcursor, m.dtop, m.sessRows())
 	m.atop = keep(m.acursor, m.atop, m.agentRows())
 	m.top = min(m.top, max(0, len(rows)-n))
+	if m.view == viewFactory {
+		m.fac.top = min(m.fac.top, m.factoryPositions()-1)
+	}
 }

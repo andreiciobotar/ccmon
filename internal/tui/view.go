@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -51,6 +52,8 @@ func (m *model) frame() []string {
 		body = m.sessionBody(p, w, bh)
 	case viewAgents:
 		body = m.agentsBody(p, w, bh)
+	case viewFactory:
+		body = m.factoryBody(p, w, bh)
 	default:
 		body = m.dashBody(p, w, bh)
 	}
@@ -84,7 +87,7 @@ func (m *model) header(p paint) string {
 		}
 		return bar.t(" "+txt+" ", th.Muted)
 	}
-	tabs := tab(1, "Dashboard", viewDashboard, "Dash") + tab(2, "Session", viewSession, "Sess") + tab(3, "Agents", viewAgents, "Agents")
+	tabs := tab(1, "Dashboard", viewDashboard, "Dash") + tab(2, "Session", viewSession, "Sess") + tab(3, "Agents", viewAgents, "Agents") + tab(4, "Factory", viewFactory, "Factory")
 
 	var chips []string
 	for i, r := range ranges {
@@ -121,6 +124,7 @@ func (m *model) header(p paint) string {
 		{rangeStr, liveStr, state},
 		{rangeStr, liveStr},
 		{rangeStr},
+		{chips[m.rangeIdx]},
 	}
 	left := title + tabs
 	for _, c := range cands {
@@ -150,6 +154,8 @@ func (m *model) subheader(p paint) string {
 			name = s.Label() + " › " + short8(s.ID)
 		}
 		left = p.t("Dashboard › ", th.Faint) + p.b(name, th.Text)
+	case m.view == viewFactory:
+		left = m.factorySubheader(p)
 	case m.view == viewAgents:
 		n := 0
 		if m.agents != nil {
@@ -338,7 +344,8 @@ func (m *model) helpScreen(p paint) []string {
 	lines = append(lines, "",
 		p.t("r cycles 24h · 7d · 30d · all; on the error screen it retries.", th.Faint),
 		p.t("s sorts by recent · cost · subagent share.", th.Faint),
-		p.t("A dot pulses on sessions written in the last 30 seconds.", th.Faint))
+		p.t("A dot pulses on sessions written in the last 30 seconds.", th.Faint),
+		p.t("The factory view refreshes every 30 s while shown.", th.Faint))
 	bw := 0
 	for _, l := range lines {
 		bw = max(bw, width(l))
@@ -350,6 +357,9 @@ func (m *model) helpScreen(p paint) []string {
 			path = append([]rune("…"), path[max(0, len(path)-max(room, 1)+1):]...)
 		}
 		lines[1] = p.t(pre+string(path)+post, th.Faint) // in place of the blank line under the title: no extra row
+	}
+	if len(lines)+2 > m.h {
+		lines = slices.DeleteFunc(lines, func(l string) bool { return l == "" }) // too short for the gaps
 	}
 	bw = min(m.w-2, bw+4)
 	bh := min(m.h, len(lines)+2)

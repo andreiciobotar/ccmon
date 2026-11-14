@@ -1,0 +1,24 @@
+ ccmon  1 Dash  2 Sess  3 Agents [4 Factory]         24h [7d] 30d  all   ○ idle 
+ Factory  8 motion (1 blocked) · 1 review · 1 merged · 1 settled  · 11:00:00    
+ worktree cap  5  per repo   c edit             ~/.claude/factory/settings.json 
+                                                                                
+ alpha                    in motion ▲●●●● 5/5   review 1   merged 1   settled 1 
+  SLUG              PHASE      ELAPSED  PR                      FLAGS           
+  needs-an-answer   ▲ blocked   10m40s  example.com/design/doc                  
+  login-flow        ⠋ motion     2h15m  -                       [overtime]      
+  quiet-refactor    ⠋ motion     4m12s  -                                       
+  rate-limit-docs   ● motion         -  #40 closed              [stale]         
+  stacked-on-login  ● motion     1m35s  ?                                       
+  api-rate-limits   ◆ review     1h30m  #42                                     
+  old-experiment    ✓ merged     1m01s  #31                                     
+  release-notes     · settled   50m00s  release-notes.md                        
+                                                                                
+ beta-é日本語                           in motion ●●● 3/2   review 0   merged 0 
+  SLUG              PHASE      ELAPSED  PR                      FLAGS           
+  task-00           ⠋ motion     1m00s  -                                       
+  task-01           ⠋ motion     2m00s  -                                       
+  task-02           ⠋ motion     3m00s  -                                       
+                                                                                
+ gamma                                                                          
+  ⚠ not inside a git repository                                                 
+ ↑↓/jk move  ·  c edit cap  ·  r range  ·  tab next view  ·  ? help  ·  q quit  

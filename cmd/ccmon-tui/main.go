@@ -19,7 +19,7 @@ func main() {
 		agents   = flag.String("agents-dir", "", "agent definitions dir, passed to ccmon")
 		prices   = flag.String("prices", "", "price file, passed to ccmon (default ccmon/prices.toml)")
 		rng      = flag.String("range", "7d", "initial range: 24h, 7d, 30d, all")
-		snapshot = flag.String("snapshot", "", "render one frame to stdout and exit: dashboard, session, agents, help")
+		snapshot = flag.String("snapshot", "", "render one frame to stdout and exit: dashboard, session, agents, factory, help")
 		size     = flag.String("size", "140x40", "snapshot size WxH")
 		session  = flag.String("session", "", "session id prefix for --snapshot session")
 		noColor  = flag.Bool("no-color", false, "plain rendering (also honors NO_COLOR)")
@@ -40,7 +40,7 @@ func main() {
 			os.Exit(2)
 		}
 		switch *snapshot {
-		case "dashboard", "session", "agents", "help":
+		case "dashboard", "session", "agents", "factory", "help":
 		default:
 			fmt.Fprintln(os.Stderr, "ccmon-tui: unknown snapshot view", *snapshot)
 			os.Exit(2)

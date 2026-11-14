@@ -19,7 +19,7 @@ A live terminal dashboard over the `ccmon` CLI. `make up` builds and starts it. 
 - The poll is robust: a project directory that cannot be read is skipped, not fatal; only an unreadable projects root is an error. Polling starts once the first load has finished, whether or not the first scan succeeded. A failing poll marks the screen stale and keeps retrying. A per-session refresh that fails is retried at the slower cadence until it succeeds, so a session's last change is never lost.
 - Every subprocess runs under a context that is cancelled on quit and has a timeout; starting a new load cancels the one it replaces. No Python process outlives the TUI, and a hung call never blocks later refreshes.
 - `--projects-dir`, `--agents-dir` and `--prices` are made absolute against the user's working directory before use. The TUI works when started from any directory.
-- Read-only towards `~/.claude`.
+- Read-only towards `~/.claude`, with one exception: the factory view writes `~/.claude/factory/settings.json` (only the `worktree_cap` key, only when the user saves the cap field), creating `~/.claude/factory/` if needed. Transcripts and everything else are never written.
 
 ## Theme
 Fixed dark truecolor palette, whole screen painted, `NO_COLOR` honored with a plain rendering.
@@ -46,9 +46,10 @@ Fixed dark truecolor palette, whole screen painted, `NO_COLOR` honored with a pl
    - The time axis skips idle time. A stretch with no dispatch running that is longer than a few percent of the active time collapses to a fixed-width break marker labelled with its length (for example `┆ 2d 18h ┆`), so a session that ran in bursts over several days still gives each burst readable width. Axis labels mark the start and end of each burst. Round 2 drew wall-clock time linearly, which squeezed a six-day session with 31 dispatches into slivers at both edges.
    - A bar is never narrower than one cell, and the selected dispatch's bar is always visible: if lanes are cut off by height, the lane holding the selection is among those shown.
 3. **Agents:** per agent type: dispatches, models, the usage bar then `= <tokens> · <cost>` then the four token classes (on a narrow terminal the classes are what is cut), p50/p90 cost and durations as bars (token percentiles stay in the JSON and the CLI), repeats, review loops, warnings.
+4. **Factory:** per repository, every factory task with its phase and the tasks in motion against the cap, which is editable there. Specified in `docs/specs/dashboard-factory-view.md`.
 
 ## Interaction
-- `tab`/`shift+tab` or `1` `2` `3` switch views; `j`/`k` and arrows move; `g`/`G` jump; `enter` opens; `esc`/`backspace` goes back; `r` cycles the range (24h, 7d, 30d, all); `f` toggles follow mode (track the most recently active session); `s` cycles the sessions sort; `/` filters sessions; `?` help overlay; `q`/`ctrl+c` quits. A footer shows the relevant keys. Keys are defined once (Bubbles `key` bindings) and feed the handler, the footer and the help overlay. On the error screen, `r` retries the same range. No mouse capture, so the terminal's own text selection keeps working.
+- `tab`/`shift+tab` or `1` `2` `3` `4` switch views (`tab` skips the session view while no session is selected); `c` edits the worktree cap in the factory view (`docs/specs/dashboard-factory-view.md`); `j`/`k` and arrows move; `g`/`G` jump; `enter` opens; `esc`/`backspace` goes back; `r` cycles the range (24h, 7d, 30d, all); `f` toggles follow mode (track the most recently active session); `s` cycles the sessions sort; `/` filters sessions; `?` help overlay; `q`/`ctrl+c` quits. A footer shows the relevant keys. Keys are defined once (Bubbles `key` bindings) and feed the handler, the footer and the help overlay. On the error screen, `r` retries the same range. No mouse capture, so the terminal's own text selection keeps working.
 - Subtle motion from a single tick: numbers count to new values, a row flashes when its data updates, the live dot pulses, running dispatches show a spinner, short toasts for events. Animations advance by real elapsed time and start within one fast tick. Near-idle CPU when nothing moves.
 - In no-color mode, a legend entry uses the same glyph as its bar segment.
 - Resize-safe; a friendly "too small" screen; deliberate empty, loading, error and stale states; display-width truncation; no line wider than the terminal.
@@ -56,7 +57,7 @@ Fixed dark truecolor palette, whole screen painted, `NO_COLOR` honored with a pl
 ## Build
 - `Makefile`: `install`, `up` (build then run), `build`, `test` (Python unittest plus Go), `snapshot`, `screenshot`.
 - `make install` gets a fresh clone ready: checks that Go and Python 3.11+ are present (a clear message naming what is missing and how to get it, non-zero exit), downloads the Go modules, builds the binary, and reports whether Chrome is available for `make screenshot` (optional, never a failure). It installs nothing system-wide.
-- Snapshot mode: `bin/ccmon-tui --snapshot <dashboard|session|agents|help> --size 140x40 [--session <id>] [--no-color]` renders one settled frame to stdout and exits. Session lookup is left to the Python CLI (ambiguous prefix is an error); a failed load exits non-zero.
+- Snapshot mode: `bin/ccmon-tui --snapshot <dashboard|session|agents|factory|help> --size 140x40 [--session <id>] [--no-color]` renders one settled frame to stdout and exits. Session lookup is left to the Python CLI (ambiguous prefix is an error); a failed load exits non-zero.
 - `make screenshot` renders a colored snapshot to a PNG so the look can be judged without a TTY.
 - README section.
 
