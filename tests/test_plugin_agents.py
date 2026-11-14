@@ -4,7 +4,7 @@ import tempfile
 import unittest
 
 from tests.support import AGENTS, HERE, by_desc
-from ccmon import metrics, transcript
+from isshoni import metrics, transcript
 
 SESSION = os.path.join(HERE, "fixtures", "plugin", "-plug-proj", "plug-0001.jsonl")
 

@@ -5,7 +5,7 @@ The rule itself is the "Store" section of `docs/specs/factory-events.md` (alread
 ## Facts this rests on
 1. Full count over the live store on 2026-11-14 (`~/.claude/factory/`, written by up to five concurrent leads and their subagents): `events.jsonl` 107 lines, `feedback.jsonl` 52, `retros.jsonl` 6, `tasks.jsonl` 1. Malformed lines (not a JSON object, or a missing final newline): **0** in every file. Longest line 1664 bytes. So single `O_APPEND` writes have not torn or interleaved; the append path stays as it is.
 2. Rate: 30 KB of events and 27 KB of feedback in the first ten hours, about 280 bytes per event. A month of heavy use is a few MB per file.
-3. `read_feedback` is the only reader in the repository; it reads the whole file. Nothing reads `events.jsonl` or `retros.jsonl` yet (grep over `factory/`, `ccmon/`, `internal/`, `cmd/`).
+3. `read_feedback` is the only reader in the repository; it reads the whole file. Nothing reads `events.jsonl` or `retros.jsonl` yet (grep over `factory/`, `isshoni/`, `internal/`, `cmd/`).
 4. Every line in the three files carries `ts` (feedback status lines too), UTC, fixed width, so string comparison orders them.
 5. The branch `worktree-explicit-task-state` calls `append("tasks", ...)` and reads `tasks.jsonl`. So `append(name, record)` must keep its behavior for other names.
 6. Leads run whatever plugin copy they were started with, so old copies keep appending to the unsuffixed files for as long as their sessions live.

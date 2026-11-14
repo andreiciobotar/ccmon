@@ -13,7 +13,7 @@ import (
 
 	"github.com/charmbracelet/x/ansi"
 
-	"ccmon/internal/data"
+	"isshoni/internal/data"
 )
 
 func plain(m *model) string { return ansi.Strip(m.Render()) }

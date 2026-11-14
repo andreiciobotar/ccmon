@@ -12,7 +12,7 @@ import (
 func (m *model) View() tea.View {
 	v := tea.NewView(m.Render())
 	v.AltScreen = true
-	v.WindowTitle = "ccmon"
+	v.WindowTitle = "isshoni"
 	if !m.th.NoColor {
 		// Bubble Tea sets the terminal's own background too, so any cell the frame
 		// does not cover (and the margins on resize) match the theme.
@@ -70,7 +70,7 @@ func (m *model) frame() []string {
 func (m *model) header(p paint) string {
 	th := m.th
 	bar := p.on(th.Surface)
-	title := bar.gradient(" ccmon ", true)
+	title := bar.gradient(" isshoni ", true)
 	tab := func(n int, label string, v viewID, short string) string {
 		txt := fmt.Sprintf("%d %s", n, label)
 		if m.w < 100 {
@@ -221,7 +221,7 @@ func short8(id string) string {
 func (m *model) smallScreen(p paint) []string {
 	th := m.th
 	msg := block{
-		p.gradient("ccmon", true),
+		p.gradient("isshoni", true),
 		"",
 		p.b("Make the window a little larger", th.Text),
 		p.t(fmt.Sprintf("need at least %dx%d, have %dx%d", minWidth, minHeight, m.w, m.h), th.Muted),
@@ -287,15 +287,15 @@ func (m *model) loadingScreen(p paint) []string {
 func (m *model) fatalScreen(p paint) []string {
 	th := m.th
 	lines := []string{
-		p.b("ccmon-tui can't reach the ccmon CLI", th.Red),
+		p.b("isshoni-tui can't reach the isshoni CLI", th.Red),
 		"",
 	}
 	for _, l := range wrapPlain(m.fatal.Error(), min(m.w-12, 64)) {
 		lines = append(lines, p.t(l, th.Text))
 	}
 	lines = append(lines, "",
-		p.t("It needs Python 3.11+ on PATH and the repo's ccmon/ package.", th.Muted),
-		p.t("Set CCMON_ROOT to the repo root if the binary was moved.", th.Muted),
+		p.t("It needs Python 3.11+ on PATH and the repo's isshoni/ package.", th.Muted),
+		p.t("Set ISSHONI_ROOT to the repo root if the binary was moved.", th.Muted),
 		"", p.b("q", th.Purple)+p.t(" quit", th.Muted))
 	bw := 0
 	for _, l := range lines {
@@ -322,7 +322,7 @@ func (m *model) errorScreen(p paint) []string {
 
 func (m *model) helpScreen(p paint) []string {
 	th := m.th
-	lines := []string{p.gradient("ccmon", true) + p.t("  keys", th.Muted)}
+	lines := []string{p.gradient("isshoni", true) + p.t("  keys", th.Muted)}
 	for _, g := range helpGroups() {
 		lines = append(lines, "")
 		for _, b := range g {

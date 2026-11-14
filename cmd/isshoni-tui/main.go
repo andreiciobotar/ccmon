@@ -1,4 +1,4 @@
-// Command ccmon-tui is a live terminal dashboard over the ccmon CLI.
+// Command isshoni-tui is a live terminal dashboard over the isshoni CLI.
 package main
 
 import (
@@ -9,14 +9,14 @@ import (
 	"strconv"
 	"strings"
 
-	"ccmon/internal/data"
-	"ccmon/internal/tui"
+	"isshoni/internal/data"
+	"isshoni/internal/tui"
 )
 
 func main() {
 	var (
 		projects = flag.String("projects-dir", "", "transcripts root (default ~/.claude/projects)")
-		agents   = flag.String("agents-dir", "", "agent definitions dir, passed to ccmon")
+		agents   = flag.String("agents-dir", "", "agent definitions dir, passed to isshoni")
 		rng      = flag.String("range", "7d", "initial range: 24h, 7d, 30d, all")
 		snapshot = flag.String("snapshot", "", "render one frame to stdout and exit: dashboard, session, agents, help")
 		size     = flag.String("size", "140x40", "snapshot size WxH")
@@ -35,25 +35,25 @@ func main() {
 	if *snapshot != "" {
 		w, h, err := parseSize(*size)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "ccmon-tui:", err)
+			fmt.Fprintln(os.Stderr, "isshoni-tui:", err)
 			os.Exit(2)
 		}
 		switch *snapshot {
 		case "dashboard", "session", "agents", "help":
 		default:
-			fmt.Fprintln(os.Stderr, "ccmon-tui: unknown snapshot view", *snapshot)
+			fmt.Fprintln(os.Stderr, "isshoni-tui: unknown snapshot view", *snapshot)
 			os.Exit(2)
 		}
 		out, err := tui.Snapshot(tui.SnapshotOptions{Options: o, View: *snapshot, Session: *session, W: w, H: h})
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "ccmon-tui:", err)
+			fmt.Fprintln(os.Stderr, "isshoni-tui:", err)
 			os.Exit(1)
 		}
 		fmt.Println(out)
 		return
 	}
 	if err := tui.Run(o); err != nil {
-		fmt.Fprintln(os.Stderr, "ccmon-tui:", err)
+		fmt.Fprintln(os.Stderr, "isshoni-tui:", err)
 		os.Exit(1)
 	}
 }

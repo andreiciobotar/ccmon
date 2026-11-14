@@ -234,7 +234,7 @@ def _common(suppress):
 
 
 def build_parser():
-    p = argparse.ArgumentParser(prog="ccmon", description="Report how a Claude Code main session delegates to subagents.",
+    p = argparse.ArgumentParser(prog="isshoni", description="Report how a Claude Code main session delegates to subagents.",
                                 parents=[_common(False)])
     sub = p.add_subparsers(dest="command", required=True)
     since = argparse.ArgumentParser(add_help=False)
@@ -257,7 +257,7 @@ def main(argv=None):
     try:
         return args.func(args)
     except SessionError as e:
-        print("ccmon: %s" % e, file=sys.stderr)
+        print("isshoni: %s" % e, file=sys.stderr)
         return 2
     except BrokenPipeError:
         return 0

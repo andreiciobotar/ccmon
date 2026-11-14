@@ -6,7 +6,7 @@ ROOT = os.path.dirname(HERE)
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from ccmon import metrics, transcript  # noqa: E402
+from isshoni import metrics, transcript  # noqa: E402
 
 PROJECTS = os.path.join(HERE, "fixtures", "projects")
 AGENTS = os.path.join(HERE, "fixtures", "agents")

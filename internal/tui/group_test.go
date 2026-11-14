@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"ccmon/internal/data"
+	"isshoni/internal/data"
 )
 
 // tableLines are the dashboard's table rows (header first) as runes.
@@ -209,7 +209,7 @@ func TestGroupLiveDot(t *testing.T) {
 	}
 }
 
-// totalsJSON is the part of a group's totals in `ccmon sessions --json` the dashboard shows.
+// totalsJSON is the part of a group's totals in `isshoni sessions --json` the dashboard shows.
 type totalsJSON struct {
 	Sessions      []string     `json:"sessions"`
 	Tokens        data.Tokens  `json:"tokens"`
@@ -224,7 +224,7 @@ type totalsJSON struct {
 func TestGroupTotalsMatchTheJSON(t *testing.T) {
 	root, _ := filepath.Abs("../..")
 	for _, fx := range []string{"projects", "grouping"} {
-		cmd := exec.Command("python3", "-m", "ccmon", "sessions", "--json", "--projects-dir", filepath.Join(root, "tests", "fixtures", fx))
+		cmd := exec.Command("python3", "-m", "isshoni", "sessions", "--json", "--projects-dir", filepath.Join(root, "tests", "fixtures", fx))
 		cmd.Dir = root
 		var so bytes.Buffer
 		cmd.Stdout = &so

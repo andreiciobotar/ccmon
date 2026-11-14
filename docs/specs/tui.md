@@ -1,19 +1,19 @@
-# Spec: `ccmon-tui` live dashboard
+# Spec: `isshoni-tui` live dashboard
 
-A live terminal dashboard over the `ccmon` CLI. `make up` builds and starts it. The bar is high on looks and feel: dark, HEY-inspired, delightful to use.
+A live terminal dashboard over the `isshoni` CLI. `make up` builds and starts it. The bar is high on looks and feel: dark, HEY-inspired, delightful to use.
 
 ## Facts this depends on
-- `python3 -m ccmon {sessions,session,agents} --json` is the only data source; shapes are defined by the dict builders in `ccmon/metrics.py`. Verified: `session --json` carries per-dispatch `start`, `returned_at`, `duration_ms`; `sessions --json` carries `start`, `end` and the transcript `path`.
+- `python3 -m isshoni {sessions,session,agents} --json` is the only data source; shapes are defined by the dict builders in `isshoni/metrics.py`. Verified: `session --json` carries per-dispatch `start`, `returned_at`, `duration_ms`; `sessions --json` carries `start`, `end` and the transcript `path`.
 - Bubble Tea v2, Lip Gloss v2 and Bubbles v2 live under `charm.land/...` and differ from v1. Check the package source in the module cache, not memory.
 - Dispatch statuses come from the Python side. Unverified which values it can emit beyond `completed`, `running`, `no-run`, `orphan`: the corpus tally showed 6 `failed`, the round-1 review says `failed` cannot occur. Count the status values across the whole corpus before deleting or keeping the `failed` handling.
 - A dispatch in a session that is no longer live can stay `running` forever in the data (the agent never finished).
 
 ## Stack and layout
 - Go; `charm.land/bubbletea/v2`, `charm.land/lipgloss/v2`, `charm.land/bubbles/v2` (the libraries basecamp/hey-cli uses). No fsnotify.
-- `go.mod` at the repo root (module `ccmon`), `cmd/ccmon-tui/main.go`, `internal/data/` (running the Python CLI, JSON types, watching), `internal/tui/`. Binary at `bin/ccmon-tui`, git-ignored.
+- `go.mod` at the repo root (module `isshoni`), `cmd/isshoni-tui/main.go`, `internal/data/` (running the Python CLI, JSON types, watching), `internal/tui/`. Binary at `bin/isshoni-tui`, git-ignored.
 
 ## Data
-- Shell out to the Python CLI with the working directory at the repo root, located via `CCMON_ROOT`, then the executable path. A clear on-screen error when python or the package is missing. No transcript parsing in Go. `--projects-dir` and `--agents-dir` pass through.
+- Shell out to the Python CLI with the working directory at the repo root, located via `ISSHONI_ROOT`, then the executable path. A clear on-screen error when python or the package is missing. No transcript parsing in Go. `--projects-dir` and `--agents-dir` pass through.
 - Initial load of `sessions` and `agents` for the active range runs in the background. Nothing blocks the UI.
 - Real time: one mechanism, a 1 s mtime poll over `<projects>/*/*.jsonl` and `<projects>/*/*/subagents/*.jsonl`. No file watches (round 1 held about 1,760 open descriptors). A changed or new session re-runs `session <id> --json` for that session only; a session whose transcript disappeared is dropped. At most one refresh in flight per session, through a single code path that every detail fetch uses; a change that arrives during a refresh triggers exactly one more afterwards. Results merge into the list and aggregates, and a slower full reload never overwrites a newer per-session result. The `agents` aggregate refreshes at a slower cadence, and a failed refresh waits for the next cadence instead of retrying at once. A session is live if its transcript changed in the last ~30 s.
 - The poll is robust: a project directory that cannot be read is skipped, not fatal; only an unreadable projects root is an error. Polling starts once the first load has finished, whether or not the first scan succeeded. A failing poll marks the screen stale and keeps retrying. A per-session refresh that fails is retried at the slower cadence until it succeeds, so a session's last change is never lost.
@@ -55,7 +55,7 @@ Fixed dark truecolor palette, whole screen painted, `NO_COLOR` honored with a pl
 ## Build
 - `Makefile`: `install`, `up` (build then run), `build`, `test` (Python unittest plus Go), `snapshot`, `screenshot`.
 - `make install` gets a fresh clone ready: checks that Go and Python 3.11+ are present (a clear message naming what is missing and how to get it, non-zero exit), downloads the Go modules, builds the binary, and reports whether Chrome is available for `make screenshot` (optional, never a failure). It installs nothing system-wide.
-- Snapshot mode: `bin/ccmon-tui --snapshot <dashboard|session|agents|help> --size 140x40 [--session <id>] [--no-color]` renders one settled frame to stdout and exits. Session lookup is left to the Python CLI (ambiguous prefix is an error); a failed load exits non-zero.
+- Snapshot mode: `bin/isshoni-tui --snapshot <dashboard|session|agents|help> --size 140x40 [--session <id>] [--no-color]` renders one settled frame to stdout and exits. Session lookup is left to the Python CLI (ambiguous prefix is an error); a failed load exits non-zero.
 - `make screenshot` renders a colored snapshot to a PNG so the look can be judged without a TTY.
 - README section.
 

@@ -10,15 +10,15 @@ A plugin's agents are dispatched as `<plugin>:<name>` (`factory:coder`). The mon
 ## Rule
 The role of an agent type is the text after its last `:`; a bare type is its own role. `factory:coder` → `coder`, `coder` → `coder`.
 
-The rule lives in two places, each one line: `role()` in `ccmon/metrics.py` and `agentRole()` in `internal/tui/theme.go`. The JSON does not carry the role: `agent_type` and the `by_agent` keys keep the full name, and the dashboard derives colour and order from it.
+The rule lives in two places, each one line: `role()` in `isshoni/metrics.py` and `agentRole()` in `internal/tui/theme.go`. The JSON does not carry the role: `agent_type` and the `by_agent` keys keep the full name, and the dashboard derives colour and order from it.
 
-## Python (`ccmon/metrics.py`)
+## Python (`isshoni/metrics.py`)
 - Review loops: a verdict comes from a dispatch whose role is `reviewer`; a dispatch or resume answers it when its role is `coder`.
 - Re-check: a candidate is a dispatch whose role is in `EXPLORER_TYPES`.
 - Repeats: dispatches are compared within one role, so `coder` and `factory:coder` prompts are compared with each other.
 - Model check: the expected model of a namespaced type cannot be found reliably (see Facts), so:
   - by default (`<cwd>/.claude/agents`, `~/.claude/agents`) a namespaced type is looked up under its full name, which finds nothing: no check, no warning. It is never compared with a bare `.claude/agents/<role>.md`, which is a different definition.
-  - with `--agents-dir DIR` the user has said where the definitions are, and a namespaced type is looked up there by its role (`DIR/coder.md` for `factory:coder`). The option replaces the default directories, so a bare `coder` in the same run is checked against the same file. `ccmon --agents-dir factory/agents ...` therefore checks factory agents. The warning text names the full type.
+  - with `--agents-dir DIR` the user has said where the definitions are, and a namespaced type is looked up there by its role (`DIR/coder.md` for `factory:coder`). The option replaces the default directories, so a bare `coder` in the same run is checked against the same file. `isshoni --agents-dir factory/agents ...` therefore checks factory agents. The warning text names the full type.
 
 ## Display (decided)
 - The full name is shown everywhere (`factory:coder`), never shortened: it says which definition ran, and a plugin's `coder` may pin a different model than the repository's.
@@ -32,4 +32,4 @@ The rule lives in two places, each one line: `role()` in `ccmon/metrics.py` and 
 ## Tests
 - Python: a fixture session with `factory:reviewer` (CHANGES_NEEDED) answered by `factory:coder`, a `factory:explorer` with a citation that the main session then reads, and a bare `coder` prompt followed by a similar `factory:coder` prompt: review loops, re-check and repeat are counted; with the fixture agents dir a wrong-model `factory:*` dispatch warns; `expected_model("factory:coder", cwd)` without an agents dir is `None` even when `<cwd>/.claude/agents/coder.md` exists. Existing tests pass unchanged.
 - Go: `AgentColor("factory:coder")` equals `AgentColor("coder")`; `agentLess` order with mixed bare and namespaced names.
-- Real data: `ccmon sessions --json` and `agents --json` before and after differ only in sessions that dispatched `factory:*` agents; one of the three factory leads is checked by hand against its transcript.
+- Real data: `isshoni sessions --json` and `agents --json` before and after differ only in sessions that dispatched `factory:*` agents; one of the three factory leads is checked by hand against its transcript.

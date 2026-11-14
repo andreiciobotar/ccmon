@@ -10,7 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"ccmon/internal/data"
+	"isshoni/internal/data"
 )
 
 func TestMain(m *testing.M) {
@@ -565,7 +565,7 @@ func TestRenderEmptyAndStates(t *testing.T) {
 			m.view = v
 			checkFrame(t, "loading", m, false)
 			// error with nothing loaded
-			m.loading, m.refreshErr = false, "ccmon: boom\nsecond line with a very long text "+strings.Repeat("x", 200)
+			m.loading, m.refreshErr = false, "isshoni: boom\nsecond line with a very long text "+strings.Repeat("x", 200)
 			checkFrame(t, "error", m, false)
 			// fatal
 			m.fatal = data.ErrPython

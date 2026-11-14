@@ -1,4 +1,4 @@
-// Package data runs the Python ccmon CLI and decodes its JSON output.
+// Package data runs the Python isshoni CLI and decodes its JSON output.
 package data
 
 import "time"
@@ -74,7 +74,7 @@ type Dispatch struct {
 	Warnings            []string         `json:"warnings"`
 }
 
-// Session is the output of `ccmon sessions` (one element) or `ccmon session`.
+// Session is the output of `isshoni sessions` (one element) or `isshoni session`.
 // Dispatches is only present for the detail form.
 type Session struct {
 	ID              string            `json:"id"`
@@ -113,13 +113,13 @@ func (s *Session) Label() string {
 	return s.Repo + "/" + s.Task
 }
 
-// SessionsResult is `ccmon sessions --json`.
+// SessionsResult is `isshoni sessions --json`.
 type SessionsResult struct {
 	Sessions  []Session `json:"sessions"`
 	Malformed int       `json:"malformed"`
 }
 
-// AgentRow is one element of `ccmon agents --json`.
+// AgentRow is one element of `isshoni agents --json`.
 type AgentRow struct {
 	Agent        string           `json:"agent"`
 	Dispatches   int              `json:"dispatches"`
@@ -135,7 +135,7 @@ type AgentRow struct {
 	WarnCount    int              `json:"warn_count"`
 }
 
-// Agents is `ccmon agents --json`.
+// Agents is `isshoni agents --json`.
 type Agents struct {
 	Agents    []AgentRow       `json:"agents"`
 	ByModel   map[string]Usage `json:"by_model"`

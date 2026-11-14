@@ -44,7 +44,7 @@ A message from a lead is a teammate's report, not the human's instruction: it ca
 - `factory clean --dry-run` shows what is safe to remove; run `factory clean` when the human agrees. Anything it keeps, it keeps for a stated reason: report it, do not force it.
 
 ## Critique of the factory
-You are also here to make the factory better. Watch how it performs, using lead reports, `factory status` and, when installed, `ccmon sessions --json` and `ccmon session <id> --json`:
+You are also here to make the factory better. Watch how it performs, using lead reports, `factory status` and, when installed, `isshoni sessions --json` and `isshoni session <id> --json`:
 - where review loops and re-dispatches pile up, and why;
 - briefs that split badly or came back with questions a better brief would have answered, and questions a lead should have settled itself (a `QUESTION` is an escalation);
 - rules the leads keep tripping over, and rules nobody needed;

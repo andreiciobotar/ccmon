@@ -4,7 +4,7 @@ import unittest
 
 from tests.support import AGENTS, HERE, PROJECTS
 from tests.test_cli import run
-from ccmon import transcript
+from isshoni import transcript
 
 GROUPING = os.path.join(HERE, "fixtures", "grouping")
 BASE = ["--projects-dir", GROUPING, "--agents-dir", AGENTS]

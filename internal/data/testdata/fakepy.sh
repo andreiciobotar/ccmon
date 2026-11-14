@@ -1,5 +1,5 @@
 #!/bin/sh
-# Stand-in for `python3 -m ccmon <cmd> [id] --json ...`. Logs each call to $STUBDIR/calls;
+# Stand-in for `python3 -m isshoni <cmd> [id] --json ...`. Logs each call to $STUBDIR/calls;
 # a file named fail or hang in $STUBDIR makes every call fail or never return.
 echo "$3 $4" >> "$STUBDIR/calls"
 [ -e "$STUBDIR/fail" ] && { echo "boom" >&2; exit 1; }

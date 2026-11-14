@@ -11,7 +11,7 @@ The data model becomes repository → task → sessions → dispatches. A task i
 - 50 of 70 worktree paths seen no longer exist on disk: nothing here may ask git or the file system about a worktree.
 - `relocated` lines are not needed: the rules below use only `worktree-state` and the first `cwd`.
 
-## Attribution (Python, `ccmon/transcript.py`; the only place that decides it)
+## Attribution (Python, `isshoni/transcript.py`; the only place that decides it)
 A session belongs to exactly one repository and at most one task.
 1. While scanning the main transcript, collect the `worktreePath` of each non-null `worktree-state` record whose `worktreeName` is not `agent-<hex>` (`agent-[0-9a-f]+`), in order, dropping consecutive duplicates.
 2. The anchor is the **last** collected path; with none, the session's first `cwd`.
@@ -27,10 +27,10 @@ Known limits, to state in the README: a session started in a subdirectory of a r
 - Each session object (`sessions --json` elements and `session --json`) gains `repo` (name), `repo_path` (string or null), `task` (string or null), `worktrees` (list of task names entered, in order; empty when none).
 - `sessions --json` gains top-level `repos`: a list ordered by repository name then path, each
   `{"repo", "repo_path", <totals>, "tasks": [{"task", <totals>}, ...]}` with tasks ordered by name. A repository's totals cover all its sessions, with or without a task. Sessions without a task appear in no `tasks` entry.
-- `<totals>` is: `sessions` (ids, ordered by start), `session_count`, `start`, `end`, and the same keys with the same meaning as a session: `tokens`, `by_model`, `by_agent`, `dispatch_count`, `repeats`, `review_loops`, `recheck` (`rate` computed from the summed counts, null with no candidates), `warn_count`, `malformed`. One helper in `ccmon/metrics.py` computes these for a list of sessions and `session_summary` uses it for its own numbers, so a session and a group of one session cannot disagree.
+- `<totals>` is: `sessions` (ids, ordered by start), `session_count`, `start`, `end`, and the same keys with the same meaning as a session: `tokens`, `by_model`, `by_agent`, `dispatch_count`, `repeats`, `review_loops`, `recheck` (`rate` computed from the summed counts, null with no candidates), `warn_count`, `malformed`. One helper in `isshoni/metrics.py` computes these for a list of sessions and `session_summary` uses it for its own numbers, so a session and a group of one session cannot disagree.
 
 ## CLI
-- `sessions` and `agents` accept `--repo NAME` and `--task NAME` (exact match on the names above; both may be given). `ccmon agents --repo ccmon --task ci-workflow` is the per-task table of tokens by agent and model.
+- `sessions` and `agents` accept `--repo NAME` and `--task NAME` (exact match on the names above; both may be given). `isshoni agents --repo isshoni --task ci-workflow` is the per-task table of tokens by agent and model.
 - `sessions` table: grouped. The first column is `repo / task / session`: a repository row (its name), then its sessions without a task (indented two spaces, 8-character id), then each task row (indented two) followed by its sessions (indented four). Repository and task rows show totals in the same columns as a session row; `start (UTC)` is the earliest start. The `id` and `project` columns go; the other columns stay. Order: repositories and tasks by name, sessions by start. The closing line counts repositories and tasks too.
 - `session` text view: the `project` line is replaced by `repo      <name> (<repo_path or project_dir>)` and `task      <task or ->`, with ` (also entered: a, b)` when `worktrees` holds other names.
 
@@ -44,7 +44,7 @@ The table's columns, widths, signal pills and one-session groups described here 
   - The `SESSION` id column is removed (the id is now the row name). The name column fits the longest row name over all rows (14 to 30 cells); signals take what is left, up to 28 cells, and drop out below 10; the name column absorbs any slack.
 - Only session rows are selectable: `j`/`k`, arrows, `g`/`G`, page keys, `enter`, follow mode and the row flash behave as before and skip group rows. Scrolling counts display rows; when the selection moves up to the first session of a group, the group rows directly above it stay in view. No new keys.
 - Sort (`s`) applies at each level with the group's aggregate: recent = latest activity in the group, tokens = summed tokens, subagent share = share of the summed tokens; ties by latest activity, then name. Sessions without a task come before the repository's tasks.
-- Filter (`/`) matches the label, the project and the id. KPI tiles, agent mix and model mix keep following the visible sessions, so filtering to `ccmon/ci-workflow` shows that task's tokens by agent and model.
+- Filter (`/`) matches the label, the project and the id. KPI tiles, agent mix and model mix keep following the visible sessions, so filtering to `isshoni/ci-workflow` shows that task's tokens by agent and model.
 - The table title stays `Sessions N`; the subheader gains the repository and task counts.
 - Group totals reuse the existing `totals` computation, refactored to take a session list.
 - Theme, fixed agent order and keys are unchanged. `docs/specs/tui.md` gets the tree described under Screens.
@@ -56,7 +56,7 @@ The table's columns, widths, signal pills and one-session groups described here 
 - `make test` passes.
 
 ## Done when
-On the real corpus: `ccmon` shows its tasks with totals equal to the sum of their sessions, the `agent` repository's worktree sessions sit under `agent`, and `make screenshot` of the dashboard is readable at 140x40 and 80x24.
+On the real corpus: `isshoni` shows its tasks with totals equal to the sum of their sessions, the `agent` repository's worktree sessions sit under `agent`, and `make screenshot` of the dashboard is readable at 140x40 and 80x24.
 
 ## Not in scope
 Cost weighting, the kaizen stats page, the "needs you" state, the cap setting, hook events, splitting one session's tokens between tasks.

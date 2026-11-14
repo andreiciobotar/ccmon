@@ -1,4 +1,4 @@
- ccmon [1 Dashboard] 2 Session  3 Agents                                                               24h  7d  30d [all]  ○ idle  00:00:00 
+ isshoni [1 Dashboard] 2 Session  3 Agents                                                             24h  7d  30d [all]  ○ idle  00:00:00 
  Sessions  1 in 1 repos, 0 tasks · all · sorted by recent                                                                                   
 ▌ TOKENS             ▌ SUBAGENT SHARE    ▌ DISPATCHES        ▌ REPEATS           ▌ REVIEW LOOPS      ▌ RE-CHECK RATE     ▌ MODEL WARNINGS   
 ▌ 670                ▌ 55.2%             ▌ 18                ▌ 1                 ▌ 3                 ▌ 67%               ▌ 1                

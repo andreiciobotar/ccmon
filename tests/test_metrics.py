@@ -1,7 +1,7 @@
 import unittest
 
 from tests.support import AGENTS, by_desc, load
-from ccmon import metrics
+from isshoni import metrics
 
 
 class MetricsTests(unittest.TestCase):

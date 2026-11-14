@@ -1,13 +1,13 @@
-# ccmon reference
+# isshoni reference
 
 Moved here unchanged from the README. The dashboard is specified in [specs/tui.md](specs/tui.md).
 
 Read-only CLI over `~/.claude/projects` transcripts (Python 3.11+, stdlib only).
 ```
-bin/ccmon sessions [--since 7d]     # sessions grouped by repository and task, with totals
-bin/ccmon session <id-prefix>       # totals by model/agent, warnings, dispatch timeline
-bin/ccmon agents [--since 7d]       # per agent type: tokens, p50/p90, repeats, WARN
-bin/ccmon agents --repo ccmon --task ci-workflow   # tokens by agent and model for one task
+bin/isshoni sessions [--since 7d]     # sessions grouped by repository and task, with totals
+bin/isshoni session <id-prefix>       # totals by model/agent, warnings, dispatch timeline
+bin/isshoni agents [--since 7d]       # per agent type: tokens, p50/p90, repeats, WARN
+bin/isshoni agents --repo isshoni --task ci-workflow   # tokens by agent and model for one task
 ```
 `sessions` and `agents` accept `--repo NAME` and `--task NAME` (exact match).
 Global options: `--json` (one JSON document on stdout), `--projects-dir`,

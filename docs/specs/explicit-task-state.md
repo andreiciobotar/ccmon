@@ -5,7 +5,7 @@ PR #7 infers a task's phase from the lead's session state and whether a pull req
 ## Facts this depends on
 Checked in this worktree, 2026-11-14.
 - A lead in its worktree can write to `~/.claude/factory/`: `echo x >> ~/.claude/factory/<file>` succeeded from this lead session; `events.jsonl`, `feedback.jsonl` and `retros.jsonl` there are written from worktrees today. (Shared git config is not writable from a worktree session, so it is not the store.)
-- `factory status --json` has no consumer outside `factory/tests` (grep for `in_motion`, `in_review`, `factory status` over `cmd/`, `internal/`, `ccmon/`, `README.md`, the plugin).
+- `factory status --json` has no consumer outside `factory/tests` (grep for `in_motion`, `in_review`, `factory status` over `cmd/`, `internal/`, `isshoni/`, `README.md`, the plugin).
 - `git worktree list --porcelain` run inside a task worktree lists the main checkout first, so `Repo()` gives the same `root` (a real path) to the lead and to the dispatcher. `tags()` does not resolve symlinks, so it is not used for the key.
 - `append()` writes one line in one `O_APPEND` write; concurrent leads cannot interleave records.
 

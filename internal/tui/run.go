@@ -7,7 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"ccmon/internal/data"
+	"isshoni/internal/data"
 )
 
 // Run starts the interactive dashboard. Quitting cancels every python call and waits
