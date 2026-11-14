@@ -207,7 +207,8 @@ def session_block(mine):
 
 def phase(pr_state, mine):
     """Where a task stands against the cap: 'review' or 'merged' when its pull request is open or merged and
-    no session is unfinished in it, otherwise 'motion'. `mine` is None when sessions cannot be listed."""
+    no session is unfinished in it, otherwise 'motion'. `mine` is None when its sessions cannot be told:
+    they cannot be listed, or an unfinished one has no cwd and could be in any task."""
     if mine is None or session_block(mine) or pr_state not in ("open", "merged"):
         return "motion"
     return "review" if pr_state == "open" else "merged"
@@ -216,6 +217,7 @@ def phase(pr_state, mine):
 def collect(repo, sessions, limit_hours):
     """One row per task worktree; `sessions` is None when they cannot be listed."""
     now = time.time()
+    placed = sessions is not None and not unplaced_block(sessions)
     rows = []
     for wt in repo.tasks:
         path, branch = wt["path"], wt["branch"]
@@ -243,7 +245,7 @@ def collect(repo, sessions, limit_hours):
         row["last_commit"] = int(ts) if rc == 0 and ts.isdigit() else None
         row["pr_state"], row["pr_url"], row["pr_head"], row["pr_base"] = (
             pull_request(repo, branch) if branch else ("unknown", "", "", ""))
-        row["phase"] = phase(row["pr_state"], None if sessions is None else mine)
+        row["phase"] = phase(row["pr_state"], mine if placed else None)
         times = [t for t in (row["last_commit"], started and started / 1000) if t]
         row["stale"] = bool(times) and now - max(times) > STALE_SECONDS
         rows.append(row)
@@ -430,7 +432,7 @@ def cmd_new(args):
     if len(repo.tasks) >= cap:
         moving = [os.path.basename(t["path"]) for t in repo.tasks
                   if phase(pull_request(repo, t["branch"])[0] if t["branch"] else "unknown",
-                           sessions_in(sessions, t["path"])) == "motion"]
+                           None if unplaced_block(sessions) else sessions_in(sessions, t["path"])) == "motion"]
         if len(moving) >= cap:
             raise Fail(f"at the cap of {cap} tasks in motion: {', '.join(moving)}")
     old_pr = pull_request(repo, branch)[0]

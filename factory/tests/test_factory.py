@@ -351,6 +351,8 @@ class NewTests(unittest.TestCase):
             "open, session working": ([{"state": "OPEN"}], [dict(done, status="busy", state="working")]),
             "open, session idle but not done": ([{"state": "OPEN"}], [dict(done, state="working")]),
             "open, interactive session": ([{"state": "OPEN"}], [dict(done, kind="interactive")]),
+            "merged, session working": ([{"state": "MERGED"}], [dict(done, status="busy", state="working")]),
+            "open, an unfinished session without cwd": ([{"state": "OPEN"}], [{"kind": "background", "status": "busy"}]),
         }
         for name, (pr, sessions) in holds.items():
             with self.subTest(name):
@@ -456,6 +458,8 @@ class StatusTests(unittest.TestCase):
                                {("claude", "agents"): (1, "", "boom")})
         _, out, _, _ = invoke(["status", "--json"], answers)
         self.assertEqual((json.loads(out)["rows"][0]["phase"], json.loads(out)["in_motion"]), ("motion", 1))
+        doc, _ = self.status([task_entry("alpha")], [{"kind": "background", "status": "busy"}], pr=[{"state": "OPEN"}])
+        self.assertEqual(doc["rows"][0]["phase"], "motion")
 
     def test_session_matching_is_by_worktree_path_prefix(self):
         inside = {"id": "in1", "cwd": f"{WT}/alpha/sub/dir", "kind": "background", "status": "idle", "state": "done"}
