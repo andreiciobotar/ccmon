@@ -9,6 +9,7 @@ import plistlib
 import re
 import shlex
 import shutil
+import statistics
 import subprocess
 import sys
 import time
@@ -72,7 +73,7 @@ def validate_slug(slug):
 
 def load_settings():
     settings = {"worktree_cap": 5, "lead_model": "fable", "lead_permission_mode": "auto",
-                "task_time_limit_hours": 2}
+                "task_time_limit_hours": 2, "monitor": None}
     path = SETTINGS_PATH.expanduser()
     try:
         data = json.loads(path.read_text())
@@ -94,8 +95,11 @@ def load_settings():
     hours = data.get("task_time_limit_hours", settings["task_time_limit_hours"])
     if isinstance(hours, bool) or not isinstance(hours, (int, float)) or not hours > 0:
         raise Fail("settings: task_time_limit_hours must be a positive number")
+    monitor = data.get("monitor")
+    if "monitor" in data and (not isinstance(monitor, str) or not monitor.strip()):
+        raise Fail("settings: monitor must be a non-empty string")
     return {"worktree_cap": cap, "lead_model": model, "lead_permission_mode": mode,
-            "task_time_limit_hours": hours}
+            "task_time_limit_hours": hours, "monitor": monitor and os.path.expanduser(monitor)}
 
 
 def build_launch_argv(slug, dispatcher, brief, settings, base, remote, now):
@@ -334,9 +338,15 @@ def append(name, record):
 
 
 def log(name, record):
-    """append to the file of the record's month; the first write of a month prunes that log."""
+    """append to the file of the record's month; whoever creates a month's file prunes that log, once."""
     month = f"{name}-{record['ts'][:7]}"
-    fresh = not (STORE.expanduser() / f"{month}.jsonl").exists()
+    directory = STORE.expanduser()
+    directory.mkdir(parents=True, exist_ok=True)
+    try:
+        os.close(os.open(directory / f"{month}.jsonl", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
+        fresh = True
+    except FileExistsError:
+        fresh = False
     append(month, record)
     if fresh:
         prune(name)
@@ -350,7 +360,7 @@ def log_files(name):
              if (m := re.fullmatch(rf"{name}-(\d{{4}}-\d\d)\.jsonl", p.name))]
     try:
         files.insert(0, (time.strftime("%Y-%m", time.gmtime(legacy.stat().st_mtime)), legacy))
-    except FileNotFoundError:
+    except OSError:
         pass
     return files
 
@@ -383,23 +393,49 @@ def read_log(name, since=None, until=None):
             yield r
 
 
+def stamp(r):
+    return str((r or {}).get("ts") or "")
+
+
+def carry_feedback(files):
+    """The records of the oldest file that still matter: open entries and changes later files rely on."""
+    def state(fs):
+        return {e["id"]: (e["status"], e.get("pr")) for e in fold_feedback(r for _, p in fs for r in read_file(p))}
+    before, after = state(files), state(files[1:])
+    keep = {i for i in before if before[i] != after.get(i) and (i in after or before[i][0] not in ("done", "rejected"))}
+    return [r for r in read_file(files[0][1]) if r.get("id") in keep]
+
+
+def carry_tasks(files):
+    """Per (repo, slug), its newest record by `ts`, when the oldest file holds it and its worktree exists."""
+    newest = {}
+    for i, (_, path) in enumerate(files):
+        for r in read_file(path):
+            key = (r.get("repo"), r.get("slug"))
+            if stamp(r) >= stamp(newest.get(key, (0, None))[1]):
+                newest[key] = (i, r)
+    return [r for (repo, slug), (i, r) in newest.items() if i == 0
+            and isinstance(repo, str) and isinstance(slug, str) and Path(repo, ".claude", "worktrees", slug).is_dir()]
+
+
+def carry_firings(files):
+    """Every miss, and every record of a firing that is open or was escalated."""
+    firings, _ = fold(sorted((r for _, p in files for r in read_file(p)), key=stamp))
+    keep = {f["id"] for f in firings if not f["cleared"] or f["decision"] == "escalated"}
+    return [r for r in read_file(files[0][1]) if "miss" in r or r.get("id") in keep]
+
+
+CARRY = {"feedback": carry_feedback, "tasks": carry_tasks, "firings": carry_firings}
+
+
 def prune(name):
     """Best effort, keeping the current month and the KEEP_MONTHS before it; see docs/factory.md."""
     n = int(now()[:4]) * 12 + int(now()[5:7]) - 1 - KEEP_MONTHS
     cutoff = f"{n // 12:04d}-{n % 12 + 1:02d}"
-
-    def state(files):
-        return {e["id"]: (e["status"], e.get("pr")) for e in fold_feedback(r for _, p in files for r in read_file(p))}
-
     try:
         while name != "retros" and (files := log_files(name)) and files[0][0] < cutoff:
-            if name == "feedback":
-                before, after = state(files), state(files[1:])
-                carry = {i for i in before if before[i] != after.get(i)
-                         and (i in after or before[i][0] not in ("done", "rejected"))}
-                for r in read_file(files[0][1]):
-                    if r.get("id") in carry:
-                        append(f"feedback-{now()[:7]}", r)
+            for r in CARRY.get(name, lambda _: [])(files):
+                append(f"{name}-{now()[:7]}", r)
             files[0][1].unlink()
     except Exception:
         pass
@@ -507,26 +543,19 @@ def fold_feedback(records):
 
 
 def read_tasks(root):
-    """The last record of each task of the repo at `root`, by slug; a task whose last state is unknown is left out."""
-    try:
-        lines = (STORE.expanduser() / "tasks.jsonl").read_text().splitlines()
-    except OSError:
-        return {}
+    """The newest record of each task of the repo at `root`, by slug; a task whose last state is unknown is left out."""
     last = {}
-    for line in lines:
-        try:
-            r = json.loads(line)
-        except ValueError:
-            continue
-        if isinstance(r, dict) and r.get("repo") == root and isinstance(r.get("slug"), str):
-            last[r["slug"]] = r
+    for r in read_log("tasks"):
+        slug = r.get("slug")
+        if r.get("repo") == root and isinstance(slug, str) and stamp(r) >= stamp(last.get(slug)):
+            last[slug] = r
     return {slug: r for slug, r in last.items() if r.get("state") in STATES}
 
 
 def declare(repo, slug, role, state, deliverable=None):
     extra = {"deliverable": deliverable} if deliverable else {}
-    append("tasks", {**record(repo.root, slug, role, None, os.environ.get("CLAUDE_CODE_SESSION_ID")),
-                     "state": state, **extra})
+    log("tasks", {**record(repo.root, slug, role, None, os.environ.get("CLAUDE_CODE_SESSION_ID")),
+                  "state": state, **extra})
 
 
 def inside(path, base):
@@ -954,6 +983,8 @@ SITE_MANAGER_MODEL = "sonnet"
 RESURFACE_MINUTES = 120
 WATCH_INTERVAL = 1800
 WATCH_TIMEOUT = 600
+MONITOR_TIMEOUT = 120
+MIN_LANDED = 5
 ESCALATE = ("always", "judgment")
 RUN_SCHEMA = {"type": "object", "required": ["sent", "decisions"], "properties": {
     "sent": {"type": "boolean"},
@@ -1015,9 +1046,10 @@ def gh_json(repo, kind, *args):
 def gather(repo, dispatcher):
     """The picture every criterion reads, built once."""
     sessions = list_sessions()
-    limit = load_settings()["task_time_limit_hours"]
+    settings = load_settings()
     return {"now": time.time(), "repo": repo, "dispatcher": dispatcher, "sessions": sessions,
-            "rows": None if sessions is None else collect(repo, sessions, limit),
+            "monitor": settings["monitor"],
+            "rows": None if sessions is None else collect(repo, sessions, settings["task_time_limit_hours"]),
             "declared": read_tasks(repo.root), "events": repo_log("events", repo.root), "models": pinned_models(),
             "gh": lambda *args: gh_json(repo, *args)}
 
@@ -1037,6 +1069,11 @@ def phased(p):
     if any(r["branch"] and r["pr_state"] == "unknown" for r in rows):
         raise NotEvaluated("a pull request state is unknown")
     return rows
+
+
+def unfinished(rows):
+    """The rows whose pull request is not merged and whose task is not acknowledged or dismissed."""
+    return [r for r in rows if r["pr_state"] != "merged" and r["state"] not in SETTLED]
 
 
 def events(p):
@@ -1106,7 +1143,7 @@ def c_dispatcher_missing(p, _):
 
 def c_quiet(p, threshold):
     found = []
-    for r in phased(p):
+    for r in unfinished(phased(p)):
         s = task_session(p, r["path"])
         if r["phase"] == "motion" and s and not finished(s):
             t = last_activity(p, r, s)
@@ -1117,7 +1154,7 @@ def c_quiet(p, threshold):
 
 def c_ended_undeclared(p, threshold):
     found = []
-    for r in phased(p):
+    for r in unfinished(phased(p)):
         mine = sessions_in(p["sessions"], p["repo"].root, r["path"])
         if r["phase"] == "motion" and not session_block(mine):
             t = last_activity(p, r, task_session(p, r["path"]))
@@ -1128,7 +1165,7 @@ def c_ended_undeclared(p, threshold):
 
 def c_blocked_unanswered(p, threshold):
     found = []
-    for r in phased(p):
+    for r in unfinished(phased(p)):
         ts = r["phase"] == "blocked" and declared_before(p, r, threshold * 60)
         if ts:
             found.append((r["slug"], r["slug"], f"blocked {age(ts, p['now'])} ago"))
@@ -1146,7 +1183,7 @@ def c_handover_unacknowledged(p, threshold):
 
 def c_review_loops(p, threshold):
     found = []
-    for r in phased(p):
+    for r in unfinished(phased(p)):
         if r["phase"] in ("motion", "blocked"):
             n = sum(e.get("event") == "SubagentStart" and e.get("role") == "reviewer"
                     for e in since_start(events(p), r["slug"])[0])
@@ -1159,7 +1196,7 @@ def c_wrong_model(p, _):
     if not p["models"]:
         raise NotEvaluated("no pinned models in factory/agents")
     found = []
-    for r in tasks(p):
+    for r in unfinished(tasks(p)):
         mine, started = since_start(events(p), r["slug"])
         want = {**p["models"], "lead": started and started.get("lead_model")}
         wrong = {}
@@ -1190,7 +1227,7 @@ def c_ci_red_handover(p, _):
 def c_deep_stack(p, threshold):
     by_branch = {r["branch"]: r for r in tasks(p) if r["branch"]}
     found = []
-    for r in tasks(p):
+    for r in unfinished(tasks(p)):
         chain, parent = [r["slug"]], by_branch.get(r["base"])
         while parent and parent["slug"] not in chain:
             chain.append(parent["slug"])
@@ -1198,6 +1235,69 @@ def c_deep_stack(p, threshold):
         if len(chain) > threshold:
             found.append((r["slug"], r["slug"], f"{len(chain)} deep: {' on '.join(chain)}"))
     return found
+
+
+def monitor_failed(why):
+    return NotEvaluated(f"the monitor failed: {why}")
+
+
+def monitor_costs(p):
+    """slug -> the monitor's cost block for this repository's tasks."""
+    if not p["monitor"]:
+        raise NotEvaluated('no monitor: set "monitor" in ~/.claude/factory/settings.json to the path of the isshoni command')
+    rc, out, err = run([p["monitor"], "sessions", "--json"], timeout=MONITOR_TIMEOUT)
+    if rc:
+        raise monitor_failed(err.strip().splitlines()[-1] if err.strip() else f"exit {rc}")
+    try:
+        repos = json.loads(out)["repos"]
+        mine = [t for r in repos if r["repo_path"] and os.path.realpath(r["repo_path"]) == p["repo"].root
+                for t in r["tasks"]]
+        return {t["task"]: {k: float(t["cost"][k]) for k in ("total", "main_pct")} for t in mine}
+    except (ValueError, KeyError, TypeError, AttributeError):
+        raise monitor_failed("unexpected output")
+
+
+def costs(p):
+    """monitor_costs, run once per picture; a failure is remembered too."""
+    if "costs" not in p:
+        try:
+            p["costs"] = monitor_costs(p)
+        except NotEvaluated as e:
+            p["costs"] = e
+    if isinstance(p["costs"], NotEvaluated):
+        raise p["costs"]
+    return p["costs"]
+
+
+def landed_median(p):
+    """(median total cost, count) over the tasks with a merged pull request and a cost above 0."""
+    if "landed" not in p:
+        merged = {r.get("headRefName", "").removeprefix("worktree-") for r in
+                  p["gh"](list, "pr", "list", "--state", "merged", "--limit", "1000", "--json", "headRefName")}
+        p["landed"] = [c["total"] for slug, c in costs(p).items() if slug in merged and c["total"] > 0]
+    totals = p["landed"]
+    if len(totals) < MIN_LANDED:
+        raise NotEvaluated(f"only {len(totals)} landed tasks have a cost; {MIN_LANDED} are needed for a median")
+    return statistics.median(totals), len(totals)
+
+
+def priced(p):
+    """[(row, cost block)] for the working or blocked unfinished rows the monitor has a cost for."""
+    spent = costs(p)
+    return [(r, spent[r["slug"]]) for r in unfinished(phased(p))
+            if r["phase"] in ("motion", "blocked") and r["slug"] in spent]
+
+
+def c_cost_outlier(p, threshold):
+    median, n = landed_median(p)
+    return [(r["slug"], r["slug"], f"cost {c['total']:.2f}, {c['total'] / median:.1f} times the median landed task "
+             f"({median:.2f} over {n})") for r, c in priced(p) if c["total"] > threshold * median]
+
+
+def c_lead_heavy(p, threshold):
+    median, _ = landed_median(p)
+    return [(r["slug"], r["slug"], f"the lead's own session is {c['main_pct']:.1f}% of its cost ({c['total']:.2f})")
+            for r, c in priced(p) if c["total"] >= median and c["main_pct"] > threshold]
 
 
 def c_merged_not_cleaned(p, threshold):
@@ -1255,6 +1355,7 @@ CRITERIA = {  # name -> (function, whether it needs a threshold)
     "wrong-model": (c_wrong_model, False), "ci-red-handover": (c_ci_red_handover, False),
     "deep-stack": (c_deep_stack, True), "merged-not-cleaned": (c_merged_not_cleaned, True),
     "lgtm-blocked": (c_lgtm_blocked, False), "base-merged": (c_base_merged, False),
+    "cost-outlier": (c_cost_outlier, True), "lead-heavy": (c_lead_heavy, True),
 }
 
 
@@ -1317,14 +1418,14 @@ def fold(records):
 
 
 def log_firing(repo, **fields):
-    append("firings", {"ts": now(), "repo": repo.root, **fields})
+    log("firings", {"ts": now(), "repo": repo.root, **fields})
 
 
 def fire(repo, f):
     """Log a new firing under a fresh id; returns it with the id."""
     ts = now()
     fid = hashlib.sha256("\0".join([repo.root, f["criterion"], f["subject"], ts]).encode()).hexdigest()[:12]
-    append("firings", {"ts": ts, "repo": repo.root, "id": fid, **{k: f[k] for k in FIRED_KEYS}})
+    log("firings", {"ts": ts, "repo": repo.root, "id": fid, **{k: f[k] for k in FIRED_KEYS}})
     return {**f, "id": fid}
 
 

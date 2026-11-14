@@ -68,7 +68,7 @@ prints the headline numbers and one line per task. A missing or empty directory 
 empty lists (`store_found: false` when the directory is missing). Records are read with a
 default for every field and lines that are not JSON objects are skipped.
 
-A task is a `(repo, slug)` that appears in events, retros or `tasks.jsonl`; records without
+A task is a `(repo, slug)` that appears in events, retros or the task state log; records without
 a `slug` or a `repo` are skipped, and worktrees the monitor sees that the factory never
 started are not tasks. **Landed** means the task's pull request is merged. Pull requests
 come from one `gh pr list --state all` per repository, run in the repository, matched on
@@ -89,7 +89,7 @@ Per task (listed by `started`, tasks without one first, then slug):
 | `repo`, `repo_path`, `slug` | `repo` is the last component of the path |
 | `version` | of its `TaskStarted` event, else of its earliest record in any store |
 | `started` | `TaskStarted` time, else the start of its earliest transcript session |
-| `state` | its last declared state in `tasks.jsonl` |
+| `state` | its last declared state (the task state record with the newest `ts`) |
 | `pr` | `{number, url, state, opened, merged}` |
 | `landed` | `pr.merged` is set |
 | `brief_to_pr_s`, `pr_to_merge_s` | `pr.opened - started` (null when negative); `pr.merged - pr.opened` |

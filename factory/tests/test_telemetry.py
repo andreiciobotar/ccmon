@@ -598,6 +598,90 @@ class PruneTests(LogCase):
         self.put("feedback-2026-11", {"id": "a", "ts": "2026-11-14T10:00:00Z", "status": "accepted"})
         self.assertEqual(self.folded(), {"a": ("done", None)})
 
+    def task(self, slug, ts, state="working", repo=None):
+        return {"ts": ts, "repo": repo or str(self.tmp / "repo"), "slug": slug, "state": state}
+
+    def worktree(self, slug):
+        (self.tmp / "repo" / ".claude" / "worktrees" / slug).mkdir(parents=True, exist_ok=True)
+
+    def prune_tasks(self, **files):
+        for name, records in files.items():
+            self.put(name.replace("_", "-"), *records)
+        with self.clock():
+            factory.prune("tasks")
+        return self.names()
+
+    def test_an_old_task_record_survives_while_its_worktree_exists(self):
+        self.worktree("kept")
+        old = [self.task("kept", "2025-01-01T00:00:00Z"), self.task("kept", "2025-01-02T00:00:00Z", "blocked"),
+               self.task("gone", "2025-01-03T00:00:00Z")]
+        self.assertEqual(self.prune_tasks(tasks_2025_01=old), ["tasks-2026-11.jsonl"])
+        self.assertEqual(self.lines("tasks"), [old[1]])
+        self.assertEqual({s: r["state"] for s, r in factory.read_tasks(str(self.tmp / "repo")).items()},
+                         {"kept": "blocked"})
+
+    def test_an_old_task_record_goes_when_a_newer_file_holds_the_task(self):
+        self.worktree("a")
+        newer = self.task("a", "2025-11-01T00:00:00Z", "handed-over")
+        names = self.prune_tasks(tasks_2025_01=[self.task("a", "2025-01-01T00:00:00Z")], tasks_2025_11=[newer])
+        self.assertEqual(names, ["tasks-2025-11.jsonl"])
+        self.assertEqual(self.lines("tasks"), [newer])
+
+    def test_the_unsuffixed_tasks_file_is_carried_like_a_month(self):
+        self.worktree("a")
+        record = self.task("a", "2025-01-01T00:00:00Z")
+        self.put("tasks", record, mtime=time.mktime((2025, 1, 1, 12, 0, 0, 0, 0, -1)))
+        with self.clock():
+            factory.prune("tasks")
+        self.assertEqual((self.names(), self.lines("tasks")), (["tasks-2026-11.jsonl"], [record]))
+
+    def test_an_unsuffixed_record_newer_than_a_month_files_is_the_one_carried(self):
+        self.worktree("a")
+        newest = self.task("a", "2025-06-01T00:00:00Z", "acknowledged")
+        self.put("tasks", newest, mtime=time.mktime((2025, 6, 1, 12, 0, 0, 0, 0, -1)))
+        self.put("tasks-2025-11", self.task("a", "2025-05-01T00:00:00Z", "working"))
+        with self.clock():
+            factory.prune("tasks")
+        self.assertEqual(factory.read_tasks(str(self.tmp / "repo"))["a"]["state"], "acknowledged")
+
+    def test_read_tasks_picks_the_newest_ts_across_files_and_the_later_read_on_a_tie(self):
+        root = str(self.tmp / "repo")
+        self.put("tasks-2026-11", self.task("a", "2025-01-01T00:00:00Z", "working"))
+        self.put("tasks-2026-10", self.task("a", "2026-10-01T00:00:00Z", "blocked"),
+                 self.task("b", "2026-10-01T00:00:00Z", "working"), self.task("b", "2026-10-01T00:00:00Z", "blocked"))
+        self.assertEqual({s: r["state"] for s, r in factory.read_tasks(root).items()}, {"a": "blocked", "b": "blocked"})
+
+    def declared(self, fid, ts, **kw):
+        return {"ts": ts, "repo": "/r", "id": fid, "criterion": "c", "escalate": "always", "slug": "s", "subject": fid,
+                "detail": "d", **kw}
+
+    def test_old_firings_that_matter_for_watch_and_for_precision_survive(self):
+        def line(fid, ts, **kw):
+            return {"ts": ts, "repo": "/r", "id": fid, **kw}
+        old = [self.declared("open", "2025-01-01T00:00:00Z"),
+               self.declared("esc", "2025-01-01T00:00:00Z"), line("esc", "2025-01-02T00:00:00Z", decision="escalated"),
+               line("esc", "2025-01-03T00:00:00Z", cleared=True),
+               self.declared("sup", "2025-01-01T00:00:00Z"), line("sup", "2025-01-02T00:00:00Z", decision="suppressed"),
+               line("sup", "2025-01-03T00:00:00Z", cleared=True),
+               self.declared("quiet", "2025-01-01T00:00:00Z"), line("quiet", "2025-01-02T00:00:00Z", cleared=True),
+               {"ts": "2025-01-04T00:00:00Z", "repo": "/r", "miss": "m", "slug": None, "firing": None}]
+        outcome = line("esc", "2025-11-05T00:00:00Z", outcome="acted")
+        self.put("firings-2025-01", *old)
+        self.put("firings-2025-11", outcome)
+
+        def summary():
+            firings, misses = factory.fold(sorted(factory.read_log("firings"), key=lambda r: r["ts"]))
+            return {k: v for k, v in factory.summarize(firings, misses).items() if k != "suppressed"}, \
+                [f["id"] for f in firings if not f["cleared"]]
+        before = summary()
+        with self.clock():
+            factory.prune("firings")
+        self.assertEqual(self.names(), ["firings-2025-11.jsonl", "firings-2026-11.jsonl"])
+        self.assertEqual(summary(), before)
+        self.assertEqual(before[1], ["open"])
+        kept = {(r["id"] if "id" in r else "miss") for r in self.lines("firings")}
+        self.assertEqual(kept, {"open", "esc", "miss"})
+
     def test_the_first_write_of_a_month_prunes(self):
         self.put(self.old(), {})
         with self.clock():

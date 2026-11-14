@@ -40,7 +40,7 @@ def pic(**kw):
     return {"now": NOW, "repo": SimpleNamespace(root=ROOT, default="main"), "dispatcher": "dispatcher-repo",
             "sessions": sessions, "rows": [], "declared": {}, "events": [],
             "models": {"coder": "sonnet", "explorer": "haiku", "reviewer": "opus"},
-            "gh": lambda *a: [], **kw}
+            "gh": lambda *a: [], "monitor": None, **kw}
 
 
 def check(name, p, threshold=None):
@@ -266,6 +266,38 @@ class CriteriaTests(Home):
         loop = [row("a", base="worktree-b"), row("b", base="worktree-a")]
         self.assertEqual(check("deep-stack", pic(rows=loop), 3), [])
 
+    def test_finished_tasks_are_skipped(self):
+        started = ev("x", "TaskStarted")
+        wrong = ev("x", "PostToolUse", role="coder", model="claude-opus-5-5")
+        reviewers = [ev("x", "SubagentStart", role="reviewer")] * 3
+        self.transcript("{sid}.jsonl", NOW - 60 * 60)
+        done = lead("x", status="idle", state="done", startedAt=(NOW - HOUR) * 1000)
+        chain = lambda **kw: [row("a"), row("b", base="worktree-a"), row("c", base="worktree-b"),
+                              row("x", base="worktree-c", **kw)]
+        cases = {
+            "quiet": lambda kw: (pic(rows=[row("x", **kw)], sessions=[lead("x")]), 20),
+            "ended-undeclared": lambda kw: (pic(rows=[row("x", **kw)], sessions=[done]), 10),
+            "blocked-unanswered": lambda kw: (pic(rows=[row("x", phase="blocked", **kw)],
+                                                  declared={"x": {"ts": iso(NOW - HOUR)}}), 30),
+            "review-loops": lambda kw: (pic(rows=[row("x", **kw)], events=[started, *reviewers]), 3),
+            "wrong-model": lambda kw: (pic(rows=[row("x", **kw)], events=[started, wrong]), None),
+            "deep-stack": lambda kw: (pic(rows=chain(**kw)), 3)}
+        for name, make in cases.items():
+            for kw in ({}, {"pr_state": "merged"}, {"state": "acknowledged"}, {"state": "dismissed"}):
+                with self.subTest(name, **kw):
+                    p, threshold = make(kw)
+                    self.assertEqual(len(check(name, p, threshold)), 0 if kw else 1)
+
+    def test_a_merged_pull_request_ends_review_loops_even_while_the_session_is_busy(self):
+        reviewers = [ev("x", "SubagentStart", role="reviewer")] * 3
+        p = pic(rows=[row("x", phase="motion", pr_state="merged")], events=[ev("x", "TaskStarted"), *reviewers])
+        self.assertEqual(check("review-loops", p, 3), [])
+
+    def test_a_finished_task_is_still_part_of_the_chain_of_a_stacked_one(self):
+        rows = [row("a"), row("b", base="worktree-a", pr_state="merged"), row("c", base="worktree-b"),
+                row("d", base="worktree-c")]
+        self.assertEqual([f[0] for f in check("deep-stack", pic(rows=rows), 3)], ["d"])
+
     def test_merged_not_cleaned(self):
         r = row("x", phase="merged", pr_url="https://pr/1")
         for hours, fires in ((3, 1), (1, 0)):
@@ -405,6 +437,84 @@ class CriteriaTests(Home):
         self.assertNotEqual(cut, b"")
 
 
+def monitor_out(*tasks, repo=ROOT, **extra):
+    """What `isshoni sessions --json` prints: (slug, total, main_pct) per task of one repository."""
+    return json.dumps({"repos": [{"repo_path": repo, "tasks": [
+        {"task": slug, "cost": {"total": total, "main_pct": main_pct}} for slug, total, main_pct in tasks]}], **extra})
+
+
+def landed(*slugs):
+    return lambda *a: [{"headRefName": f"worktree-{slug}"} for slug in slugs]
+
+
+BASE = [(f"t{i}", float(i), 50.0) for i in range(1, 6)]  # five landed tasks: median 3.00
+
+
+class CostTests(unittest.TestCase):
+    def evaluate(self, name, threshold, tasks=(), rows=(), answer=None, calls=None, gh=None, p=None):
+        p = p or pic(monitor="/m/isshoni", rows=list(rows), gh=gh or landed("t1", "t2", "t3", "t4", "t5"))
+
+        def fake(argv, cwd=None, timeout=None, input=None):
+            if calls is not None:
+                calls.append((argv, timeout))
+            return answer or (0, monitor_out(*BASE, *tasks), "")
+        with mock.patch.object(factory, "run", fake):
+            return check(name, p, threshold)
+
+    def test_no_monitor_is_not_evaluated(self):
+        with self.assertRaisesRegex(factory.NotEvaluated, 'no monitor: set "monitor" in ~/.claude/factory/settings.json'):
+            check("cost-outlier", pic(rows=[row("x")]), 3)
+
+    def test_the_monitor_is_run_once_for_both_criteria_and_a_failure_is_remembered_too(self):
+        calls = []
+        p = pic(monitor="/m/isshoni", rows=[row("x")], gh=landed("t1", "t2", "t3", "t4", "t5"))
+        self.evaluate("cost-outlier", 3, calls=calls, p=p)
+        self.evaluate("lead-heavy", 85, calls=calls, p=p)
+        self.assertEqual(calls, [(["/m/isshoni", "sessions", "--json"], 120)])
+        calls, p = [], pic(monitor="/m/isshoni", rows=[row("x")], gh=landed("t1"))
+        for name, threshold in (("cost-outlier", 3), ("lead-heavy", 85)):
+            with self.assertRaisesRegex(factory.NotEvaluated, "the monitor failed: boom"):
+                self.evaluate(name, threshold, answer=(1, "", "warn\nboom\n"), calls=calls, p=p)
+        self.assertEqual(len(calls), 1)
+
+    def test_a_monitor_that_fails_or_answers_oddly_is_not_evaluated(self):
+        bad_task = '{"repos": [{"repo_path": "/repo", "tasks": [{"task": "x", "cost": {}}]}]}'
+        for answer, why in (((1, "", ""), "exit 1"), ((124, "", "timed out"), "timed out"), ((0, "no", ""), "unexpected"),
+                            ((0, "[]", ""), "unexpected"), ((0, '{"repos": [{"repo_path": "/repo"}]}', ""), "unexpected"),
+                            ((0, bad_task, ""), "unexpected")):
+            with self.subTest(why=why), self.assertRaisesRegex(factory.NotEvaluated, f"the monitor failed: .*{why}"):
+                self.evaluate("cost-outlier", 3, rows=[row("x")], answer=answer)
+
+    def test_only_this_repositorys_tasks_count(self):
+        other = (0, monitor_out(*BASE, ("x", 99.0, 99.0), repo="/elsewhere"), "")
+        with self.assertRaisesRegex(factory.NotEvaluated, "only 0 landed"):
+            self.evaluate("cost-outlier", 3, rows=[row("x")], answer=other)
+
+    def test_the_median_needs_five_landed_tasks_with_a_cost(self):
+        zero = [("t1", 0.0, 50.0), *BASE[1:]]
+        for slugs, tasks, n in (((), BASE, 0), (("t1", "t2", "t3", "t4"), BASE, 4),
+                                (("t1", "t2", "t3", "t4", "t5"), zero, 4)):
+            answer = (0, monitor_out(*tasks), "")
+            with self.subTest(slugs=slugs, n=n), self.assertRaisesRegex(
+                    factory.NotEvaluated, f"only {n} landed tasks have a cost; 5 are needed for a median"):
+                self.evaluate("lead-heavy", 85, rows=[row("x")], answer=answer, gh=landed(*slugs))
+
+    def test_cost_outlier(self):
+        rows = [row("x"), row("y", phase="blocked"), row("review", phase="review"), row("done", pr_state="merged"),
+                row("ack", state="acknowledged"), row("free")]
+        tasks = [("x", 10.0, 50.0), ("y", 9.0, 50.0), ("review", 99.0, 50.0), ("done", 99.0, 50.0), ("ack", 99.0, 50.0)]
+        found = self.evaluate("cost-outlier", 3, tasks, rows)
+        self.assertEqual(found, [("x", "x", "cost 10.00, 3.3 times the median landed task (3.00 over 5)")])
+
+    def test_lead_heavy(self):
+        rows = [row("a"), row("b"), row("c"), row("d"), row("e", pr_state="merged"), row("f", state="acknowledged")]
+        tasks = [("a", 3.0, 90.0), ("b", 2.9, 99.0), ("c", 5.0, 85.0), ("d", 4.0, 85.1), ("e", 9.0, 99.0),
+                 ("f", 9.0, 99.0)]
+        found = self.evaluate("lead-heavy", 85, tasks, rows)
+        self.assertEqual(found, [("a", "a", "the lead's own session is 90.0% of its cost (3.00)"),
+                                 ("d", "d", "the lead's own session is 85.1% of its cost (4.00)")])
+
+
 class RunTests(unittest.TestCase):
     def test_a_timeout_returns_124(self):
         self.assertEqual(factory.run(["sleep", "5"], timeout=0.1), (124, "", "timed out"))
@@ -445,8 +555,7 @@ class Harness(Home):
             f.writelines(json.dumps(r) + "\n" for r in records)
 
     def records(self, name="firings"):
-        path = self.store / f"{name}.jsonl"
-        return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+        return [r for _, path in factory.log_files(name) for r in factory.read_file(path)]
 
     def cli(self, *argv, answers=None, sessions=(DISPATCHER | {"name": "dispatcher-repo"},), entries=(), at=None):
         base = repo_answers([task_entry(s) for s in entries], sessions)
@@ -658,7 +767,8 @@ class WatchTests(Harness):
                 self.assertEqual(code, 1)
                 self.assertIn("aaa  past-limit  x  undecided", out)
                 self.assertEqual(self.decisions(), [])
-                self.store.joinpath("firings.jsonl").unlink()
+                for _, path in factory.log_files("firings"):
+                    path.unlink()
 
     def test_an_open_blocked_firing_survives_an_unplaced_session(self):
         self.seed("firings", [fired("aaa", criterion="blocked-unanswered", escalate="judgment")])
@@ -671,7 +781,7 @@ class WatchTests(Harness):
     def test_an_escalated_firing_is_not_sent_again(self):
         self.tick()
         fid = self.records()[0]["id"]
-        self.seed("firings", [decided(fid, "escalated", ts=NOW)])
+        self.seed("firings", [decided(fid, "escalated", ts=NOW + 1)])
         self.tick(at=NOW + 1800)
         self.assertEqual(len(self.claude_runs()), 0)
         self.assertEqual(len(self.records()), 2)

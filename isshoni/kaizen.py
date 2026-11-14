@@ -343,8 +343,8 @@ def _outbox(feedback, cutoff):
 def build(factory_dir, load_sessions, prices, cutoff=None, now=None):
     """The kaizen document. `load_sessions()` is called once, and only when the store has tasks."""
     factory_dir = os.path.expanduser(factory_dir)
-    logs = {n: read_log(factory_dir, n) for n in ("events", "retros", "feedback")}
-    logs["tasks"] = list(_records(os.path.join(factory_dir, "tasks.jsonl")))
+    logs = {n: read_log(factory_dir, n) for n in ("events", "retros", "feedback", "tasks")}
+    logs["tasks"].sort(key=lambda r: str(r.get("ts")))  # a carried record sits in a newer file than its ts
     stops = _stops(logs["events"])
     by_task = {}
     for store in ("events", "retros", "tasks"):

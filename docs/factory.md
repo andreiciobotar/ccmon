@@ -65,6 +65,7 @@ The cap (`worktree_cap`) counts slots per repository. Only `new` checks it, so a
 | `lead_model` | `fable` | |
 | `lead_permission_mode` | `auto` | `acceptEdits`, `auto`, `bypassPermissions`, `manual`, `dontAsk`, `plan` |
 | `task_time_limit_hours` | 2 | after it `status` shows `overtime` while the lead's turn has not ended; the lead stops and reports |
+| `monitor` | none | the path of the monitor's `isshoni` command; the cost criteria need it (see Criteria) |
 
 ## Messages
 Leads and the dispatcher talk through Claude Code's `SendMessage`, by session name. A lead's first line starts with `QUESTION:`, `BLOCKED:`, `OVERTIME:`, `SPLIT:` or `DONE:` and its slug. The human can always `claude attach <slug>`.
@@ -80,10 +81,10 @@ All under `~/.claude/factory/`, JSON lines, append-only, mode 0600. Except where
 | events | `events-YYYY-MM.jsonl` | the plugin's hooks; `new`, `clean` | the current month and the 12 before it |
 | retros | `retros-YYYY-MM.jsonl` | `factory retro` | forever |
 | feedback | `feedback-YYYY-MM.jsonl` | hooks; `feedback add`, `decide`, `set` | `open` and `accepted` forever, `done` and `rejected` at least 12 months |
-| task state | `tasks.jsonl` | `new`, `state`, `ack` | forever |
-| firings | `firings.jsonl` | `watch`, `firing`, `miss` | forever |
+| task state | `tasks-YYYY-MM.jsonl` | `new`, `state`, `ack` | the current month and the 12 before it, and the newest record of every task that still has a worktree |
+| firings | `firings-YYYY-MM.jsonl` | `watch`, `firing`, `miss` | the current month and the 12 before it, and every miss and every firing that is still open or was escalated, with its records |
 
-Unsuffixed `events.jsonl`, `retros.jsonl` and `feedback.jsonl` from older versions are still read, as the oldest. Old files are deleted when a log's first record of a new month is written; feedback lines still needed are first carried, unchanged, into the current month's file.
+Unsuffixed `events.jsonl`, `retros.jsonl`, `feedback.jsonl`, `tasks.jsonl` and `firings.jsonl` from older versions are still read, as the oldest. Old files are deleted when a log's first record of a new month is written; the lines still needed (the Kept column) are first carried, unchanged, into the current month's file. What goes after 12 months: a task's records once its worktree is gone, and firings that cleared and were suppressed or never decided. A task's state is its record with the newest `ts`, whichever file holds it.
 
 `factory log` prints records oldest file first, where `since <= ts < until`; a bound is a `ts` or a prefix of one, at least `YYYY-MM`.
 
@@ -142,14 +143,20 @@ Criteria are `factory/criteria.json`, one entry per line: `name`, `escalate` (`a
 | `review-loops` | judgment | 3 | a task had that many reviewer dispatches since it started |
 | `wrong-model` | judgment | | a lead or subagent ran on a model other than the one pinned for its role |
 | `ci-red-handover` | judgment | | a handed-over pull request has a failing check |
-| `deep-stack` | judgment | 3 | a task's stack is deeper than that |
+| `deep-stack` | judgment | 3 | a task's stack, counting the task itself, is deeper than that |
 | `merged-not-cleaned` | judgment | 2 h | a task was merged or settled that long ago and not cleaned |
 | `lgtm-blocked` | always | | a pull request carries the human's `lgtm` and was not merged; subject `#<number>/<kind>` (see Merging) |
 | `base-merged` | always | | a lead is still working (pull request neither merged nor open against the default branch) on a base that has merged, and its worktree lacks that merge commit |
+| `cost-outlier` | judgment | 3 | a working or blocked task has cost more than that many times the median landed task |
+| `lead-heavy` | judgment | 85 % | a working or blocked task that has cost at least the median landed task has more than that share of its cost in the lead's own session |
+
+Finished tasks (a merged pull request, or declared `acknowledged` or `dismissed`) are skipped by `quiet`, `ended-undeclared`, `blocked-unanswered`, `review-loops`, `wrong-model`, `deep-stack` (as the task that fires; it still counts in a stack above it), `cost-outlier` and `lead-heavy`. `past-limit` is not: a session running past the limit spends money whatever its pull request says.
+
+The two cost criteria read the monitor, not the plugin: set `monitor` in the settings to the path of `isshoni` and each `health` or `watch` runs `isshoni sessions --json` once (7 seconds over all transcripts on the author's machine; 120 seconds at most). Without the setting, or when the monitor fails, they print `not evaluated`. The median is over this repository's tasks that have a merged pull request and a cost above 0; with fewer than 5 there is no median and they are `not evaluated`. The monitor's price file sets the currency. The thresholds come from this repository's 23 landed tasks (median 6.52, p75 10.48, p90 15.35, max 19.08, so 2.93 times the median): `cost-outlier` at 3 times the median would have fired on none of them. The lead's own share of cost (`main_pct`) had median 78.6, p90 88.3, max 90.5, and 54.7 to 82.2 among the 12 that cost at least the median; 85 is just above what those 12 showed. A task in its first minutes shows 100 % in the lead, which is why `lead-heavy` needs a cost of at least the median.
 
 The dispatcher closes the loop: `firing <id> acted|ignored` on each escalation, `miss` for a problem that was not escalated (`--firing` when it had fired and was suppressed). `firings` lists the log, then precision `acted/(acted+ignored)` and recall `acted/(acted+missed)`.
 
-`firings.jsonl` records carry only `ts`, `repo` and one of: a firing (`id`, `criterion`, `escalate`, `slug`, `subject`, `detail`); a decision (`id`, `decision`: `escalated` or `suppressed`, `reason`, `by`: `site-manager` or `watch`); an outcome (`id`, `outcome`); a clearing (`id`, `cleared: true`); a miss (`miss`, `slug`, `firing`).
+`firings-YYYY-MM.jsonl` records carry only `ts`, `repo` and one of: a firing (`id`, `criterion`, `escalate`, `slug`, `subject`, `detail`); a decision (`id`, `decision`: `escalated` or `suppressed`, `reason`, `by`: `site-manager` or `watch`); an outcome (`id`, `outcome`); a clearing (`id`, `cleared: true`); a miss (`miss`, `slug`, `firing`).
 
 ## Merging
 `factory merge` merges pull requests with no model. It merges only what is mechanical and stops at the first thing that is not. Two things start it:
@@ -183,6 +190,7 @@ Then it retargets the pull request onto the default branch when its base is a me
 - Nothing caps what a lead spends; the time limit is checked by the lead between subagent runs.
 - A worktree made by hand under a slug used before inherits that slug's last declared state.
 - A store nobody writes to is never pruned. A month file and `watch.log` have no size limit.
+- The monitor adds up the cost of a reused slug, so a task started under an old slug looks dearer than it is. A model the monitor has no price for understates the cost.
 - Merging: the `lgtm` trigger rests on a rule, not a mechanism (see Merging). Checks are not rerun after a retarget, and GitHub does not test the merge result: mergeable means no conflict. A pull request with no task worktree is a `handover` stop; the human merges it. At most 100 open pull requests are seen. An `lgtm` during a running check waits for the next tick. There is no lock: when a tick and the dispatcher merge at once, the second `gh pr merge` fails and is reported.
 - The site manager's thresholds are first guesses; `quiet` reads file times, so a lead waiting on a long command looks quiet; a run that dies after sending may escalate the same firing again next tick.
 - Two repositories whose directories share a name share a spec folder and a default dispatcher name.
