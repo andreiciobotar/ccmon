@@ -388,7 +388,7 @@ class CriteriaTests(Home):
         lines = [entry(i) + " " * 200 for i in range(400)]
         lines[-3] = json.dumps({"timestamp": "TU", "message": {"role": "user", "content": "a\u2028b"}},
                                ensure_ascii=False)
-        lines[-2] = "[" * 5000
+        lines[-2] = "[" * 20000
         path.write_text("\n".join(lines) + "\n")
         tail = factory.transcript_tail(path)
         self.assertEqual(len(tail), 15)

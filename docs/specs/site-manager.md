@@ -138,4 +138,7 @@ Rules in the role file: `always` firings are passed on unjudged; for a `judgment
 - A site manager run costs about $0.15 (one measured run); `watch` prints each run's cost. The runs load no plugin, so the hooks record no events for them.
 - If a run sends its message and then dies before answering, its escalations stay undecided and are sent again next tick: a duplicate is possible, a lost escalation is not.
 - `watch.log` grows without bound (a few lines per tick).
+- `ci-red-handover` skips a pull request when `gh pr checks` says `no checks reported`. That wording is from memory of `gh`, not observed: every pull request in this repo has checks. With another wording the criterion is reported as not evaluated while such a pull request is in review; nothing fires falsely.
+- `factory schedule install` was not run on this machine by the lead (the permission was denied); the same `launchctl bootstrap`/`bootout` calls were, with a hand-written plist (fact 1). Installing over a loaded job runs `bootout` then `bootstrap` at once, which launchd may refuse while the old job is still unloading; run `install` again if it does.
+- Events and firings are ordered by `ts` when read; a clock stepping backwards could misorder records written within the step.
 - macOS only for the scheduler; elsewhere the cron line is printed, not installed.
