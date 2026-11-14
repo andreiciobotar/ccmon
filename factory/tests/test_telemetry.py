@@ -146,10 +146,23 @@ class HookTests(StoreCase):
         e({"hook_event_name": "PostToolUse", "tool_name": "SubagentHandback", "agent_id": "a1",
            "agent_type": "factory:reviewer", "tool_input": {"message": "report"}},
           event="PostToolUse", tool_name="SubagentHandback", agent_id="a1", role="reviewer")
-        for message, kind in (("QUESTION: which?", "QUESTION"), ("BLOCKED: x", "BLOCKED"), ("OVERTIME: x", "OVERTIME"),
-                              ("SPLIT: x", "SPLIT"), ("DONE: x", "DONE"), ("DONE x", None), ("hi", None)):
+        for message, kind in (("SPLIT: my-task x", "SPLIT"), ("DONE: my-task x", "DONE"), ("DONE x", None), ("hi", None)):
             e({"hook_event_name": "PostToolUse", "tool_name": "SendMessage", "tool_input": {"to": "d1", "message": message}},
               event="PostToolUse", tool_name="SendMessage", to="d1", kind=kind)
+
+    def test_a_stop_records_its_first_line_only(self):
+        for message, kind, summary in (
+                ("QUESTION: my-task — which base?\nFacts: secret", "QUESTION", "which base?"),
+                ("BLOCKED: my-task push denied", "BLOCKED", "push denied"),
+                ("OVERTIME: my-task\n\n  review is not converging  \nOptions: secret", "OVERTIME", "review is not converging"),
+                ("QUESTION: which?", "QUESTION", "which?"),
+                ("BLOCKED: other-task: x", "BLOCKED", "other-task: x"),
+                ("OVERTIME: my-task " + "x" * 300, "OVERTIME", "x" * 200)):
+            self.event({"hook_event_name": "PostToolUse", "tool_name": "SendMessage", "tool_input": {"to": "d1", "message": message}},
+                       event="PostToolUse", tool_name="SendMessage", to="d1", kind=kind, summary=summary)
+        for message in ("QUESTION: my-task", "BLOCKED:", "OVERTIME: my-task —\n"):
+            self.event({"hook_event_name": "PostToolUse", "tool_name": "SendMessage", "tool_input": {"to": "d1", "message": message}},
+                       event="PostToolUse", tool_name="SendMessage", to="d1", kind=message.partition(":")[0])
 
     def test_unknown_event_has_tags_only(self):
         self.event({"hook_event_name": "Mystery", "tool_name": "x"}, event="Mystery")
