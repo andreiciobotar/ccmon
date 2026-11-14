@@ -1,5 +1,8 @@
 {
   "name": "factory",
   "description": "A dispatcher hands each task to a lead session in its own git worktree; leads plan, build through subagents and land a pull request.",
-  "version": "0.3.0"
+  "version": "0.3.0",
+  "author": { "name": "Andrei Ciobotar", "url": "https://github.com/andreiciobotar" },
+  "repository": "https://github.com/andreiciobotar/isshoni",
+  "license": "LicenseRef-MIT-Commons-Clause"
 }

@@ -1,5 +1,6 @@
 {
   "name": "factory",
+  "description": "Isshoni's factory plugin for Claude Code.",
   "owner": { "name": "Andrei Ciobotar" },
   "plugins": [
     {
