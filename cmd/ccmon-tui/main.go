@@ -17,6 +17,7 @@ func main() {
 	var (
 		projects = flag.String("projects-dir", "", "transcripts root (default ~/.claude/projects)")
 		agents   = flag.String("agents-dir", "", "agent definitions dir, passed to ccmon")
+		prices   = flag.String("prices", "", "price file, passed to ccmon (default ccmon/prices.toml)")
 		rng      = flag.String("range", "7d", "initial range: 24h, 7d, 30d, all")
 		snapshot = flag.String("snapshot", "", "render one frame to stdout and exit: dashboard, session, agents, help")
 		size     = flag.String("size", "140x40", "snapshot size WxH")
@@ -28,7 +29,7 @@ func main() {
 
 	root, rootErr := data.LocateRoot()
 	// a missing root is not fatal here: the TUI reports it on screen
-	r := &data.Runner{Root: root, ProjectsDir: absolute(*projects), AgentsDir: absolute(*agents), Err: rootErr}
+	r := &data.Runner{Root: root, ProjectsDir: absolute(*projects), AgentsDir: absolute(*agents), Prices: absolute(*prices), Err: rootErr}
 	nc := *noColor || os.Getenv("NO_COLOR") != ""
 	o := tui.Options{Runner: r, Range: *rng, NoColor: nc, Follow: *follow}
 

@@ -45,7 +45,7 @@ Headers are right-aligned over right-aligned columns. `signalPills` is deleted (
 
 Width allocation, inner width `iw`, `want` = longest `2*depth + name + 1 + suffix` over all rows, clamped 14..30:
 1. Always: lead, name, TOKENS, MAIN│SUB at 8, DISP.
-2. Optional columns are added in a fixed chain, each only if the previous one is shown, so a wider table never loses a column: the four signal columns (18 + 1 gap) if the name keeps 12 cells (an indented session id; this holds at the 60-column minimum terminal); the time column if the name keeps 14; `SUB%` if the name keeps `want`; `BAD` (when it exists) if the name keeps `want`.
+2. Optional columns are added in a fixed chain, each only if the previous one is shown, so a wider table never loses a column: the four signal columns (18 + 1 gap) if the name keeps 10 cells (this holds at the 60-column minimum terminal, where an indented session id is cut); the time column if the name keeps 14; `TOKENS` if the name keeps `want` (`COST` is always shown, see `cost-in-money.md`); `SUB%` if the name keeps `want`; `BAD` (when it exists) if the name keeps `want`.
 3. name = min(want, what is left). Slack beyond that goes first to the MAIN│SUB bar (up to 16), then to the name column (up to 30); anything further stays blank at the right edge.
 A truncated name loses its suffix first (plain `cell` truncation with the ellipsis is fine).
 

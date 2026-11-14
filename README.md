@@ -24,23 +24,23 @@ Isshoni is two tools for people who run [Claude Code](https://claude.com/claude-
 
 | | What it does | You run |
 |---|---|---|
-| **Monitor** | Shows where the tokens went: per repository, task, session, agent and model | `ccmon`, `ccmon-tui` |
+| **Monitor** | Shows where the money and tokens went: per repository, task, session, agent and model | `ccmon`, `ccmon-tui` |
 | **Factory** | Builds several tasks in parallel, each in its own git worktree, each ending in a draft pull request | `/factory:dispatch`, from the `factory` plugin |
 
 Isshoni is the project. Its commands and plugin keep their working names (`ccmon`, `ccmon-tui`, `factory`) for now.
 
 ## Monitor
 
-`ccmon` reads the transcripts Claude Code already keeps in `~/.claude/projects` and never writes there. It reports tokens by model and agent, the share spent in subagents, and the signs of wasted work: repeated dispatches, review loops, and agents running on a model other than the one pinned for them.
+`ccmon` reads the transcripts Claude Code already keeps in `~/.claude/projects` and never writes there. It reports cost and tokens by model and agent, the share spent in subagents, and the signs of wasted work: repeated dispatches, review loops, and agents running on a model other than the one pinned for them.
 
 ```sh
 git clone https://github.com/andreiciobotar/isshoni && cd isshoni
 bin/ccmon sessions --since 7d    # sessions by repository and task, with totals
 bin/ccmon session <id-prefix>    # one session: models, agents, dispatch timeline
-bin/ccmon agents --since 7d      # per agent type: tokens, p50/p90, repeats
+bin/ccmon agents --since 7d      # per agent type: cost, tokens, p50/p90, repeats
 ```
 
-Python 3.11+, no dependencies. Add `--json` for machine-readable output; [docs/ccmon.md](docs/ccmon.md) has the rest.
+Cost is the API list price, from [ccmon/prices.toml](ccmon/prices.toml); edit it when prices change. Python 3.11+, no dependencies. Add `--json` for machine-readable output; [docs/ccmon.md](docs/ccmon.md) has the rest.
 
 `ccmon-tui` is the same data as a live terminal dashboard: sessions grouped by repository and task, a timeline per session, and what is running now.
 

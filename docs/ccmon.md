@@ -11,11 +11,26 @@ bin/ccmon agents --repo ccmon --task ci-workflow   # tokens by agent and model f
 ```
 `sessions` and `agents` accept `--repo NAME` and `--task NAME` (exact match).
 Global options: `--json` (one JSON document on stdout), `--projects-dir`,
-`--agents-dir` (agent definitions used for the model WARN), `--repeat-threshold`
+`--agents-dir` (agent definitions used for the model WARN), `--prices` (price file), `--repeat-threshold`
 (Jaccard, default 0.5). `--since` takes `Nd`, `Nh`, `Nw` or an ISO date.
 Exit codes: 0 ok, 2 usage error (unknown or ambiguous session id, bad option).
 Flags in the timeline: `repeat`, `review-loop`, `rechecked`, `WARN`, plus the
 status when not `completed` (`running`, `no-run`, `orphan`).
+
+Cost: every command shows money next to tokens, priced per message from
+`ccmon/prices.toml` (per million tokens: input, output, cache write 5m and 1h, cache
+read; an optional `long_prompt` table for a model that charges more above a prompt
+size). Edit the file or pass `--prices PATH` (`ccmon-tui --prices` passes it on); a
+missing or invalid file exits 2. A model id matches a table exactly or minus a trailing
+`-YYYYMMDD`. A model with no table is never counted as zero: it shows as `unpriced`,
+figures that contain its tokens end in `*`, and a footer names it. In `--json` every
+usage object gains `cost` and `unpriced` (tokens), each session, task and repository a
+`cost` block beside `tokens` (with `unpriced_tokens`, `unpriced_models`), agents
+`cost_p50`/`cost_p90`, and each document a `prices` block. Limits: cost is the list
+price at the file's `as_of` date, not what a subscription charges; fast mode, US-only
+inference, web search and batch are not priced; it is a lower bound, because Claude
+Code makes helper calls (web search and fetch summaries) that it does not write to the
+transcript.
 
 Grouping: a task is a git worktree a session worked in. A session belongs to one
 repository and at most one task: the last worktree it entered (from the

@@ -117,7 +117,7 @@ func TestDispatchRowsAlignWithAndWithoutFlags(t *testing.T) {
 	if col < 0 {
 		t.Fatal("no dispatch list found")
 	}
-	for _, h := range []string{"MODEL", "IN", "OUT", "TOTAL", "DUR", "FLAGS"} {
+	for _, h := range []string{"MODEL", "COST", "TOTAL", "DUR", "FLAGS"} { // IN and OUT drop first when the description needs the room
 		if !strings.Contains(head, h) {
 			t.Fatalf("column %s missing at 140 columns: %q", h, head)
 		}
@@ -262,7 +262,8 @@ func fixtureCopy(t *testing.T, name string) string {
 func fixtureSnapshot(t *testing.T, projects, view, session string, w, h int) (string, error) {
 	t.Helper()
 	root, _ := filepath.Abs("../..")
-	r := &data.Runner{Root: root, ProjectsDir: projects, AgentsDir: filepath.Join(root, "tests", "fixtures", "agents")}
+	r := &data.Runner{Root: root, ProjectsDir: projects, AgentsDir: filepath.Join(root, "tests", "fixtures", "agents"),
+		Prices: "tests/fixtures/prices.toml"} // relative to Root, so the help golden does not hold a checkout path
 	if err := r.Check(); err != nil {
 		t.Skipf("python unavailable: %v", err)
 	}
@@ -417,6 +418,17 @@ func TestAgentOrderIsFixed(t *testing.T) {
 	out := plain(m)
 	if !(strings.Index(out, "main") < strings.Index(out, "coder") && strings.Index(out, "coder") < strings.Index(out, "explorer") && strings.Index(out, "explorer") < strings.Index(out, "odd-one")) {
 		t.Fatalf("agents view not in the fixed order:\n%s", out)
+	}
+}
+
+func TestAgentCardKeepsTheCostAt80Columns(t *testing.T) {
+	m := fakeModel(true, 80, 24)
+	u := usage(12345, 67890, 98765, 4321098)
+	u.Cost = 10.5
+	m.agents.Agents = []data.AgentRow{{Agent: "coder", Dispatches: 3, Usage: u}}
+	m.view = viewAgents
+	if out := plain(m); !strings.Contains(out, "$10.50") {
+		t.Fatalf("the cost must survive a narrow usage line:\n%s", out)
 	}
 }
 

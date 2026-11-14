@@ -139,9 +139,11 @@ func (m *model) sessionHeader(p paint, s *data.Session, w int) block {
 	if rc := m.rowTok[s.ID]; rc != nil {
 		tok = rc.Value()
 	}
-	l2 := p.sp(1) + p.b(Human(tok), th.Text) + p.t(" tokens", th.Muted) +
-		p.t("   main ", th.Muted) + p.b(HumanInt(s.Tokens.Main), th.Yellow) + p.t(fmt.Sprintf(" %.0f%%", s.Tokens.MainPct), th.Faint) +
-		p.t("   subagents ", th.Muted) + p.b(HumanInt(s.Tokens.Subagents), th.Purple) + p.t(fmt.Sprintf(" %.0f%%", s.Tokens.SubagentPct), th.Faint)
+	main := s.ByAgent["main"].Unpriced
+	l2 := p.sp(1) + p.b(m.money(s.Cost.Total, s.Cost.UnpricedTokens), th.Text) + p.t(" cost", th.Muted) +
+		p.t("   ", th.Muted) + p.b(Human(tok), th.Text) + p.t(" tokens", th.Muted) +
+		p.t("   main ", th.Muted) + p.b(m.money(s.Cost.Main, main), th.Yellow) + p.t(fmt.Sprintf(" %.0f%%", s.Cost.MainPct), th.Faint) +
+		p.t("   subagents ", th.Muted) + p.b(m.money(s.Cost.Subagents, s.Cost.UnpricedTokens-main), th.Purple) + p.t(fmt.Sprintf(" %.0f%%", s.Cost.SubagentPct), th.Faint)
 	var in, out, cw, cr int64
 	for _, u := range s.ByAgent {
 		in += u.Input
@@ -182,15 +184,29 @@ func (m *model) agentBar(p paint, s *data.Session, w int) block {
 	var legend []string
 	for i, r := range rows {
 		col := th.AgentColor(r.k)
-		segs = append(segs, seg{float64(r.v), col})
+		segs = append(segs, seg{r.v, col})
 		share := 0.0
 		if total > 0 {
-			share = float64(r.v) / float64(total) * 100
+			share = r.v / total * 100
 		}
-		legend = append(legend, p.swatch(i, col)+p.t(" ", th.Text)+p.t(r.k, th.Text)+p.t(" "+pct(share)+" "+HumanInt(r.v), th.Muted))
+		legend = append(legend, p.swatch(i, col)+p.t(" ", th.Text)+p.t(r.k, th.Text)+p.t(" "+pct(share)+" "+m.money(r.v, r.unpriced), th.Muted))
 	}
 	bar := p.sp(1) + p.stack(w-2, segs)
-	leg := p.sp(1) + strings.Join(legend, p.sp(3))
+	leg := p.sp(1)
+	for i, e := range legend { // whole entries only: a cut-off money figure reads as a smaller one
+		if i > 0 {
+			e = p.sp(3) + e
+		}
+		more := ""
+		if i < len(legend)-1 {
+			more = fmt.Sprintf("   +%d", len(legend)-1-i)
+		}
+		if width(leg)+width(e)+width(more) > w {
+			leg += p.t(fmt.Sprintf("   +%d", len(legend)-i), th.Faint)
+			break
+		}
+		leg += e
+	}
 	return block{fit(bar, w, p), fit(leg, w, p)}
 }
 
@@ -532,19 +548,20 @@ func pillsWidth(pls []pill) int {
 
 type dispCols struct {
 	agent, model, flags, desc int
-	inout                     bool
+	inout, cost               bool
 }
 
 const (
 	timeW    = 8
 	numW     = 6
 	totalW   = 7
+	costW    = 9
 	durW     = 6
 	minDescW = 14
 )
 
 // dispLayout sizes the columns from the data. When the width cannot hold them all with
-// a readable description, the numeric in/out columns go first, then model, then flags.
+// a readable description, the numeric in/out columns go first, then model, then flags, then cost.
 func (m *model) dispLayout(iw int, s, d *data.Session) dispCols {
 	var c dispCols
 	c.agent = 6
@@ -557,9 +574,12 @@ func (m *model) dispLayout(iw int, s, d *data.Session) dispCols {
 	c.agent = min(c.agent, 16)
 	c.model = min(c.model, 10)
 	c.flags = min(c.flags, 16)
-	c.inout = true
+	c.inout, c.cost = true, true
 	used := func() int {
 		u := 2 + timeW + 1 + c.agent + 1 + totalW + 1 + durW
+		if c.cost {
+			u += costW + 1
+		}
 		if c.model > 0 {
 			u += c.model + 1
 		}
@@ -579,6 +599,8 @@ func (m *model) dispLayout(iw int, s, d *data.Session) dispCols {
 			c.model = 0
 		case c.flags > 0:
 			c.flags = 0
+		case c.cost:
+			c.cost = false
 		default:
 			c.desc = max(c.desc, 0)
 			return c
@@ -606,6 +628,9 @@ func (m *model) dispatchList(p paint, s, d *data.Session, w, h, cursor int) bloc
 	}
 	if c.inout {
 		head += cell("IN", numW, true) + " " + cell("OUT", numW, true) + " "
+	}
+	if c.cost {
+		head += cell("COST", costW, true) + " "
 	}
 	head += cell("TOTAL", totalW, true) + " " + cell("DUR", durW, true)
 	if c.flags > 0 {
@@ -669,7 +694,10 @@ func (m *model) dispatchRow(s *data.Session, x data.Dispatch, selected bool, c d
 	if c.inout {
 		line += q.t(cell(HumanInt(x.Usage.Input), numW, true), th.Muted) + q.sp(1) + q.t(cell(HumanInt(x.Usage.Output), numW, true), th.Muted) + q.sp(1)
 	}
-	line += q.t(cell(HumanInt(x.Usage.Total), totalW, true), th.Text) + q.sp(1)
+	if c.cost {
+		line += q.t(cell(m.money(x.Usage.Cost, x.Usage.Unpriced), costW, true), th.Text) + q.sp(1)
+	}
+	line += q.t(cell(HumanInt(x.Usage.Total), totalW, true), th.Muted) + q.sp(1)
 	line += q.t(cell(m.durText(s, x), durW, true), th.Muted)
 	if c.flags > 0 {
 		line += q.sp(1) + fit(m.flagPills(q, m.flagList(s, x, true), c.flags), c.flags, q)
@@ -751,6 +779,7 @@ func (m *model) detailBox(p paint, s, d *data.Session, cur, w, h int) block {
 		ls = append(ls, in.t(cell(k.n, 8, false), th.Faint)+in.bar(bw, float64(k.v)/float64(maxC), k.c, false)+in.t(cell(HumanInt(k.v), 8, true), th.Text))
 	}
 	ls = append(ls, in.t(cell("total", 8, false), th.Faint)+in.b(cell(HumanInt(x.Usage.Total), iw-8, false), th.Text))
+	ls = append(ls, in.t(cell("cost", 8, false), th.Faint)+in.b(cell(m.money(x.Usage.Cost, x.Usage.Unpriced), iw-8, false), th.Text))
 	if len(x.Flags) > 0 {
 		ls = append(ls, "", m.flagPills(in, m.flagList(s, x, false), iw))
 	}
