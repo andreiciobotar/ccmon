@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"ccmon/internal/data"
+	"isshoni/internal/data"
 )
 
 // ---- fixtures ---------------------------------------------------------------------
@@ -456,7 +456,7 @@ func TestFactoryHelpAndFooter(t *testing.T) {
 // ---- goldens and screenshots ------------------------------------------------------
 
 func TestGoldenFactory(t *testing.T) {
-	shots := os.Getenv("CCMON_SHOT_DIR")
+	shots := os.Getenv("ISSHONI_SHOT_DIR")
 	for _, c := range []struct {
 		name string
 		w, h int
@@ -470,7 +470,7 @@ func TestGoldenFactory(t *testing.T) {
 		{"factory-edit-100x30", 100, 30, func(m *model) { setFactory(m, fakeFactoryRepos()...); m.fac.editing, m.fac.field = true, "12" }, false},
 		{"factory-busy-140x40", 140, 40, func(m *model) {
 			busy := alpha()
-			busy.name = "ccmon"
+			busy.name = "isshoni"
 			setFactory(m, busy, factoryRepo{name: "agent", path: "/r/agent", st: fstatus(5, manyTasks(7)...)}, factoryRepo{name: "zahn-os", path: "/r/z", st: fstatus(40, manyTasks(12)...)})
 		}, false},
 	} {

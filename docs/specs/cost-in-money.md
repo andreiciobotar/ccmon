@@ -41,10 +41,10 @@ Full count over `~/.claude/projects`: 788 files, 431,444 lines, 51,284 deduplica
 
 ## Design
 
-### Price file: `ccmon/prices.toml`
+### Price file: `isshoni/prices.toml`
 Shipped next to the code that reads it (the monitor runs from its checkout; the factory plugin is a
 separate thing). TOML because it takes comments and Python 3.11 reads it with the standard library.
-`--prices PATH` on every command reads another file instead (private rates, tests); `ccmon-tui --prices`
+`--prices PATH` on every command reads another file instead (private rates, tests); `isshoni-tui --prices`
 passes it through, like `--projects-dir`.
 
 ```toml
@@ -69,7 +69,7 @@ input = 0.50
 ...
 ```
 
-Loading (new module `ccmon/prices.py`, the one owner of prices and the cost of one message):
+Loading (new module `isshoni/prices.py`, the one owner of prices and the cost of one message):
 - `load(path=None)` returns the parsed prices; a missing file, invalid TOML, a missing or empty
   `currency`/`as_of`, a model missing one of the five rates, a `long_prompt` missing `over` or a rate, or a
   rate that is not a non-negative number is a `SessionError` naming the file and the problem (exit code 2).

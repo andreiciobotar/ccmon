@@ -1,4 +1,4 @@
-module ccmon
+module isshoni
 
 go 1.27
 

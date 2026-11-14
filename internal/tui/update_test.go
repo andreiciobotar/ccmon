@@ -11,7 +11,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"ccmon/internal/data"
+	"isshoni/internal/data"
 )
 
 // stubModel is a fake model whose runner is the stub in internal/data/testdata: python
@@ -335,7 +335,7 @@ func TestRunQuitCancelsCallsAndWaits(t *testing.T) {
 func TestRetryOnErrorScreenKeepsRange(t *testing.T) {
 	m, _ := stubModel(t)
 	m.sessions, m.details = map[string]*data.Session{}, map[string]*data.Session{}
-	m.loading, m.refreshErr = false, "ccmon: boom"
+	m.loading, m.refreshErr = false, "isshoni: boom"
 	rng, gen := m.rangeIdx, m.loadGen
 	if cmd := m.handleKey(press("r")); cmd == nil {
 		t.Fatal("r retries")

@@ -1,13 +1,13 @@
-# ccmon reference
+# isshoni reference
 
 Moved here unchanged from the README. The dashboard is specified in [specs/tui.md](specs/tui.md).
 
 Read-only CLI over `~/.claude/projects` transcripts (Python 3.11+, stdlib only).
 ```
-bin/ccmon sessions [--since 7d]     # sessions grouped by repository and task, with totals
-bin/ccmon session <id-prefix>       # totals by model/agent, warnings, dispatch timeline
-bin/ccmon agents [--since 7d]       # per agent type: tokens, p50/p90, repeats, WARN
-bin/ccmon agents --repo ccmon --task ci-workflow   # tokens by agent and model for one task
+bin/isshoni sessions [--since 7d]     # sessions grouped by repository and task, with totals
+bin/isshoni session <id-prefix>       # totals by model/agent, warnings, dispatch timeline
+bin/isshoni agents [--since 7d]       # per agent type: tokens, p50/p90, repeats, WARN
+bin/isshoni agents --repo isshoni --task ci-workflow   # tokens by agent and model for one task
 ```
 `sessions` and `agents` accept `--repo NAME` and `--task NAME` (exact match).
 Global options: `--json` (one JSON document on stdout), `--projects-dir`,
@@ -18,9 +18,9 @@ Flags in the timeline: `repeat`, `review-loop`, `rechecked`, `WARN`, plus the
 status when not `completed` (`running`, `no-run`, `orphan`).
 
 Cost: every command shows money next to tokens, priced per message from
-`ccmon/prices.toml` (per million tokens: input, output, cache write 5m and 1h, cache
+`isshoni/prices.toml` (per million tokens: input, output, cache write 5m and 1h, cache
 read; an optional `long_prompt` table for a model that charges more above a prompt
-size). Edit the file or pass `--prices PATH` (`ccmon-tui --prices` passes it on); a
+size). Edit the file or pass `--prices PATH` (`isshoni-tui --prices` passes it on); a
 missing or invalid file exits 2. A model id matches a table exactly or minus a trailing
 `-YYYYMMDD`. A model with no table is never counted as zero: it shows as `unpriced`,
 figures that contain its tokens end in `*`, and a footer names it. In `--json` every

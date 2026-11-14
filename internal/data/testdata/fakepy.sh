@@ -1,5 +1,5 @@
 #!/bin/sh
-# Stand-in for `python3 -m ccmon <cmd> [id] --json ...` and for `python3 <root>/factory/bin/factory status --json`.
+# Stand-in for `python3 -m isshoni <cmd> [id] --json ...` and for `python3 <root>/factory/bin/factory status --json`.
 # Logs each call to $STUBDIR/calls; a file named fail or hang in $STUBDIR makes every call fail or never return.
 # $STUBDIR/sessions.json and $STUBDIR/status.json, when present, are what the sessions and factory calls print.
 if [ "$2" = status ]; then

@@ -3,8 +3,8 @@ import tempfile
 import unittest
 
 from tests.support import PRICES, PROJECTS, SESSION, by_desc, load
-from ccmon import transcript
-from ccmon.transcript import SessionError
+from isshoni import transcript
+from isshoni.transcript import SessionError
 
 
 class TranscriptTests(unittest.TestCase):

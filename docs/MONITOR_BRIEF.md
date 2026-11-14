@@ -4,7 +4,7 @@ Paste this into a Fable session (`/model fable`, plan mode) and say:
 "Plan this, then build it using the explorer, coder and reviewer agents."
 
 ## Goal
-A CLI tool, `ccmon`, that reads Claude Code session transcripts and reports how
+A CLI tool, `isshoni`, that reads Claude Code session transcripts and reports how
 the main session delegates to subagents, so we can see if the Fable-orchestrator
 setup is efficient.
 
@@ -13,7 +13,7 @@ setup is efficient.
    Subagent runs are recorded too (either inline as sidechain messages or as
    separate files near the session; the format depends on the Claude Code version).
 2. **Hook log (optional, live):** a `PreToolUse` hook on the subagent tool and a
-   `SubagentStop` hook append one JSON line per event to `~/.claude/ccmon/events.jsonl`.
+   `SubagentStop` hook append one JSON line per event to `~/.claude/isshoni/events.jsonl`.
 
 **Step 0 is mandatory: have the explorer inspect real transcript files and report
 the actual schema** (field names for model, usage, tool calls, sidechain/subagent
@@ -49,10 +49,10 @@ Re-dispatches (the signal-quality metric):
   the `path:line` files it cited. Healthy in moderation; record the rate.
 
 ## Output
-- `ccmon sessions [--since 7d]`: one row per session with the totals above.
-- `ccmon session <id>`: a timeline of dispatches: time, agent, model, tokens in/out,
+- `isshoni sessions [--since 7d]`: one row per session with the totals above.
+- `isshoni session <id>`: a timeline of dispatches: time, agent, model, tokens in/out,
   duration, re-dispatch flags, first line of the description.
-- `ccmon agents [--since 7d]`: per-agent-type aggregates.
+- `isshoni agents [--since 7d]`: per-agent-type aggregates.
 - `--json` on every command for piping into other tools.
 
 ## Constraints
@@ -63,6 +63,6 @@ Re-dispatches (the signal-quality metric):
   the dispatch linkage and both re-dispatch detectors.
 
 ## Done when
-- Running `ccmon session <id>` on the session that built this tool shows its own
+- Running `isshoni session <id>` on the session that built this tool shows its own
   explorer/coder/reviewer dispatches with sensible numbers.
 - The reviewer returns APPROVE.

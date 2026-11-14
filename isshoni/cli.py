@@ -276,13 +276,13 @@ def _common(suppress):
     p.add_argument("--projects-dir", default=d or DEFAULT_PROJECTS, help="transcripts root (default %s)" % DEFAULT_PROJECTS)
     p.add_argument("--agents-dir", default=d, help="agent definitions dir (overrides cwd/.claude/agents and ~/.claude/agents)")
     p.add_argument("--repeat-threshold", type=float, default=d or 0.5, help="Jaccard threshold for repeat flag (default 0.5)")
-    p.add_argument("--prices", default=d, help="price file (default ccmon/prices.toml)")
+    p.add_argument("--prices", default=d, help="price file (default isshoni/prices.toml)")
     p.add_argument("--json", action="store_true", default=d or False, help="emit one JSON document")
     return p
 
 
 def build_parser():
-    p = argparse.ArgumentParser(prog="ccmon", description="Report how a Claude Code main session delegates to subagents.",
+    p = argparse.ArgumentParser(prog="isshoni", description="Report how a Claude Code main session delegates to subagents.",
                                 parents=[_common(False)])
     sub = p.add_subparsers(dest="command", required=True)
     since = argparse.ArgumentParser(add_help=False)
@@ -305,7 +305,7 @@ def main(argv=None):
     try:
         return args.func(args)
     except SessionError as e:
-        print("ccmon: %s" % e, file=sys.stderr)
+        print("isshoni: %s" % e, file=sys.stderr)
         return 2
     except BrokenPipeError:
         return 0

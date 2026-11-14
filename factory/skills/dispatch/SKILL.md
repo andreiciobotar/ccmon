@@ -53,7 +53,7 @@ A scheduled script (`factory watch`, every 30 minutes, no model) checks the fact
 - The site manager does not merge; nothing merges without the human's word.
 
 ## Critique of the factory
-You are also here to make the factory better. Watch how it performs, using lead reports, `factory status` and, when installed, `ccmon sessions --json` and `ccmon session <id> --json`:
+You are also here to make the factory better. Watch how it performs, using lead reports, `factory status` and, when installed, `isshoni sessions --json` and `isshoni session <id> --json`:
 - where review loops and re-dispatches pile up, and why;
 - briefs that split badly or came back with questions a better brief would have answered, and questions a lead should have settled itself (a `QUESTION` is an escalation);
 - rules the leads keep tripping over, and rules nobody needed;

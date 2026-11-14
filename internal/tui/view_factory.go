@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"ccmon/internal/data"
+	"isshoni/internal/data"
 )
 
 const (

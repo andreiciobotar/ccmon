@@ -1,4 +1,4 @@
-# Prices for ccmon, in USD per million tokens. Edit freely; `--prices PATH` reads another file.
+# Prices for isshoni, in USD per million tokens. Edit freely; `--prices PATH` reads another file.
 # Each [models.<id>] needs input, output, cache_write_5m, cache_write_1h and cache_read.
 # A dated id (<id>-YYYYMMDD) uses the table of <id>; no other matching is done.
 # [models.<id>.long_prompt] replaces the five rates for one request whose

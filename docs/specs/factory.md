@@ -127,7 +127,7 @@ A task that turns out to be several is reported with `SPLIT:` and one brief per 
 Every role runs one plain command per Bash call, because worktree isolation refuses compound commands that mention git; a longer step is a script file under the job's temporary directory (lead, coder) or `python3 -c` (explorer and reviewer, which have no Write tool).
 
 ## Dispatcher's critique duty
-The dispatcher watches how the factory performs (lead reports, `factory status`, and `ccmon --json` when installed) and tells the human what to change: where review loops pile up, which briefs split badly, which rules leads trip over, what the tokens bought. It proposes edits to the plugin's files; the human decides.
+The dispatcher watches how the factory performs (lead reports, `factory status`, and `isshoni --json` when installed) and tells the human what to change: where review loops pile up, which briefs split badly, which rules leads trip over, what the tokens bought. It proposes edits to the plugin's files; the human decides.
 
 ## Tests
 - Slug validation, both sides of every rule.

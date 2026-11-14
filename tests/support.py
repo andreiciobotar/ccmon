@@ -6,7 +6,7 @@ ROOT = os.path.dirname(HERE)
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from ccmon import metrics, prices, transcript  # noqa: E402
+from isshoni import metrics, prices, transcript  # noqa: E402
 
 PRICES_PATH = os.path.join(HERE, "fixtures", "prices.toml")
 PRICES = prices.load(PRICES_PATH)

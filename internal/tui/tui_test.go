@@ -10,7 +10,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"ccmon/internal/data"
+	"isshoni/internal/data"
 )
 
 func TestMain(m *testing.M) {
@@ -195,8 +195,8 @@ func TestHelpSaysWherePricesComeFrom(t *testing.T) {
 	}
 	m = fakeModel(true, 80, 24)
 	m.help = true
-	m.prices.Path = "/home/someone/a/very/long/path/to/the/project/config/ccmon/prices.toml"
-	if out := plain(m); !strings.Contains(out, "/ccmon/prices.toml (USD, as of 2026-11-14)") || !strings.Contains(out, "Prices: …") {
+	m.prices.Path = "/home/someone/a/very/long/path/to/the/project/config/isshoni/prices.toml"
+	if out := plain(m); !strings.Contains(out, "/isshoni/prices.toml (USD, as of 2026-11-14)") || !strings.Contains(out, "Prices: …") {
 		t.Fatalf("a long path is cut from the left and still shown at 80x24:\n%s", out)
 	}
 }
@@ -629,7 +629,7 @@ func TestRenderEmptyAndStates(t *testing.T) {
 			m.view = v
 			checkFrame(t, "loading", m, false)
 			// error with nothing loaded
-			m.loading, m.refreshErr = false, "ccmon: boom\nsecond line with a very long text "+strings.Repeat("x", 200)
+			m.loading, m.refreshErr = false, "isshoni: boom\nsecond line with a very long text "+strings.Repeat("x", 200)
 			checkFrame(t, "error", m, false)
 			// fatal
 			m.fatal = data.ErrPython
@@ -968,5 +968,35 @@ func TestScrollPullsBackWhenTheWindowGrows(t *testing.T) {
 	m.fixScroll()
 	if m.top != 0 {
 		t.Fatalf("top %d after growing: group rows above are hidden", m.top)
+	}
+}
+
+// The kanji is three double-width cells: the header stays exactly as wide as the
+// window, and from kanjiMinWidth the kanji never costs the clock, even with every
+// right-hand part showing (live sessions, reloading).
+func TestHeaderBrand(t *testing.T) {
+	for _, noColor := range []bool{true, false} {
+		for _, w := range []int{minWidth, 80, 100, kanjiMinWidth - 1, kanjiMinWidth, 140} {
+			m := fakeModel(noColor, w, 30)
+			m.loading, m.lastUpdate = true, m.now()
+			for id := range m.sessions {
+				m.seen[id] = m.now()
+			}
+			raw := strings.SplitN(m.Render(), "\n", 2)[0]
+			head := ansi.Strip(raw)
+			name := fmt.Sprintf("noColor=%v w=%d", noColor, w)
+			if width(raw) != w {
+				t.Errorf("%s: header is %d cells: %q", name, width(raw), head)
+			}
+			if !strings.Contains(head, " Isshoni ") {
+				t.Errorf("%s: no name: %q", name, head)
+			}
+			if got, want := strings.Contains(head, "一緒に"), w >= kanjiMinWidth; got != want {
+				t.Errorf("%s: kanji shown=%v, want %v: %q", name, got, want, head)
+			}
+			if w >= kanjiMinWidth && !(strings.Contains(head, "3 live") && strings.Contains(head, "reloading") && strings.Contains(head, m.lastUpdate.Local().Format("15:04:05"))) {
+				t.Errorf("%s: the kanji pushed something out: %q", name, head)
+			}
+		}
 	}
 }
