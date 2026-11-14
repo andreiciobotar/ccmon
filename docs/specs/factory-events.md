@@ -132,6 +132,7 @@ A failed write is ignored; output and exit codes of `new`, `status` and `clean` 
 - Within a file, lines are in write order; a reader that needs strict time order across the unsuffixed file and the month files sorts by `ts`. A session still running a plugin copy from before the month files keeps appending to the unsuffixed files; they are read, so nothing is lost, and while one is being written no older month file of that log is deleted.
 - A crash between carrying feedback lines and deleting their file, or two sessions pruning at once, leaves duplicate lines; they fold to the same entries.
 - `factory feedback` lists carried entries after newer ones.
+- A `feedback set` that reopens a closed entry more than 12 months old in the same instant its file is deleted is lost. Two status lines for one entry with the same `ts`, one of them carried, may swap which wins.
 - A month file has no size limit of its own: it holds what one month produces (about 280 bytes per event; 30 KB of events in the first ten hours of use).
 - A subagent that never calls `SubagentHandback` files nothing; the lead files its items with `factory feedback add`.
 - `PermissionDenied`, `TaskStarted` and `TaskRemoved` have not been seen in a live session (the end-to-end lead was started without `factory new`, which requires the dispatcher's session name); the last two are covered by tests.

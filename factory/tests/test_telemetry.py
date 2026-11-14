@@ -564,6 +564,7 @@ class PruneTests(LogCase):
             feedback_2025_03=[{"id": "b", "ts": "2025-03-01T00:00:00Z", "status": "open"}])
         self.assertEqual(names, ["feedback-2026-11.jsonl"])
         self.assertEqual(self.folded(), {"a": ("accepted", "u"), "b": ("open", None)})
+        self.assertEqual(len(self.lines("feedback")), 5)
 
     def test_closed_in_the_old_file_and_refiled_later_stays_closed(self):
         names = self.prune_feedback(feedback_2025_01=self.entry("a", "2025-01-01T00:00:00Z", "done"),
