@@ -1,0 +1,40 @@
+ ccmon  1 Dashboard [2 Session] 3 Agents                                                               24h  7d  30d [all]  ○ idle  00:00:00 
+ Dashboard › cwd › fixture-                                                                                                                 
+ ○ fixture-0001  cwd  Jan 01 10:00 → 10:11 · 11m40s                                                                                         
+ 670 tokens   main 300 45%   subagents 370 55%   in 66 · out 112 · cw 119 · cr 373                                                          
+ repeats 1  ·  review loops 3  ·  warnings 1  ·  re-check 67% (2/3)  ·  malformed 2                                                         
+ ██████████████████████████████████████████████████████████████▓▓▓▓▒▒▒▒▒▒▒░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░# 
+ █ main 45% 300   ▓ coder 3% 18   ▒ reviewer 5% 36   ░ explorer 47% 312   # general-purpose 1% 4                                            
+╭─ Timeline ───────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ ● coder           ┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈███████┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈░┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈░┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈ │
+│ ● reviewer        ┈┈┈┈┈┈┈┈█████████┈┈┈┈┈┈┈┈┈┈┈┈██████┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈██████┈┈┈┈┈┈┈┈┈┈┈┈┈┈███████┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈ │
+│ ● explorer        ▓▓▓▓▓▓┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈░┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈██████┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈█████ │
+│                   ▒▒┈████┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈██████┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈▒┈┈ │
+│                   ┈▒▒┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈ │
+│ ● general-purpose ┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈░┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈ │
+│                   10:00                                                                                                            10:11 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭─ Dispatches 18 ──────────────────────────────────────────────────────────────────────────────────────╮ ╭─ Dispatch 1/18 ─────────────────╮
+│   TIME     AGENT           MODEL          IN    OUT   TOTAL    DUR FLAGS            DESCRIPTION      │ │ Find config loader              │
+│ > 10:00:10 explorer        haiku-5-5      11     21     253    30s [rechecked]      Find config loa… │ │ ● explorer · completed          │
+│   10:00:15   explorer      haiku-5-5       1      1       4      - [unfinished]     Nested lookup    │ │ 10:00:10 → 10:00:40 · 30s       │
+│   10:00:20 explorer        haiku-5-5       2      4      20      - [unfinished] +1  Find config loa… │ │ models  ■ haiku-5-5             │
+│   10:00:30 explorer        sonnet-5-5      7      8      15    20s [WARN]           Map database mi… │ │                                 │
+│   10:01:00 reviewer        opus-5-5        2      3      14    45s                  Review change    │ │ input   █░░░░░░░░░░░░░      11  │
+│   10:02:00 coder           sonnet-5-5      3      4      18    38s [loop] [loop↻1]  Apply fixes      │ │ output  █░░░░░░░░░░░░░      21  │
+│   10:03:00 reviewer        opus-5-5        2      3      14    30s                  Second pass      │ │ cache-w ░░░░░░░░░░░░░░       1  │
+│   10:03:40 explorer                        0      0       0      - [no-run]         Ghost dispatch   │ │ cache-r ████████████░░     220  │
+│   10:05:00 general-purpose haiku-5-5       1      1       4     0s [orphan]                          │ │ total   253                     │
+│   10:06:00 reviewer        opus-5-5        1      1       4    30s                  Handback review  │ │                                 │
+│   10:07:00 coder                           0      0       0      - [no-run] [loop]  Second fix round │ │ [rechecked]                     │
+│   10:07:10 explorer        haiku-5-5       1      1       4    30s [rechecked]      Helper lookup    │ │                                 │
+│   10:07:15 explorer        haiku-5-5       1      1       4    31s                  Entry point loo… │ │                                 │
+│   10:08:00 reviewer        opus-5-5        1      1       4    31s                  Another handbac… │ │                                 │
+│   10:10:00 coder                           0      0       0      - [no-run]         Third fix round  │ │                                 │
+│   10:11:00 explorer        haiku-5-5       1      1       4    12s                  Queued only      │ │                                 │
+│   10:11:10 explorer        haiku-5-5       1      1       4      - [unfinished]     Wrong attachmen… │ │                                 │
+│   10:11:20 explorer        haiku-5-5       1      1       4     7s                  Both sources     │ │                                 │
+│                                                                                                      │ │                                 │
+│                                                                                                      │ │                                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────╯ ╰─────────────────────────────────╯
+ ↑↓/jk move  ·  enter open  ·  esc back  ·  f follow  ·  tab next view  ·  ? help  ·  q quit                                                
