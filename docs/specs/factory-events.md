@@ -72,14 +72,17 @@ Feedback is filed by the same call from two texts: `tool_input.message` of a `Su
 - Entry line: the tags, `id`, `text`, `status: "open"`. `id` is the first 12 hex digits of the SHA-256 of `repo`, `slug`, `role` and `text` joined by NUL, so the same item filed again (a resumed subagent hands back twice) has the same id.
 - Status line: `id`, `ts`, `status`, and `pr` when given. Lines are only ever appended.
 - Reading: an entry is the first line with that `id` and a `text`; its status and `pr` come from the last status line for the id (no `pr` on that line: none shown), else `open`. Lines that are not JSON objects are skipped.
+- Kind: an entry whose text starts with `DECISION:` is a `decision` (a key decision a lead took without asking: what and why), every other entry an `issue`. The kind is computed on reading and never stored, so entries filed before kinds existed read correctly, and an item of a report's section that starts with `DECISION:` is a decision too.
 
 Commands:
 ```
-factory feedback [--json] [--status open|accepted|rejected|done]
+factory feedback [--json] [--status open|accepted|rejected|done] [--kind issue|decision]
 factory feedback add --role <role> [--slug <slug>] [--model <model>]   # text on stdin
+factory feedback decide "<what>. Why: <why>"
 factory feedback set <id> open|accepted|rejected|done [--pr <url>]
 ```
-- The listing prints one entry per line: id, status, slug, role, the first 100 characters of the text on one line; `--json` prints the entries as a JSON array with every field.
+- The listing prints one entry per line: id, status, slug, role, the first 100 characters of the text on one line; `--json` prints the entries as a JSON array with every field plus `kind`. `--kind` and `--status` each narrow the listing; without `--kind` both kinds show.
+- `decide` files one decision: whitespace runs become single spaces and the text is stored as `DECISION: <text>`, with the tags of the working directory and session (role `lead` in a task worktree). Empty, or longer than 200 characters: exit 2, nothing filed. It prints the id.
 - `add` files what a hook could not: stdin is a report (its section is used) or, without a heading line, the items themselves. Tags come from the working directory and session; `--slug` and `--model` override them. It prints the ids filed, or `no items`.
 - `set` takes an id or a unique prefix of one; no match or several is an error (exit 2).
 
@@ -97,7 +100,7 @@ Lists may be empty; strings must be non-empty. Run outside a task worktree (no s
 A failed write is ignored; output and exit codes of `new`, `status` and `clean` do not change.
 
 ### Errors
-`retro`, `feedback add` and `feedback set` exit 1 with one line when the store cannot be written, 2 on bad input.
+`retro`, `feedback add`, `feedback decide` and `feedback set` exit 1 with one line when the store cannot be written, 2 on bad input.
 
 ### Rules
 - `factory/agents/{explorer,coder,reviewer}.md`: the report format gains a last section `## Factory feedback`: at most three things about the brief, the rules, the tools or permissions that cost time or forced a guess, not about the task; each with what happened, what it cost and a suggested change; `none` otherwise. Filed automatically.

@@ -93,13 +93,14 @@ factory new <slug> (--brief <text> | --brief-file <path>) [--dispatcher <session
 factory status [--json]
 factory clean [--dry-run]
 factory retro                                   # a lead's retrospective, JSON on stdin
-factory feedback [--json] [--status open|accepted|rejected|done]
+factory feedback [--json] [--status open|accepted|rejected|done] [--kind issue|decision]
 factory feedback add --role <role> [--slug <slug>] [--model <model>]   # items on stdin
+factory feedback decide "<what>. Why: <why>"    # a lead's key decision, one line, 200 characters at most
 factory feedback set <id> open|accepted|rejected|done [--pr <url>]
 ```
 `new` starts a lead in `.claude/worktrees/<slug>`; `--base` stacks it on another open task's branch. The calling session must be named `--dispatcher` (default `dispatcher-<repo directory name>`); name it with `/rename <name>`, or `new` refuses. `new` refuses when the repo is at its cap of tasks in motion; a task stops counting once its pull request is open (or merged) and no session is unfinished in it (an open interactive session counts as unfinished), so work waiting for review does not block new work. `status` shows one row per task with its phase (`motion`, `review`, `merged`), session, changes, distance from the default branch, pull request and staleness, then the number in motion against the cap the number waiting for review and the number merged and not yet cleaned; `clean` removes a task only on positive evidence (pull request merged into the default branch, nothing uncommitted, no live session, nothing stacked on it), removes nothing when sessions cannot be listed, and says why it kept the rest.
 
-The factory records what happens in three JSONL files under `~/.claude/factory/`: `events.jsonl` (the plugin's hooks append to it automatically, and `new` and `clean` add task events), `retros.jsonl` (lead retrospectives from `factory retro`) and `feedback.jsonl` (the "Factory feedback" items from reports, with their status). Formats are in `docs/specs/factory-events.md`.
+The factory records what happens in three JSONL files under `~/.claude/factory/`: `events.jsonl` (the plugin's hooks append to it automatically, and `new` and `clean` add task events), `retros.jsonl` (lead retrospectives from `factory retro`) and `feedback.jsonl` (the outbox: issues from the "Factory feedback" items of reports and the key decisions leads took, with their status). Formats are in `docs/specs/factory-events.md`.
 
 Exit codes: 0 success, 2 usage or precondition error, 1 a `claude`, `git` or `gh` step failed.
 
