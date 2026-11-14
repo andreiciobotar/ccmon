@@ -25,13 +25,21 @@ def percentile(values, p):
     return vals[lo] + (vals[hi] - vals[lo]) * (k - lo)
 
 
+def role(agent_type):
+    """A plugin's agent is dispatched as <plugin>:<name>; its role is the name."""
+    return agent_type.rpartition(":")[2]
+
+
 # ---- model WARN -----------------------------------------------------------
 
 def expected_model(agent_type, cwd, agents_dir=None):
     dirs = []
     if agents_dir:
+        # the user said where the definitions are: a plugin agent is looked up there by its role
         dirs.append(os.path.expanduser(agents_dir))
+        agent_type = role(agent_type or "")
     else:
+        # nothing records where a plugin's definitions were loaded from: a namespaced type finds no file here
         if cwd:
             dirs.append(os.path.join(cwd, ".claude", "agents"))
         dirs.append(os.path.expanduser("~/.claude/agents"))
@@ -121,7 +129,7 @@ def analyze(session, agents_dir=None, repeat_threshold=0.5):
     # repeats
     by_type = {}
     for d in ds:
-        by_type.setdefault(d.agent_type, []).append(d)
+        by_type.setdefault(role(d.agent_type), []).append(d)
     for lst in by_type.values():
         prior = []
         for d in lst:
@@ -139,14 +147,14 @@ def analyze(session, agents_dir=None, repeat_threshold=0.5):
     # review loops
     events = []  # (ts, order, kind, dispatch)
     for d in ds:
-        if d.agent_type == "reviewer":
+        if role(d.agent_type) == "reviewer":
             for ts, text in d.results:
                 if _is_changes_needed(text):
                     events.append((ts or EPOCH, 0, "verdict", d))
-        elif d.agent_type == "coder":
+        elif role(d.agent_type) == "coder":
             events.append((d.ts or EPOCH, 1, "dispatch", d))
     for ts, d in session.sends:
-        if d.agent_type == "coder":
+        if role(d.agent_type) == "coder":
             events.append((ts or EPOCH, 1, "resume", d))
     events.sort(key=lambda e: (e[0], e[1]))
     pending = []  # FIFO of (verdict ts, reviewer dispatch)
@@ -176,7 +184,7 @@ def analyze(session, agents_dir=None, repeat_threshold=0.5):
     # re-check
     session.recheck_candidates = session.rechecked = 0
     for d in ds:
-        if d.agent_type not in EXPLORER_TYPES:
+        if role(d.agent_type) not in EXPLORER_TYPES:
             continue
         cited = set()
         for _, text in d.results:
