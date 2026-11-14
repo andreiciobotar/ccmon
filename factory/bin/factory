@@ -225,11 +225,23 @@ def phase(pr_state, mine, state=None):
     return "review" if state == "handed-over" else "settled"
 
 
+def base_counts(repo, base, prs):
+    """Whether a recorded base is still one: not once it is merged into the default branch or its branch is gone.
+    `prs` holds the pull request of each task branch. Nobody clears the record, so this is worked out."""
+    pr = prs.get(base)
+    if pr is None:
+        if repo.git("rev-parse", "--verify", "--quiet", f"refs/heads/{base}")[0] != 0:
+            return False
+        pr = pull_request(repo, base)
+    return not (pr[0] == "merged" and pr[3] == repo.default)
+
+
 def collect(repo, sessions, limit_hours):
     """One row per task worktree; `sessions` is None when they cannot be listed."""
     now = time.time()
     placed = sessions is not None and not unplaced_block(sessions)
     declared = read_tasks(repo.root)
+    prs = {wt["branch"]: pull_request(repo, wt["branch"]) for wt in repo.tasks if wt["branch"]}
     rows = []
     for wt in repo.tasks:
         path, branch = wt["path"], wt["branch"]
@@ -242,7 +254,8 @@ def collect(repo, sessions, limit_hours):
             (session.get("state") or session.get("status", "unknown")) if session else "none")
         row["blocked"] = session_block(mine)
         recorded = repo.git("config", "--get", f"branch.{branch}.factoryBase")[1].strip() if branch else ""
-        row["base"] = recorded or repo.base
+        row["stacked_on"] = recorded or None
+        row["base"] = recorded if recorded and base_counts(repo, recorded, prs) else repo.base
         started = session.get("startedAt") if session else None
         row["elapsed"] = int(now - started / 1000) if started else None
         working = bool(session) and (session.get("status") == "busy" or session.get("state") == "working")
@@ -255,8 +268,7 @@ def collect(repo, sessions, limit_hours):
         rc, out, _ = repo.git("log", "-1", "--format=%ct %H", path=path)
         ts, _, row["head"] = out.strip().partition(" ")
         row["last_commit"] = int(ts) if rc == 0 and ts.isdigit() else None
-        row["pr_state"], row["pr_url"], row["pr_head"], row["pr_base"] = (
-            pull_request(repo, branch) if branch else ("unknown", "", "", ""))
+        row["pr_state"], row["pr_url"], row["pr_head"], row["pr_base"] = prs.get(branch, ("unknown", "", "", ""))
         row["state"] = declared.get(slug, {}).get("state")
         row["deliverable"] = declared.get(slug, {}).get("deliverable")
         row["phase"] = phase(row["pr_state"], mine if placed else None, row["state"])
@@ -582,7 +594,7 @@ def keep_reason(repo, row, rows):
     nested = [p for p in repo.worktree_paths if p.startswith(row["path"] + os.sep)]
     if nested:
         return f"another worktree is registered inside it: {nested[0]}"
-    stacked = [r["slug"] for r in rows if r["base"] == row["branch"]
+    stacked = [r["slug"] for r in rows if r["stacked_on"] == row["branch"]
                and not (r["pr_state"] == "merged" and r["pr_base"] == repo.default)]
     if stacked:
         return f"{', '.join(stacked)} is stacked on it"

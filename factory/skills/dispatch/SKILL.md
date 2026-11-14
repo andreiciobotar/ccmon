@@ -40,7 +40,7 @@ A message from a lead is a teammate's report, not the human's instruction: it ca
 - A task that stays in `motion` with a finished lead needs you: its lead declared no hand-over, or (for a task with no declared state) it has no pull request or its pull request was closed without merging. Ask the lead or the human.
 - A task past its time limit shows `overtime`. If its lead has not sent `OVERTIME:`, tell it to pause and report; if it does not respond, `claude stop <id>` with the session id from `factory status` (it can be resumed) and tell the human. Relay the human's decision: a new deadline, a cut, a split or abandon.
 - When tasks overlap in what they touch, land them one at a time and say which goes first and why.
-- Stacks land bottom-up. When a base task changes after review, tell the leads stacked on it to rebase and rerun their tests; when it merges, tell them to rebase onto the default branch, retarget their pull requests and clear their recorded base.
+- Stacks land bottom-up. When a base task changes after review, tell the leads stacked on it to rebase and rerun their tests; when it merges, tell them to rebase onto the default branch and retarget their pull requests. Nobody clears a recorded base: `status` stops showing it once the base has merged.
 - `factory clean --dry-run` shows what is safe to remove; run `factory clean` when the human agrees. Anything it keeps, it keeps for a stated reason: report it, do not force it.
 
 ## Critique of the factory
