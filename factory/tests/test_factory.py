@@ -509,6 +509,7 @@ class NewTests(unittest.TestCase):
         frees = {
             "open, no session": ([{"state": "OPEN"}], ()),
             "open, finished session": ([{"state": "OPEN"}], [done]),
+            "open, session idle with another state word": ([{"state": "OPEN"}], [dict(done, state="working")]),
             "merged, not cleaned": ([{"state": "MERGED"}], ()),
         }
         for name, (pr, sessions) in frees.items():
@@ -521,7 +522,7 @@ class NewTests(unittest.TestCase):
             "closed": ([{"state": "CLOSED"}], ()),
             "state unknown": ("not a list", ()),
             "open, session working": ([{"state": "OPEN"}], [dict(done, status="busy", state="working")]),
-            "open, session idle but not done": ([{"state": "OPEN"}], [dict(done, state="working")]),
+            "open, session waiting": ([{"state": "OPEN"}], [dict(done, status="waiting")]),
             "open, interactive session": ([{"state": "OPEN"}], [dict(done, kind="interactive")]),
             "merged, session working": ([{"state": "MERGED"}], [dict(done, status="busy", state="working")]),
             "open, an unfinished session without cwd": ([{"state": "OPEN"}], [{"kind": "background", "status": "busy"}]),
@@ -820,8 +821,10 @@ class StatusTests(unittest.TestCase):
         cases = [
             ("working past the limit", session(2.5), True),
             ("working within the limit", session(1.5), False),
-            ("state working, status idle", session(2.5, status="idle"), True),
-            ("done past the limit", session(2.5, status="idle", state="done"), False),
+            ("waiting past the limit", session(2.5, status="waiting"), True),
+            ("turn ended, state working", session(2.5, status="idle"), False),
+            ("turn ended, state done", session(2.5, status="idle", state="done"), False),
+            ("stopped", {k: v for k, v in session(2.5, state="stopped").items() if k != "status"}, False),
         ]
         for name, s, overtime in cases:
             with self.subTest(name):
@@ -910,7 +913,6 @@ class CleanTests(unittest.TestCase):
             "busy session": (dict(sessions=[bg(status="busy", state="working")]),
                              "not finished \\(status busy, state working\\)"),
             "waiting session": (dict(sessions=[bg(status="waiting")]), "not finished \\(status waiting, state done\\)"),
-            "idle but working": (dict(sessions=[bg(state="working")]), "not finished \\(status idle, state working\\)"),
             "unknown status": (dict(sessions=[bg(status="needs_input")]), "status needs_input, state done"),
             "missing status, process alive": (dict(sessions=[EXITED | {"pid": 7, "cwd": f"{WT}/x"}]),
                                               "status missing, state done"),
@@ -925,9 +927,12 @@ class CleanTests(unittest.TestCase):
                 dict(entries=[task_entry("x") + ("",)]), f"locked and no session .*run: git worktree unlock {WT}/x$"),
             "locked, exited session of another name": (
                 dict(entries=[task_entry("x") + ("",)], sessions=[EXITED | {"name": "y"}]), "locked and no session"),
-            "missing state": (dict(sessions=[{"id": "ab", "cwd": f"{WT}/x", "kind": "background", "status": "idle"}]),
-                              "status idle, state missing"),
-            "one finished, one not": (dict(sessions=[bg(), bg(id="cd", state="working")]), "session cd is not finished"),
+            "exited, no state": (dict(sessions=[{k: v for k, v in EXITED.items() if k != "state"}]),
+                                 "status missing, state missing"),
+            "pid, no status, stopped": (dict(sessions=[EXITED | {"pid": 7, "cwd": f"{WT}/x", "state": "stopped"}]),
+                                        "status missing, state stopped"),
+            "one finished, one not": (dict(sessions=[bg(pid=1), bg(id="cd", pid=2, status="busy")]),
+                                      "session cd is not finished"),
             "worktree nested inside": (
                 dict(entries=[task_entry("x"), (f"{WT}/x/.claude/worktrees/agent-1", "worktree-agent-1", False)]),
                 "registered inside it: .*/x/.claude/worktrees/agent-1"),
@@ -1084,6 +1089,19 @@ class CleanTests(unittest.TestCase):
         self.assertIn(["claude", "rm", "ab12"], fake.calls)
         self.assertFalse(fake.ran("git", "worktree", "remove"))
         self.assertFalse(fake.ran("git", "branch"))
+
+    def test_a_turn_that_has_ended_is_finished_whatever_the_state_word(self):
+        live = {"id": "ab12", "cwd": f"{WT}/x", "kind": "background", "status": "idle", "pid": 7}
+        cases = {"idle, working": (live | {"state": "working"}, "ab12"),
+                 "idle, blocked": (live | {"state": "blocked"}, "ab12"),
+                 "idle, no state": (live, "ab12"),
+                 "stopped": (EXITED | {"state": "stopped"}, "ex1"),
+                 "stopped, cwd still in the worktree": (EXITED | {"state": "stopped", "cwd": f"{WT}/x"}, "ex1")}
+        for name, (session, sid) in cases.items():
+            with self.subTest(name):
+                code, out, _, fake = self.clean(sessions=[session])
+                self.assertEqual((code, out.strip()), (0, "removed x"))
+                self.assertIn(["claude", "rm", sid], fake.calls)
 
     def test_exited_lead_is_removed_with_claude_rm(self):
         locked = [task_entry("x") + ("claude session x (pid 7 start Sat)",)]

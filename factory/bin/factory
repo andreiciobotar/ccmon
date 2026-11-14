@@ -173,9 +173,14 @@ def list_sessions():
 
 
 def finished(s):
-    """A background session that has ended its turn (`idle`) or whose process has exited (no status, no pid)."""
-    return s.get("kind") == "background" and s.get("state") == "done" and (
-        s.get("status") == "idle" or ("status" not in s and "pid" not in s))
+    """A background session whose turn has ended: its process reports `idle` (nothing running or queued), or is
+    gone (no status, no pid) and left `done` or `stopped`. The `state` of a live session is its own summary of
+    its last turn (`done`, `blocked`, `working`) and does not say whether it is running, so it is not read."""
+    if s.get("kind") != "background":
+        return False
+    if "status" in s:
+        return s["status"] == "idle"
+    return "pid" not in s and s.get("state") in ("done", "stopped")
 
 
 def unplaced_block(sessions):
@@ -283,8 +288,8 @@ def collect(repo, sessions, limit_hours):
         row["base"] = recorded if recorded and base_counts(repo, recorded, prs) else repo.base
         started = session.get("startedAt") if session else None
         row["elapsed"] = int(now - started / 1000) if started else None
-        working = bool(session) and (session.get("status") == "busy" or session.get("state") == "working")
-        row["overtime"] = working and row["elapsed"] is not None and row["elapsed"] > limit_hours * 3600
+        running = bool(session) and not finished(session)
+        row["overtime"] = running and row["elapsed"] is not None and row["elapsed"] > limit_hours * 3600
         rc, out, _ = repo.git("status", "--porcelain", path=path)
         row["dirty"] = bool(out.strip()) if rc == 0 else None
         rc, out, _ = repo.git("rev-list", "--left-right", "--count", f"{row['base']}...HEAD", path=path)
@@ -1066,7 +1071,7 @@ def c_quiet(p, threshold):
     found = []
     for r in phased(p):
         s = task_session(p, r["path"])
-        if r["phase"] == "motion" and s and (s.get("status") == "busy" or s.get("state") == "working"):
+        if r["phase"] == "motion" and s and not finished(s):
             t = last_activity(p, r, s)
             if t and p["now"] - t > threshold * 60:
                 found.append((r["slug"], r["slug"], f"no activity for {age(t, p['now'])}"))
