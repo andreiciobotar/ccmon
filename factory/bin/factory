@@ -287,6 +287,8 @@ def collect(repo, sessions, limit_hours):
         row["base"] = recorded if recorded and base_counts(repo, recorded, prs) else repo.base
         started = session.get("startedAt") if session else None
         row["elapsed"] = int(now - started / 1000) if started else None
+        running = bool(session) and not finished(session)
+        row["overtime"] = running and row["elapsed"] is not None and row["elapsed"] > limit_hours * 3600
         rc, out, _ = repo.git("status", "--porcelain", path=path)
         row["dirty"] = bool(out.strip()) if rc == 0 else None
         rc, out, _ = repo.git("rev-list", "--left-right", "--count", f"{row['base']}...HEAD", path=path)
@@ -299,9 +301,6 @@ def collect(repo, sessions, limit_hours):
         row["state"] = declared.get(slug, {}).get("state")
         row["deliverable"] = declared.get(slug, {}).get("deliverable")
         row["phase"] = phase(row["pr_state"], mine if placed else None, row["state"])
-        working = bool(session) and (session.get("status") == "busy" or session.get("state") == "working")
-        row["overtime"] = (row["phase"] == "motion" and working and row["elapsed"] is not None
-                           and row["elapsed"] > limit_hours * 3600)
         times = [t for t in (row["last_commit"], started and started / 1000) if t]
         row["stale"] = bool(times) and now - max(times) > STALE_SECONDS
         rows.append(row)
@@ -1066,7 +1065,7 @@ def c_quiet(p, threshold):
     found = []
     for r in phased(p):
         s = task_session(p, r["path"])
-        if r["phase"] == "motion" and s and (s.get("status") == "busy" or s.get("state") == "working"):
+        if r["phase"] == "motion" and s and not finished(s):
             t = last_activity(p, r, s)
             if t and p["now"] - t > threshold * 60:
                 found.append((r["slug"], r["slug"], f"no activity for {age(t, p['now'])}"))

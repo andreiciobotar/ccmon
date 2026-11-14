@@ -179,7 +179,7 @@ class CriteriaTests(Home):
     def test_quiet_needs_a_working_lead_in_motion(self):
         self.transcript("{sid}.jsonl", NOW - 60 * 60)
         for r, s in ((row("x", phase="review"), lead("x")), (row("x"), lead("x", **FINISHED)),
-                     (row("x"), None)):
+                     (row("x"), lead("x", status="idle")), (row("x"), None)):
             with self.subTest(phase=r["phase"], session=s):
                 self.assertEqual(check("quiet", pic(rows=[r], sessions=[s] if s else []), 20), [])
 

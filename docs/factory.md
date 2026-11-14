@@ -31,7 +31,7 @@ factory merge (<number>... | --all) [--dry-run]
 ```
 
 - **`new`** starts a lead: a background session in a new worktree, with `factory/roles/lead.md` appended to its system prompt, declared `working`. The calling session must be named `--dispatcher` (default `dispatcher-<main checkout's directory name>`; set it with `/rename`), and no other session may carry that name. It refuses a slug whose worktree, branch, session or pull request (in any state) already exists (when `gh` cannot say, it warns and goes on), and a repository at its cap. `--base` stacks the task on another open task's branch.
-- **`status`** prints one row per task worktree: slug, phase, declared state, branch, session, base, session state, age (`overtime` past the time limit, only while the task is in `motion`), uncommitted changes, commits ahead and behind its base, last commit, pull request, and `stale` when the last commit and the session's start are both older than 7 days. Then the counts per phase against the cap, the leftover `agent-*` and outside worktrees, and one `waiting on the human: <slug> <deliverable>` line per task in review. Pull request state is `unknown` without `gh`.
+- **`status`** prints one row per task worktree: slug, phase, declared state, branch, session, base, session state, age (`overtime` when a session whose turn has not ended is past the time limit), uncommitted changes, commits ahead and behind its base, last commit, pull request, and `stale` when the last commit and the session's start are both older than 7 days. Then the counts per phase against the cap, the leftover `agent-*` and outside worktrees, and one `waiting on the human: <slug> <deliverable>` line per task in review. Pull request state is `unknown` without `gh`.
 - **`clean`** removes finished tasks (session, worktree, branch) and says why it kept the rest. It never forces and keeps a task whenever anything is uncertain. A task goes only when its pull request is merged into the default branch with the local head equal to the merged head, or its state is `acknowledged` or `dismissed` with a recorded deliverable, a pull request that is not open and a head that is pushed; and in both cases nothing is uncommitted, no task is stacked on it, no session in it is unfinished and no other worktree is nested in it. It keeps a task on a detached HEAD, and one whose worktree is locked with no session (it prints the `git worktree unlock` to run). If sessions cannot be listed, or an unfinished session has no `cwd`, it removes nothing (exit 2). A dismissed branch that is not merged makes `git branch -d` refuse: reported, exit 1. Git-ignored files in a removed worktree go with it.
 - **`state`** is run by a lead inside its worktree. `handed-over` takes the deliverable: a link (`scheme://...`), or a file that exists and is outside the worktree.
 - **`ack`** is run by the dispatcher on the human's word, for a task that was handed over.
@@ -64,7 +64,7 @@ The cap (`worktree_cap`) counts slots per repository. Only `new` checks it, so a
 | `worktree_cap` | 5 | tasks holding a slot, per repository; `isshoni-tui` can edit it |
 | `lead_model` | `fable` | |
 | `lead_permission_mode` | `auto` | `acceptEdits`, `auto`, `bypassPermissions`, `manual`, `dontAsk`, `plan` |
-| `task_time_limit_hours` | 2 | after it `status` shows `overtime` on a task in `motion`; the lead stops and reports |
+| `task_time_limit_hours` | 2 | after it `status` shows `overtime` while the lead's turn has not ended; the lead stops and reports |
 
 ## Messages
 Leads and the dispatcher talk through Claude Code's `SendMessage`, by session name. A lead's first line starts with `QUESTION:`, `BLOCKED:`, `OVERTIME:`, `SPLIT:` or `DONE:` and its slug. The human can always `claude attach <slug>`.
@@ -125,7 +125,7 @@ Criteria are `factory/criteria.json`, one entry per line: `name`, `escalate` (`a
 | `past-limit` | always | | a lead is working past the time limit |
 | `ci-red-default` | always | | a workflow's newest decisive run on the default branch did not succeed |
 | `dispatcher-missing` | always | | tasks are live and not exactly one unfinished session carries the dispatcher's name |
-| `quiet` | judgment | 20 min | a working lead wrote nothing and committed nothing for that long |
+| `quiet` | judgment | 20 min | a lead whose turn has not ended wrote nothing and committed nothing for that long |
 | `ended-undeclared` | judgment | 10 min | a lead's session ended with no hand-over or block declared |
 | `blocked-unanswered` | judgment | 30 min | a task has been `blocked` that long |
 | `handover-unacknowledged` | judgment | 24 h | a task was declared `handed-over` that long ago and is still in `review` |

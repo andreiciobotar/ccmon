@@ -819,16 +819,16 @@ class StatusTests(unittest.TestCase):
             return dict({"cwd": f"{WT}/alpha", "kind": "background", "status": "busy", "state": "working",
                          "startedAt": now_ms - int(hours * H)}, **kw)
         cases = [
-            ("working past the limit", session(2.5), None, True),
-            ("working within the limit", session(1.5), None, False),
-            ("state working, status idle", session(2.5, status="idle"), None, True),
-            ("done past the limit", session(2.5, status="idle", state="done"), None, False),
-            ("state working, status idle, merged", session(2.5, status="idle"), [{"state": "MERGED"}], False),
-            ("busy past the limit, merged", session(2.5), [{"state": "MERGED"}], True),
+            ("working past the limit", session(2.5), True),
+            ("working within the limit", session(1.5), False),
+            ("waiting past the limit", session(2.5, status="waiting"), True),
+            ("turn ended, state working", session(2.5, status="idle"), False),
+            ("turn ended, state done", session(2.5, status="idle", state="done"), False),
+            ("stopped", {k: v for k, v in session(2.5, state="stopped").items() if k != "status"}, False),
         ]
-        for name, s, pr, overtime in cases:
+        for name, s, overtime in cases:
             with self.subTest(name):
-                doc, _ = self.status([task_entry("alpha")], [s], pr=pr)
+                doc, _ = self.status([task_entry("alpha")], [s])
                 row = doc["rows"][0]
                 self.assertEqual(row["overtime"], overtime)
                 self.assertAlmostEqual(row["elapsed"], (now_ms - s["startedAt"]) / 1000, delta=5)
