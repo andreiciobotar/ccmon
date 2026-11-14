@@ -155,7 +155,7 @@ def _stops(events):
             continue
         kind, waited, why = None, None, None
         if e.get("event") == "PostToolUse" and e.get("tool_name") == "SendMessage" and e.get("kind") in STOP_KINDS:
-            kind = e["kind"]
+            kind, why = e["kind"], _str(e, "summary")
             session = _str(e, "session")
             for nxt in events[i + 1:]:
                 nts = _ts(nxt)
@@ -338,6 +338,39 @@ def _outbox(feedback, cutoff):
     return {**counts, "topics": [{"topic": n, "open": topics[n]} for n in ranked], "entries": out}
 
 
+# ---- the site manager ---------------------------------------------------------------
+
+def _site_manager(records, cutoff):
+    """The site manager's record, folded and counted as `factory firings` does, over every repository."""
+    firings, misses = {}, 0
+    suppressed_first = 0
+    for r in sorted(records, key=lambda r: str(r.get("ts"))):
+        fid = r.get("id")
+        f = firings.get(fid) if isinstance(fid, str) else None
+        if "miss" in r or (isinstance(fid, str) and "criterion" in r):
+            ts = _ts(r)
+            if cutoff is not None and not (ts and ts >= cutoff):
+                continue
+            if "miss" in r:
+                misses += 1
+                suppressed_first += bool(r.get("firing"))
+            else:
+                firings[fid] = {"decision": None, "outcome": None}
+        elif f and "decision" in r and f["decision"] is None:
+            f["decision"] = r["decision"]
+        elif f and "outcome" in r:
+            f["outcome"] = r["outcome"]
+    escalated = [f for f in firings.values() if f["decision"] == "escalated"]
+    acted = sum(f["outcome"] == "acted" for f in escalated)
+    ignored = sum(f["outcome"] == "ignored" for f in escalated)
+    ratio = lambda n, d: round(n / d, 6) if d else None  # noqa: E731
+    return {"escalated": len(escalated), "acted": acted, "ignored": ignored,
+            "no_outcome": len(escalated) - acted - ignored,
+            "suppressed": sum(f["decision"] == "suppressed" for f in firings.values()), "missed": misses,
+            "missed_suppressed": suppressed_first, "missed_never_fired": misses - suppressed_first,
+            "precision": ratio(acted, acted + ignored), "recall": ratio(acted, acted + misses)}
+
+
 # ---- the document -------------------------------------------------------------------
 
 def build(factory_dir, load_sessions, prices, cutoff=None, now=None):
@@ -394,4 +427,5 @@ def build(factory_dir, load_sessions, prices, cutoff=None, now=None):
         "stops": [{k: v for k, v in s.items() if k != "_key"} for s in stops if s["_key"] in kept],
         "slowed": slowed, "rewards": _rewards([t for t in tasks if t["landed"]]),
         "outbox": _outbox(logs["feedback"], cutoff),
+        "site_manager": _site_manager(_records(os.path.join(factory_dir, "firings.jsonl")), cutoff),
     }

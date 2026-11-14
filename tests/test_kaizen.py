@@ -311,6 +311,7 @@ def shapes(d):
     add("median", [s[m] for m in ("cost", "brief_to_pr_s", "pr_to_merge_s", "review_rounds")])
     add("stop", d["stops"]), add("slowed", d["slowed"]), add("reward", d["rewards"])
     add("outbox", [o]), add("counts", [o["issues"], o["decisions"]]), add("topic", o["topics"]), add("entry", o["entries"])
+    add("site_manager", [d["site_manager"]])
     return out
 
 
@@ -323,7 +324,8 @@ class DashboardFixtureTests(FixtureStore):
         ours = shapes(self.doc)
         self.assertEqual({n for n, v in fixture.items() if len(v) != 1}, set())
         self.assertLessEqual({"doc", "repo", "version", "task", "pr", "cost", "by_role", "defects", "summary", "time",
-                              "first_pass", "median", "stop", "slowed", "outbox", "counts", "topic", "entry"}, set(ours))
+                              "first_pass", "median", "stop", "slowed", "outbox", "counts", "topic", "entry",
+                              "site_manager"}, set(ours))
         for name in ours:
             self.assertEqual(fixture[name], ours[name], name)
         self.assertEqual(fixture["trend"], {frozenset(kaizen._trend([task("t", "2026-11-01T00:00:00Z")] * 10))})
@@ -343,6 +345,98 @@ class StopAndTimeTests(Store):
         self.assertEqual(d["stops"], [{"ts": "%sT10:10:00Z" % DAY, "repo": "alpha", "slug": "a1", "kind": "OVERTIME",
                                        "waited_s": 180, "why": None}])
         self.assertEqual((t["landed"], t["brief_to_pr_s"], t["pr_to_merge_s"]), (True, None, 1800))
+
+    def test_why_is_the_summary_the_hook_stored(self):
+        stop = lambda minute, kind, **kw: ev("%sT10:%02d:00Z" % (DAY, minute), "PostToolUse", tool_name="SendMessage",  # noqa: E731
+                                             kind=kind, session="s1", **kw)
+        self.log("events-2026-11.jsonl", [
+            stop(1, "QUESTION", summary="which of the two schemas?"), stop(2, "BLOCKED", summary="push denied"),
+            stop(3, "OVERTIME", summary="review is on its third round"),
+            stop(4, "QUESTION"), stop(5, "QUESTION", summary=""), stop(6, "QUESTION", summary=7),  # older or odd records
+            stop(7, "DONE", summary="not a stop")])
+        self.assertEqual([(s["kind"], s["why"]) for s in self.build(lambda p: [])["stops"]], [
+            ("QUESTION", "which of the two schemas?"), ("BLOCKED", "push denied"), ("OVERTIME", "review is on its third round"),
+            ("QUESTION", None), ("QUESTION", None), ("QUESTION", None)])
+
+
+def fired(fid, ts, repo=ALPHA):
+    return {"ts": ts, "repo": repo, "id": fid, "criterion": "quiet", "escalate": "judge", "slug": "a1", "subject": "a1", "detail": "d"}
+
+
+class SiteManagerTests(Store):
+    EMPTY = {"escalated": 0, "acted": 0, "ignored": 0, "no_outcome": 0, "suppressed": 0, "missed": 0,
+             "missed_suppressed": 0, "missed_never_fired": 0, "precision": None, "recall": None}
+
+    def record(self, cutoff=None):
+        return self.build(lambda p: [], cutoff=cutoff)["site_manager"]
+
+    def test_no_log_and_an_empty_log(self):
+        self.assertEqual(self.record(), self.EMPTY)
+        self.log("firings.jsonl", [])
+        self.assertEqual(self.record(), self.EMPTY)
+
+    def test_fired_without_a_decision_or_an_outcome_gives_no_ratio(self):
+        self.log("firings.jsonl", [fired("f1", "2026-11-10T10:00:00Z"), fired("f2", "2026-11-10T10:01:00Z"),
+                                   {"ts": "2026-11-10T10:02:00Z", "id": "f2", "decision": "escalated", "by": "watch"}])
+        self.assertEqual(self.record(), {**self.EMPTY, "escalated": 1, "no_outcome": 1})
+
+    def test_counts_and_ratios_over_every_repository(self):
+        d = lambda fid, minute, decision: {"ts": "2026-11-10T11:%02d:00Z" % minute, "id": fid, "decision": decision}  # noqa: E731
+        o = lambda fid, minute, outcome: {"ts": "2026-11-10T12:%02d:00Z" % minute, "id": fid, "outcome": outcome}  # noqa: E731
+        self.log("firings.jsonl", [
+            "not json", {"ts": "2026-11-10T09:00:00Z", "id": 7, "criterion": "quiet"}, {"id": "zz", "outcome": "acted"},
+            o("f1", 9, "acted"),  # written out of order: records are folded by ts, as the factory reads them
+            *(fired("f%d" % i, "2026-11-10T10:%02d:00Z" % i, BETA if i == 2 else ALPHA) for i in range(1, 8)),
+            d("f1", 1, "escalated"), d("f1", 2, "suppressed"),  # the first decision stands
+            d("f2", 3, "escalated"), d("f3", 4, "escalated"), d("f4", 5, "escalated"), d("f5", 6, "escalated"),
+            d("f6", 7, "suppressed"), d("f7", 8, "suppressed"),
+            o("f2", 1, "ignored"), o("f2", 2, "acted"),  # the last outcome stands
+            o("f3", 3, "acted"), o("f4", 4, "ignored"),
+            o("f6", 5, "acted"),  # an outcome on a suppressed firing counts nowhere
+            {"ts": "2026-11-10T12:10:00Z", "id": "f1", "cleared": True},
+            {"ts": "2026-11-10T13:00:00Z", "repo": ALPHA, "miss": "a lead was stuck", "slug": "a1", "firing": "f6"},
+            {"ts": "2026-11-10T13:01:00Z", "repo": BETA, "miss": "nothing fired", "slug": None, "firing": None}])
+        self.assertEqual(self.record(), {
+            "escalated": 5, "acted": 3, "ignored": 1, "no_outcome": 1, "suppressed": 2, "missed": 2,
+            "missed_suppressed": 1, "missed_never_fired": 1, "precision": 0.75, "recall": 0.6})
+
+    def test_since_keeps_firings_and_misses_by_their_own_time(self):
+        self.log("firings.jsonl", [
+            fired("old", "2026-11-10T10:00:00Z"), fired("new", "2026-11-10T12:00:00Z"),
+            {"ts": "2026-11-10T12:01:00Z", "id": "old", "decision": "escalated"},
+            {"ts": "2026-11-10T12:02:00Z", "id": "old", "outcome": "ignored"},
+            {"ts": "2026-11-10T12:03:00Z", "id": "new", "decision": "escalated"},
+            {"ts": "2026-11-10T12:04:00Z", "id": "new", "outcome": "acted"},
+            {"ts": "2026-11-10T11:59:59Z", "miss": "before"}, {"ts": "2026-11-10T12:00:00Z", "miss": "at the cutoff"},
+            {"miss": "no time"}])
+        self.assertEqual(self.record(datetime(2026, 11, 10, 12, 0, 0, tzinfo=timezone.utc)), {
+            **self.EMPTY, "escalated": 1, "acted": 1, "missed": 1, "missed_never_fired": 1, "precision": 1.0, "recall": 0.5})
+        self.assertEqual((self.record()["escalated"], self.record()["missed"], self.record()["precision"]), (2, 3, 0.5))
+
+    def test_agrees_with_the_factory_on_the_same_log(self):
+        """The one place the two folds are compared: `factory firings --json` run on a store holding one repository."""
+        home = os.path.dirname(self.factory)
+        repo = os.path.realpath(os.path.join(home, "alpha"))
+        subprocess.run(["git", "init", "-q", repo], check=True)
+        self.factory = os.path.join(home, ".claude", "factory")
+        self.log("firings.jsonl", [
+            fired("f1", "2026-11-10T10:00:00Z", repo), fired("f2", "2026-11-10T10:01:00Z", repo),
+            fired("f3", "2026-11-10T10:02:00Z", repo), fired("f4", "2026-11-10T10:03:00Z", repo),
+            {"ts": "2026-11-10T11:00:00Z", "repo": repo, "id": "f1", "decision": "escalated"},
+            {"ts": "2026-11-10T11:01:00Z", "repo": repo, "id": "f2", "decision": "suppressed", "reason": "r"},
+            {"ts": "2026-11-10T11:02:00Z", "repo": repo, "id": "f3", "decision": "escalated"},
+            {"ts": "2026-11-10T11:03:00Z", "repo": repo, "id": "f4", "decision": "escalated"},
+            {"ts": "2026-11-10T12:00:00Z", "repo": repo, "id": "f1", "outcome": "acted"},
+            {"ts": "2026-11-10T12:01:00Z", "repo": repo, "id": "f3", "outcome": "ignored"},
+            {"ts": "2026-11-10T13:00:00Z", "repo": repo, "miss": "m", "slug": None, "firing": "f2"},
+            {"ts": "2026-11-10T13:01:00Z", "repo": repo, "miss": "n", "slug": None, "firing": None}])
+        p = subprocess.run([os.path.join(ROOT, "factory", "bin", "factory"), "firings", "--json"], cwd=repo,
+                           env={**os.environ, "HOME": home}, capture_output=True, text=True)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        theirs = json.loads(p.stdout)["summary"]
+        self.assertEqual((theirs["escalated"], theirs["missed"]), (3, 2))
+        theirs.update({k: round(theirs[k], 6) for k in ("precision", "recall")})
+        self.assertEqual(self.record(), theirs)
 
 
 class SmallTests(Store):
@@ -542,7 +636,8 @@ class CliTests(Store):
             _, out, _ = run_cli("kaizen", "--json", *self.args)
         d = json.loads(out)
         self.assertEqual(list(d), ["generated", "factory_dir", "store_found", "prices", "repos", "versions", "tasks", "summary",
-                                   "stops", "slowed", "rewards", "outbox"])
+                                   "stops", "slowed", "rewards", "outbox", "site_manager"])
+        self.assertEqual(d["site_manager"], SiteManagerTests.EMPTY)
         self.assertEqual(list(d["tasks"][0]), ["repo", "repo_path", "slug", "version", "started", "state", "pr", "landed",
                                                "brief_to_pr_s", "pr_to_merge_s", "cost", "review_rounds", "first_pass", "stops",
                                                "stopped_s", "defects"])

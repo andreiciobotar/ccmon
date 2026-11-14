@@ -78,7 +78,8 @@ the reason, its tasks have no `pr`, and nothing there counts as landed.
 
 The document: `generated`, `factory_dir`, `store_found`, `prices`, `repos`
 (`repo`, `repo_path`, `prs`: `ok` or the reason), `versions` (each plugin version by its
-earliest record in any store), `tasks`, `summary`, `stops`, `slowed`, `rewards`, `outbox`.
+earliest record in any store), `tasks`, `summary`, `stops`, `slowed`, `rewards`, `outbox`,
+`site_manager`.
 Times are UTC (`2026-11-14T00:01:02Z`), a task's durations whole seconds, medians floats
 that may be fractional, money in the price file's currency, and a missing value is `null`.
 
@@ -110,7 +111,8 @@ tasks; else the median of each measure over the latest half (`latest_n`) against
 
 `stops`, oldest first: a lead's `QUESTION`, `BLOCKED` or `OVERTIME` message (`waited_s`
 runs to the next prompt from the human or the dispatcher in the same session, null while
-unanswered; `why` is null, the store does not hold the reason) and a denied permission
+unanswered; `why` is the event's `summary`, the first line of the message, or null on
+events logged before the hook stored one) and a denied permission
 (`DENIED`, `why` is `<tool>: <reason>`). `slowed` lists every `slowed` text of the retros,
 newest first. `rewards` fire only on real records over landed tasks in merge order: the
 last 3 or more all first-pass; a latest cost, or a latest brief-to-pull-request time, that
@@ -119,8 +121,18 @@ is strictly the lowest of at least 5 tasks (a tie is not a record). `outbox` fol
 and decisions by status, and groups open issues by the first keyword topic that matches
 (`permissions`, `brief`, `rules`, `tools`, `review`, `time`, else `other`).
 
-Limits: no landed figure without `gh`; the reason text of a stop is not stored; the
-site manager's firings are not read; rework counts subagent runs only; costs are the list
+`site_manager` is the site manager's record over every repository, read from
+`firings.jsonl` and counted as `factory firings` counts it (`docs/factory.md`, "Site
+manager"): `escalated` firings and of those `acted`, `ignored` and `no_outcome`;
+`suppressed` firings; `missed` problems (`missed_suppressed` had fired and were
+suppressed, `missed_never_fired` the rest); `precision` is `acted / (acted + ignored)` and
+`recall` is `acted / (acted + missed)`, each 0 to 1, or null with nothing to divide by.
+With `--since` it counts the firings that fired, and the misses recorded, at or after the
+cutoff. Without the file every count is 0 and both ratios are null.
+
+Limits: no landed figure without `gh`; a stop logged before the hook stored a summary has no reason;
+the site manager's firings are counted, not listed (`factory firings` lists a
+repository's); rework counts subagent runs only; costs are the list
 prices of `isshoni/prices.toml` (see Cost above).
 
 ## Dashboard (`isshoni-tui`)
@@ -191,8 +203,11 @@ VIEW=... SIZE=...` turns it into a PNG under `shots/` (needs Chrome).
   pull request, pull request to merge and first-pass rate, each with how the latest half
   of the landed tasks compares with the earlier half from 10 landed tasks; the rewards;
   a column chart per measure, one column per landed task in start order, with the
-  plugin versions marked under it; who caught the defects), **Flow** (where the money
-  and the time went, a table of every task, the stops, what slowed tasks) and **Board**
+  plugin versions marked under it; who caught the defects; the site manager's record:
+  precision and recall, then what it escalated with the outcomes, suppressed and missed,
+  or one line saying nothing is logged yet), **Flow** (where the money
+  and the time went, a table of every task, the stops each with its reason in full or
+  "reason not recorded", what slowed tasks) and **Board**
   (the factory's feedback outbox: open issues grouped by topic, what was acted on, the
   decisions). The columns of a chart use the colour of what they measure; review rounds
   are green for a first pass and orange otherwise; a chart too narrow for every task

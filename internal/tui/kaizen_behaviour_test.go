@@ -281,7 +281,7 @@ func TestKaizenPulseSections(t *testing.T) {
 	doc.Rewards = nil
 	doc.Summary.Trend = nil
 	doc.Repos[1].PRs = "gh failed: not a GitHub repository"
-	m := fakeModel(true, 140, 40)
+	m := fakeModel(true, 140, 50)
 	setKaizen(m, doc, pagePulse)
 	out = plain(m)
 	for _, want := range []string{"none escaped to CI or the human", "comparing latest with earlier starts at 10 landed tasks (have 20)", "3 in flight", "20 tasks",
@@ -299,6 +299,57 @@ func TestKaizenPulseSections(t *testing.T) {
 	setKaizen(m, doc, pagePulse)
 	if out := plain(m); !strings.Contains(out, "no retrospectives yet") {
 		t.Errorf("no retros:\n%s", out)
+	}
+}
+
+func TestKaizenSiteManagerRecord(t *testing.T) {
+	pulse := func(s data.SiteManager, w int) string {
+		doc := kaizenDoc(t)
+		doc.SiteManager = s
+		m := fakeModel(true, w, 200)
+		setKaizen(m, doc, pagePulse)
+		out := plain(m)
+		return out[strings.Index(out, "site manager"):strings.Index(out, "open issues")]
+	}
+	has := func(out string, wants ...string) {
+		t.Helper()
+		for _, want := range wants {
+			if !strings.Contains(out, want) {
+				t.Errorf("lacks %q:\n%s", want, out)
+			}
+		}
+	}
+	full := kaizenDoc(t).SiteManager
+	has(pulse(full, 140), "precision 75%  3 acted on of 4 with an outcome", "recall 60%  3 acted on of 5 that needed the human",
+		"6 escalated   3 acted on   1 ignored   2 no outcome yet   4 suppressed   2 missed (1 suppressed first, 1 never fired)")
+	has(pulse(full, 60), "precision 75%", "recall 60%", "2 no outcome yet", "2 missed (1 suppressed first, 1 never fired)")
+
+	// the log is empty until the site manager first fires: say so, and how outcomes get recorded
+	empty := pulse(data.SiteManager{}, 140)
+	has(empty, "nothing escalated, suppressed or missed yet", "precision and recall start with the first outcome (factory firing <id> acted|ignored)")
+	if strings.Contains(empty, "precision 0%") || strings.Contains(empty, "0 escalated") {
+		t.Errorf("an empty record shows no numbers:\n%s", empty)
+	}
+
+	// escalations without an outcome give no ratio, and a zero is a number, not a dash
+	has(pulse(data.SiteManager{Escalated: 2, NoOutcome: 2, Suppressed: 1}, 140),
+		"precision -  no outcome recorded yet", "recall -  nothing acted on or missed yet", "2 escalated   0 acted on   0 ignored   2 no outcome yet   1 suppressed   0 missed")
+	has(pulse(data.SiteManager{Escalated: 1, Ignored: 1, Missed: 1, MissedNeverFired: 1, Precision: ptr(0.0), Recall: ptr(0.0)}, 140),
+		"precision 0%  0 acted on of 1 with an outcome", "recall 0%  0 acted on of 1 that needed the human", "1 missed (0 suppressed first, 1 never fired)")
+}
+
+func TestKaizenStopReasonIsShownInFull(t *testing.T) {
+	why := "Should the hook payload keep the legacy session field? Two consumers still read it, and dropping it would break the replay tool until both are migrated."
+	for _, w := range []int{140, 100, 80, 60} {
+		m := kaizenModel(t, true, w, 200, pageFlow)
+		out := plain(m)
+		out = out[strings.Index(out, "the line stopped"):strings.Index(out, "what slowed tasks")]
+		if got := strings.Join(strings.Fields(out), " "); !strings.Contains(got, why) || !strings.Contains(got, "git push was denied: the remote rejects the task branch") {
+			t.Errorf("%d columns: the reasons are not whole:\n%s", w, out)
+		}
+		if !strings.Contains(out, "reason not recorded") {
+			t.Errorf("%d columns: a stop without a summary says so:\n%s", w, out)
+		}
 	}
 }
 
