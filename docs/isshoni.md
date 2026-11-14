@@ -133,18 +133,20 @@ terminal of at least 60x16.
 ```
 bin/isshoni-tui [--range 24h|7d|30d|all] [--follow] [--no-color]
                 [--projects-dir DIR] [--agents-dir DIR] [--prices PATH]
-bin/isshoni-tui --snapshot dashboard|session|agents|factory|kaizen|kaizen-flow|kaizen-board|help [--size 140x40] [--session ID] [--row N]
+bin/isshoni-tui --snapshot dashboard|session|agents|factory|kaizen|kaizen-flow|kaizen-board|help [--size 140x40] [--session ID] [--row N] [--fold]
 ```
 `--range` defaults to `7d`. `NO_COLOR` gives the plain rendering too. `--snapshot`
 prints one settled frame and exits, non-zero when the load fails; `--row N` puts the
-dashboard cursor on table row N (0 is the `all` row); `make screenshot
+dashboard cursor on table row N (0 is the `all` row) and `--fold` collapses the
+repository that row is in; `make screenshot
 VIEW=... SIZE=...` turns it into a PNG under `shots/` (needs Chrome).
 
 | Key | |
 |---|---|
 | `tab` `shift+tab`, `1` `2` `3` `4` `5` | switch view: dashboard, session, agents, factory, kaizen |
 | `↑` `↓` `j` `k`, `g` `G`, `pgup` `pgdn` | move, first and last, page |
-| `enter`, `esc` | open a session row (nothing on a group row), back |
+| `←` `→` `h` `l` | dashboard: collapse the repository the cursor is in (the cursor moves to its row), expand it |
+| `enter`, `esc` | open the session under the cursor; on `all`, a repository or a task, the most recently active session in it (a message names it); back |
 | `r` | range: 24h, 7d, 30d, all (on the error screen: retry) |
 | `s` | sort: recent, cost, subagent share |
 | `/` | filter by `repo`, `repo/task`, project or session id |

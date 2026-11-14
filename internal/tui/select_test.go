@@ -194,7 +194,7 @@ func TestCursorSurvivesRefresh(t *testing.T) {
 	for _, pick := range []struct {
 		kind rowKind
 		name string
-	}{{kindTask, "ci"}, {kindRepo, "alpha"}} {
+	}{{kindTask, "ci"}, {kindRepo, "alpha"}, {kindSession, "a1000000"}} {
 		m := groupedModel(120, 40)
 		row := rowNamed(t, m, pick.kind, pick.name)
 		selectRow(m, row.key)
@@ -248,24 +248,195 @@ func TestSelectionFallsBackToTheAllRow(t *testing.T) {
 	}
 }
 
-func TestEnterOpensSessionRowsOnly(t *testing.T) {
-	m := groupedModel(120, 40)
-	for _, r := range m.rows() {
-		m.view = viewDashboard
-		selectRow(m, r.key)
-		send(m, "enter")
-		switch {
-		case r.s != nil && (m.view != viewSession || m.selID != r.s.ID):
-			t.Errorf("enter on %s: view %v, selID %q", r.label(), m.view, m.selID)
-		case r.s == nil && m.view != viewDashboard:
-			t.Errorf("enter on %s opened the %v view", r.label(), m.view)
+// Every row opens a session: its own, or for a group row the most recently active one in it, named in a toast.
+func TestEveryRowOpensASession(t *testing.T) {
+	recent := map[string]string{"all": "b1000000", "alpha": "a4000000", "ci": "a3000000"}
+	for _, k := range []string{"enter", "2", "tab"} {
+		m := groupedModel(120, 40)
+		for _, r := range m.rows() {
+			m.view, m.toast = viewDashboard, toast{}
+			selectRow(m, r.key)
+			send(m, k)
+			want, wantToast := recent[r.name], "opened "+recent[r.name]+", the most recent in "+r.name
+			if r.s != nil {
+				want, wantToast = r.s.ID, ""
+			}
+			if m.view != viewSession || m.selID != want || m.toast.text != wantToast {
+				t.Errorf("%s on %s: view %v, selID %q, toast %q; want %q, %q", k, r.label(), m.view, m.selID, m.toast.text, want, wantToast)
+			}
+			send(m, "esc")
+			if cur := m.rows()[mustCursor(m)]; m.view != viewDashboard || cur.s == nil || cur.s.ID != want {
+				t.Errorf("%s on %s, then esc: view %v, cursor on %s", k, r.label(), m.view, cur.label())
+			}
 		}
 	}
-	m.view = viewDashboard
-	selectRow(m, rowNamed(t, m, kindRepo, "alpha").key)
-	send(m, "tab")
-	if m.view != viewAgents {
-		t.Errorf("tab from a group row goes to %v, not past the session view", m.view)
+
+	m := groupedModel(120, 40)
+	send(m, "3", "shift+tab")
+	if m.view != viewSession || m.selID != "b1000000" {
+		t.Errorf("shift+tab from the Agents view with the cursor on all: view %v, selID %q", m.view, m.selID)
+	}
+
+	m = groupedModel(120, 40)
+	send(m, "/", "a", "l", "p", "h", "a", "enter", "enter")
+	if m.view != viewSession || m.selID != "a4000000" {
+		t.Errorf("with a filter the all row opens the most recent session shown: view %v, selID %q", m.view, m.selID)
+	}
+
+	// equal activity: the smaller id, whatever the order of the group
+	m = modelOf(120, 40, groupSession("t2000000", "r", "/r/r", "t", 0, 100, 0), groupSession("t1000000", "r", "/r/r", "t", 0, 100, 0))
+	send(m, "2")
+	if m.selID != "t1000000" {
+		t.Errorf("a tie opens the smaller id, got %q", m.selID)
+	}
+
+	m = modelOf(120, 40)
+	for _, k := range []string{"2", "enter"} {
+		m.toast = toast{}
+		send(m, k)
+		if m.view != viewDashboard || m.toast.text != "no sessions to open" {
+			t.Errorf("%s without sessions: view %v, toast %q", k, m.view, m.toast.text)
+		}
+	}
+}
+
+// left folds the repository the cursor is in, from any row of it, and puts the cursor on its row; right
+// unfolds it. Totals, the header and the sort ignore the fold; the mix panels show the repository.
+func TestFoldRepository(t *testing.T) {
+	for _, from := range []string{"a3000000", "a1000000", "a4000000", groupKey("task", "/r/alpha", "alpha", "ci"), groupKey("repo", "/r/alpha", "alpha")} {
+		for _, ks := range [][2]string{{"left", "right"}, {"h", "l"}} {
+			m := groupedModel(120, 40)
+			selectRow(m, from)
+			before, open := plain(m), rowNames(m)
+			send(m, ks[0])
+			if got := rowNames(m); got != "all ×5,beta b1000000,alpha ×4" {
+				t.Fatalf("%s from %q: rows %s", ks[0], from, got)
+			}
+			cur := m.rows()[mustCursor(m)]
+			out := plain(m)
+			if cur.name != "alpha" || !cur.folded || !strings.Contains(out, "alpha ×4 ▸") || !strings.Contains(out, "mix · repo alpha ×4") {
+				t.Fatalf("%s from %q: cursor on %s\n%s", ks[0], from, cur.label(), out)
+			}
+			for _, same := range []string{"Sessions  5 in 2 repos, 2 tasks", "totals of all 5 sessions shown"} {
+				if !strings.Contains(before, same) || !strings.Contains(out, same) {
+					t.Fatalf("a fold keeps %q\n%s", same, out)
+				}
+			}
+			if len(m.visible()) != 5 || m.totals().tokens != sumTotals(m.rows()[0].group).tokens {
+				t.Fatalf("a fold hides rows, not sessions: %d visible", len(m.visible()))
+			}
+			send(m, ks[0]) // already folded: nothing
+			if got := m.rows()[mustCursor(m)]; got.name != "alpha" || len(m.rows()) != 3 {
+				t.Fatalf("%s on a folded repository changes nothing, cursor on %s", ks[0], got.label())
+			}
+			send(m, ks[1])
+			if got := m.rows()[mustCursor(m)]; rowNames(m) != open || got.name != "alpha" || got.folded {
+				t.Fatalf("%s unfolds and keeps the cursor: %s, cursor on %s", ks[1], rowNames(m), got.label())
+			}
+			send(m, ks[1]) // already open: nothing
+			if rowNames(m) != open || m.rows()[mustCursor(m)].name != "alpha" {
+				t.Fatalf("%s on an open repository changes nothing", ks[1])
+			}
+		}
+	}
+
+	// nothing to fold: the all row, a repository of one session
+	m := groupedModel(120, 40)
+	for _, key := range []string{groupKey("all"), "b1000000"} {
+		selectRow(m, key)
+		rows := rowNames(m)
+		send(m, "left", "right")
+		if rowNames(m) != rows || m.selID != key || len(m.folded) != 0 {
+			t.Fatalf("left and right on %q: rows %s, selID %q", key, rowNames(m), m.selID)
+		}
+	}
+	// only in the dashboard
+	send(m, "3", "left")
+	if len(m.folded) != 0 {
+		t.Fatal("left folds outside the dashboard")
+	}
+}
+
+// A fold is kept through a re-sort, a refresh, a new session in the folded repository and a filter; the
+// cursor stays on the folded row.
+func TestFoldSurvivesUpdatesAndFilter(t *testing.T) {
+	m := groupedModel(120, 40)
+	selectRow(m, "a3000000")
+	send(m, "left")
+	key := groupKey("repo", "/r/alpha", "alpha")
+	check := func(step string, n int) {
+		t.Helper()
+		r := m.rows()[mustCursor(m)]
+		if m.selID != key || r.key != key || !r.folded || len(r.group) != n || strings.Contains(rowNames(m), "ci") {
+			t.Fatalf("%s: selID %q, cursor on %s, rows %s", step, m.selID, r.label(), rowNames(m))
+		}
+	}
+	send(m, "s")
+	check("re-sort", 4)
+	changed := *m.sessions["a2000000"]
+	changed.Cost.Total *= 3
+	changed.LastChange = changed.LastChange.Add(time.Hour)
+	m.mergeSession(&changed)
+	m.normalizeSelection()
+	check("mergeSession", 4)
+	fresh := groupSession("a5000000", "alpha", "/r/alpha", "new", 500, 100, 0)
+	m.mergeSession(fresh)
+	m.normalizeSelection()
+	check("new session inside", 5)
+	var all []data.Session
+	for _, s := range m.sessions {
+		all = append(all, *s)
+	}
+	m.mergeLoad(sessionsMsg{res: &data.SessionsResult{Sessions: all}})
+	m.normalizeSelection()
+	check("mergeLoad", 5)
+
+	// the filter finds what is inside: the folded row stays, counting the matches, and opens the match
+	send(m, "/", "c", "i", "enter")
+	if got := rowNames(m); got != "all ×2,alpha ×2" {
+		t.Fatalf("filter ci with alpha folded: %s", got)
+	}
+	check("filter", 2)
+	send(m, "right")
+	if got := rowNames(m); got != "all ×2,alpha ×2,  ci ×2,    a2000000,    a3000000" {
+		t.Fatalf("right shows the matches: %s", got)
+	}
+}
+
+// A folded repository opens its most recent session; the session view stays open through refreshes, and
+// back in the dashboard the cursor is on the folded row. Follow mode works the same way.
+func TestFoldedRepositoryOpensAndFollows(t *testing.T) {
+	m := groupedModel(120, 40)
+	selectRow(m, "a1000000")
+	send(m, "left", "enter")
+	if m.view != viewSession || m.selID != "a4000000" || m.toast.text != "opened a4000000, the most recent in alpha" {
+		t.Fatalf("enter on folded alpha: view %v, selID %q, toast %q", m.view, m.selID, m.toast.text)
+	}
+	m.normalizeSelection()
+	if m.view != viewSession || m.selID != "a4000000" {
+		t.Fatalf("a refresh closed the session opened from a folded row: view %v, selID %q", m.view, m.selID)
+	}
+	send(m, "esc")
+	if r := m.rows()[mustCursor(m)]; r.name != "alpha" || !r.folded {
+		t.Fatalf("back on the folded row, got %s", r.label())
+	}
+	m.seen["a2000000"] = m.activity(m.sessions["a4000000"]).Add(time.Hour)
+	m.toast = toast{}
+	send(m, "enter")
+	if m.selID != "a2000000" || m.toast.text != "opened a2000000, the most recent in alpha" {
+		t.Fatalf("the folded row opens what is most recent now: selID %q, toast %q", m.selID, m.toast.text)
+	}
+
+	send(m, "esc", "f")
+	if !m.follow || m.selID != "a2000000" {
+		t.Fatalf("follow targets the most recent session, folded or not: follow %v, selID %q", m.follow, m.selID)
+	}
+	m.normalizeSelection()
+	if r := m.rows()[mustCursor(m)]; m.selID != "a2000000" || r.name != "alpha" || !r.folded {
+		t.Fatalf("following a folded session: selID %q, cursor on %s", m.selID, r.label())
+	}
+	if out := plain(m); !strings.Contains(out, "mix · repo alpha ×4") {
+		t.Fatalf("the mix panels show the folded row\n%s", out)
 	}
 }
 

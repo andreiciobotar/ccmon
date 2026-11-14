@@ -95,6 +95,7 @@ type model struct {
 	prices   data.Prices
 
 	selID      string // key of the row under the dashboard cursor: a session id, or a group row's key
+	folded     map[string]bool // keys of the repository rows collapsed to one row
 	top        int    // first visible table row
 	dcursor    int    // dispatch cursor in session view
 	dtop       int
@@ -159,7 +160,7 @@ func New(o Options) *model {
 		w: 100, h: 30, rangeIdx: idx, follow: o.Follow, loading: true,
 		sessions: map[string]*data.Session{}, details: map[string]*data.Session{},
 		dirty: map[string]bool{}, inflight: map[string]bool{}, retry: map[string]time.Time{}, counter: map[string]*Counter{},
-		rowTok: map[string]*Counter{}, flash: map[string]time.Time{},
+		rowTok: map[string]*Counter{}, flash: map[string]time.Time{}, folded: map[string]bool{},
 	}
 	m.loadCtx, m.loadCancel = context.WithCancel(m.ctx)
 	for _, k := range append([]string{"tokens", "dispatches", "repeats", "loops", "warns", "share", "recheck"}, kaizenCounters...) {
@@ -340,6 +341,12 @@ type treeRow struct {
 	suffix string          // faint, after the name: ×N sessions of a group, the id of a merged row
 	depth  int             // indent in steps of two cells
 	group  []*data.Session // what the row totals; a session row holds just itself
+	folded bool            // a repository collapsed to this row: its tasks and sessions are not shown
+}
+
+// holds says the cursor is on this row while selID is key: the row's own key, or a session folded into it.
+func (r treeRow) holds(key string) bool {
+	return r.key == key || r.folded && slices.ContainsFunc(r.group, func(s *data.Session) bool { return s.ID == key })
 }
 
 // groupKey is the key of a group row; the NUL bytes keep it from ever equalling a session id.
@@ -409,9 +416,25 @@ func (m *model) sessionUnits(ss []*data.Session) []unit {
 	return us
 }
 
-// rows is the filtered, sorted sessions table, the one owner of display order:
-// repositories, each with its sessions without a task, then its tasks.
+// rows is the sessions table as shown: the tree without what is under a folded repository.
 func (m *model) rows() []treeRow {
+	var out []treeRow
+	hide := false
+	for _, r := range m.tree() {
+		if r.depth == 0 {
+			r.folded = m.folded[r.key]
+			hide = r.folded
+		} else if hide {
+			continue
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
+// tree is the filtered, sorted sessions table, the one owner of display order:
+// repositories, each with its tasks and its sessions without a task in one sorted list.
+func (m *model) tree() []treeRow {
 	f := strings.ToLower(strings.TrimSpace(m.filter))
 	type repo struct {
 		name, path string
@@ -453,15 +476,19 @@ func (m *model) rows() []treeRow {
 			continue
 		}
 		out = append(out, treeRow{kind: kindRepo, key: repoKey, name: r.name, suffix: fmt.Sprintf("×%d", len(ru.group)), group: ru.group})
-		for _, u := range m.sessionUnits(r.bare) {
-			out = append(out, treeRow{kind: kindSession, key: u.group[0].ID, s: u.group[0], name: short8(u.name), depth: 1, group: u.group})
+		var units []unit
+		for _, s := range r.bare {
+			units = append(units, m.unit([]*data.Session{s}, s.ID, "session"))
 		}
-		var tasks []unit
 		for name, ss := range r.tasks {
-			tasks = append(tasks, m.unit(ss, name, ""))
+			units = append(units, m.unit(ss, name, "task"))
 		}
-		m.sortUnits(tasks)
-		for _, tu := range tasks {
+		m.sortUnits(units)
+		for _, tu := range units {
+			if tu.tie == "session" {
+				out = append(out, treeRow{kind: kindSession, key: tu.group[0].ID, s: tu.group[0], name: short8(tu.name), depth: 1, group: tu.group})
+				continue
+			}
 			if len(tu.group) == 1 {
 				out = append(out, treeRow{kind: kindTask, key: tu.group[0].ID, s: tu.group[0], name: tu.name, suffix: short8(tu.group[0].ID), depth: 1, group: tu.group})
 				continue
@@ -479,11 +506,11 @@ func (m *model) rows() []treeRow {
 	return append([]treeRow{all}, out...)
 }
 
-// visible is the filtered session list in table order: the rows that carry a session. An index into it is
-// not a cursor position.
+// visible is the filtered session list in table order, folded or not: the rows of the tree that carry a
+// session. An index into it is not a cursor position.
 func (m *model) visible() []*data.Session {
 	var out []*data.Session
-	for _, r := range m.rows() {
+	for _, r := range m.tree() {
 		if r.s != nil {
 			out = append(out, r.s)
 		}
@@ -504,10 +531,11 @@ func shownGroups(rows []treeRow) (repos, tasks int) {
 	return
 }
 
-// cursorRow is the display row under the dashboard cursor (the first row when selID is not shown), and the
+// cursorRow is the display row under the dashboard cursor (the first row when selID is not shown; the
+// repository row when selID is a session folded into it), and the
 // first row of the group rows directly above it (which stay in view with it).
 func (m *model) cursorRow(rows []treeRow) (cur, first int) {
-	cur = slices.IndexFunc(rows, func(r treeRow) bool { return r.key == m.selID })
+	cur = slices.IndexFunc(rows, func(r treeRow) bool { return r.holds(m.selID) })
 	cur = max(cur, 0)
 	first = cur
 	for first > 0 && rows[first-1].s == nil {
@@ -544,7 +572,7 @@ func (m *model) normalizeSelection() {
 	switch {
 	case len(rows) == 0:
 		m.selID = ""
-	case !slices.ContainsFunc(rows, func(r treeRow) bool { return r.key == m.selID }):
+	case !slices.ContainsFunc(rows, func(r treeRow) bool { return r.holds(m.selID) }):
 		m.selID = rows[0].key
 	}
 	if m.view == viewSession && m.sessions[m.selID] == nil {
@@ -1119,6 +1147,10 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.switchView(viewFactory)
 	case key.Matches(msg, keys.Kaizen):
 		return m.switchView(viewKaizen)
+	case m.view == viewDashboard && key.Matches(msg, keys.Fold): // the same keys turn the page in the Kaizen view
+		m.fold(true)
+	case m.view == viewDashboard && key.Matches(msg, keys.Unfold):
+		m.fold(false)
 	case key.Matches(msg, keys.PageLeft):
 		if m.view == viewKaizen {
 			m.kaizenPage(-1)
@@ -1198,9 +1230,15 @@ func (m *model) filterKey(msg tea.KeyPressMsg) tea.Cmd {
 
 func (m *model) switchView(v viewID) tea.Cmd {
 	if v == viewSession {
-		if m.selID == "" || m.sessions[m.selID] == nil {
-			m.setToast("no session selected", false)
-			return nil
+		if m.view != viewSession {
+			row, ok := m.scope()
+			if !ok {
+				m.setToast("no sessions to open", false)
+				return nil
+			}
+			if row.s == nil {
+				m.openMostRecent(row)
+			}
 		}
 		m.view = v
 		m.dcursor, m.dtop = 0, 0
@@ -1219,11 +1257,49 @@ func (m *model) switchView(v viewID) tea.Cmd {
 	return nil
 }
 
-// cycle is the next view in a direction; the session view is skipped without a selection.
+// openMostRecent moves the selection from a group row to the session in it with the latest activity (the
+// smaller id on a tie) and says which one.
+func (m *model) openMostRecent(row treeRow) {
+	best := row.group[0]
+	for _, s := range row.group[1:] {
+		a, b := m.activity(s), m.activity(best)
+		if a.After(b) || (a.Equal(b) && s.ID < best.ID) {
+			best = s
+		}
+	}
+	m.selID = best.ID
+	m.setToast("opened "+short8(best.ID)+", the most recent in "+row.name, false)
+}
+
+// fold collapses the repository the cursor is in to its one row and puts the cursor there (on), or expands
+// the collapsed repository under the cursor. It does nothing on the all row, on a repository of one
+// session, and when the repository is already as asked.
+func (m *model) fold(on bool) {
+	rows := m.rows()
+	if len(rows) == 0 {
+		return
+	}
+	i, _ := m.cursorRow(rows)
+	for rows[i].depth > 0 {
+		i--
+	}
+	r := rows[i]
+	switch {
+	case r.kind != kindRepo || r.s != nil || r.folded == on:
+	case on:
+		m.folded[r.key] = true
+		m.moveTo(i)
+	default:
+		delete(m.folded, r.key)
+		m.selID = r.key
+	}
+}
+
+// cycle is the next view in a direction; the session view is skipped when there is no session to open.
 func (m *model) cycle(step int) viewID {
 	const n = int(viewKaizen) + 1
 	v := viewID((int(m.view) + step + n) % n)
-	if v == viewSession && m.sessions[m.selID] == nil {
+	if v == viewSession && len(m.rows()) == 0 {
 		v = viewID((int(v) + step + n) % n)
 	}
 	return v

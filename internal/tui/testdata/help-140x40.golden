@@ -9,6 +9,7 @@
                                     │ ↑↓/jk         move                                               │                                    
                                     │ g G           first · last                                       │                                    
                                     │ pgdn pgup     page                                               │                                    
+                                    │ ←→/hl         fold repo                                          │                                    
                                     │ enter         open                                               │                                    
                                     │ esc           back                                               │                                    
                                     │                                                                  │                                    
@@ -32,7 +33,6 @@
                                     │ A dot pulses on sessions written in the last 30 seconds.         │                                    
                                     │ The factory view refreshes every 30 s while shown.               │                                    
                                     ╰──────────────────────────────────────────────────────────────────╯                                    
-                                                                                                                                            
                                                                                                                                             
                                                                                                                                             
                                                                                                                                             

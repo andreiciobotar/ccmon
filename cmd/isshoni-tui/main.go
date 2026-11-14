@@ -23,6 +23,7 @@ func main() {
 		size     = flag.String("size", "140x40", "snapshot size WxH")
 		session  = flag.String("session", "", "session id prefix for --snapshot session")
 		row      = flag.Int("row", 0, "dashboard snapshot: cursor on table row N, 0 is the all row")
+		fold     = flag.Bool("fold", false, "dashboard snapshot: collapse the repository the cursor is in")
 		noColor  = flag.Bool("no-color", false, "plain rendering (also honors NO_COLOR)")
 		follow   = flag.Bool("follow", false, "start in follow mode")
 	)
@@ -46,7 +47,7 @@ func main() {
 			fmt.Fprintln(os.Stderr, "isshoni-tui: unknown snapshot view", *snapshot)
 			os.Exit(2)
 		}
-		out, err := tui.Snapshot(tui.SnapshotOptions{Options: o, View: *snapshot, Session: *session, Row: *row, W: w, H: h})
+		out, err := tui.Snapshot(tui.SnapshotOptions{Options: o, View: *snapshot, Session: *session, Row: *row, Fold: *fold, W: w, H: h})
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "isshoni-tui:", err)
 			os.Exit(1)

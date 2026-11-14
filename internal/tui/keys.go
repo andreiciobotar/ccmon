@@ -10,7 +10,7 @@ type keyMap struct {
 	Next, Prev, Dash, Sess, Agents, Factory key.Binding
 	Kaizen, PageLeft, PageRight             key.Binding
 	Down, Up, Top, Bottom, PageDown, PageUp key.Binding
-	Open, Back                              key.Binding
+	Fold, Unfold, Open, Back                key.Binding
 	Range, Follow, Sort, Filter             key.Binding
 	FilterKeep, FilterClear, Erase, Wipe    key.Binding
 	CapEdit, CapSave, CapCancel             key.Binding
@@ -38,6 +38,9 @@ var keys = keyMap{
 	Bottom:   key.NewBinding(key.WithKeys("G", "end")),
 	PageDown: key.NewBinding(key.WithKeys("pgdown", "ctrl+d"), key.WithHelp("pgdn pgup", "page")),
 	PageUp:   key.NewBinding(key.WithKeys("pgup", "ctrl+u")),
+
+	Fold:   key.NewBinding(key.WithKeys("left", "h"), key.WithHelp("←→/hl", "fold repo")),
+	Unfold: key.NewBinding(key.WithKeys("right", "l")),
 
 	Open: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open")),
 	Back: key.NewBinding(key.WithKeys("esc", "backspace"), key.WithHelp("esc", "back")),
@@ -74,13 +77,13 @@ func (m *model) footerKeys() []key.Binding {
 	case m.view == viewAgents:
 		return []key.Binding{keys.Down, keys.Range, keys.Next, keys.Back, keys.Help, keys.Quit}
 	}
-	return []key.Binding{keys.Down, keys.Open, keys.Filter, keys.Sort, keys.Range, keys.Follow, keys.Next, keys.Help, keys.Quit}
+	return []key.Binding{keys.Down, keys.Open, keys.Fold, keys.Filter, keys.Sort, keys.Range, keys.Follow, keys.Next, keys.Help, keys.Quit}
 }
 
 // helpGroups is the help overlay: every binding that has help text.
 func helpGroups() [][]key.Binding {
 	return [][]key.Binding{
-		{keys.Down, keys.Top, keys.PageDown, keys.Open, keys.Back},
+		{keys.Down, keys.Top, keys.PageDown, keys.Fold, keys.Open, keys.Back},
 		{keys.Next, keys.Prev, keys.Dash, keys.PageLeft},
 		{keys.Range, keys.Sort, keys.Filter, keys.Follow, keys.CapEdit},
 		{keys.Help, keys.Quit},

@@ -793,7 +793,7 @@ func modelOf(w, h int, ss ...*data.Session) *model {
 	return m
 }
 
-// groupedModel holds: repo alpha (a1 without a task, task ci with a2 and a3, task zz with a4) and repo beta (b1).
+// groupedModel holds, oldest first: repo alpha (a1 without a task, task ci with a2 and a3, task zz with a4) and repo beta (b1).
 func groupedModel(w, h int) *model {
 	mk := func(id, repo, task string, startMin int, main, sub int64) *data.Session {
 		return groupSession(id, repo, "/r/"+repo, task, startMin, main, sub)
@@ -852,12 +852,12 @@ func TestTreeOrderUnderEachSort(t *testing.T) {
 		sort sortMode
 		want string
 	}{
-		// recent: beta ends last; in alpha the sessions without a task come first, then tasks by latest activity
-		{sortRecent, "all ×5,beta b1000000,alpha ×4,  a1000000,  zz a4000000,  ci ×2,    a3000000,    a2000000"},
-		// cost (the fakes price every token alike, so it follows tokens): alpha before beta; zz before ci
-		{sortCost, "all ×5,alpha ×4,  a1000000,  zz a4000000,  ci ×2,    a3000000,    a2000000,beta b1000000"},
-		// subagent share: ci 50% first among tasks; repositories by summed share (alpha ~3.6%, beta 0)
-		{sortShare, "all ×5,alpha ×4,  a1000000,  ci ×2,    a3000000,    a2000000,  zz a4000000,beta b1000000"},
+		// recent: beta ends last; in alpha tasks and the session without a task (a1, the oldest) are one list by latest activity
+		{sortRecent, "all ×5,beta b1000000,alpha ×4,  zz a4000000,  ci ×2,    a3000000,    a2000000,  a1000000"},
+		// cost (the fakes price every token alike, so it follows tokens): alpha before beta; zz, ci, then a1, the cheapest
+		{sortCost, "all ×5,alpha ×4,  zz a4000000,  ci ×2,    a3000000,    a2000000,  a1000000,beta b1000000"},
+		// subagent share: ci 50% first; zz and a1 have none, so latest activity decides; repositories by summed share (alpha ~3.6%, beta 0)
+		{sortShare, "all ×5,alpha ×4,  ci ×2,    a3000000,    a2000000,  zz a4000000,  a1000000,beta b1000000"},
 	} {
 		m.sortBy = c.sort
 		if got := rowNames(m); got != c.want {
@@ -875,7 +875,7 @@ func TestCursorVisitsEveryRow(t *testing.T) {
 		seen = append(seen, rowNameOf(m.rows()[mustCursor(m)]))
 		send(m, "j")
 	}
-	want := "all ×5,alpha ×4,a1000000,zz a4000000,ci ×2,a3000000,a2000000,beta b1000000"
+	want := "all ×5,alpha ×4,zz a4000000,ci ×2,a3000000,a2000000,a1000000,beta b1000000"
 	if got := strings.Join(seen, ","); got != want {
 		t.Fatalf("j order %s, want %s", got, want)
 	}
@@ -883,7 +883,7 @@ func TestCursorVisitsEveryRow(t *testing.T) {
 		t.Fatalf("j stops at the last row, on %s", got)
 	}
 	send(m, "k")
-	if m.selID != "a2000000" {
+	if m.selID != "a1000000" {
 		t.Fatalf("k -> %s", m.selID)
 	}
 	send(m, "G")
@@ -906,16 +906,16 @@ func TestScrollKeepsGroupRowsAboveTheFirstSession(t *testing.T) {
 	if rows := m.dashRows(); rows >= len(m.rows()) {
 		t.Fatalf("table shows all %d of %d rows; the test needs scrolling", rows, len(m.rows()))
 	}
-	send(m, "G", "k", "k") // a2, a3: first session of task ci
+	send(m, "G", "k", "k", "k") // a1, a2, a3: first session of task ci
 	if m.selID != "a3000000" {
 		t.Fatalf("selected %s", m.selID)
 	}
 	if m.rows()[m.top].s != nil {
 		t.Fatalf("top row %d is a session; the task row above a3000000 must stay in view", m.top)
 	}
-	send(m, "k", "k", "k") // ci, a4, a1: first session of the repository
-	if m.selID != "a1000000" || m.rows()[m.top].s != nil {
-		t.Fatalf("a1000000 must keep its repository row in view (top %d)", m.top)
+	send(m, "k", "k") // ci, a4: first session of the repository
+	if m.selID != "a4000000" || m.rows()[m.top].s != nil {
+		t.Fatalf("a4000000 must keep its repository row in view (top %d)", m.top)
 	}
 	send(m, "g")
 	if m.top != 0 {
