@@ -737,7 +737,7 @@ func groupedModel(w, h int) *model {
 func rowNames(m *model) string {
 	var out []string
 	for _, r := range m.rows() {
-		out = append(out, strings.Repeat("  ", r.depth)+r.name)
+		out = append(out, strings.Repeat("  ", r.depth)+strings.TrimSpace(r.name+" "+r.suffix))
 	}
 	return strings.Join(out, ",")
 }
@@ -749,11 +749,11 @@ func TestTreeOrderUnderEachSort(t *testing.T) {
 		want string
 	}{
 		// recent: beta ends last; in alpha the sessions without a task come first, then tasks by latest activity
-		{sortRecent, "beta,  b1000000,alpha,  a1000000,  zz,    a4000000,  ci,    a3000000,    a2000000"},
+		{sortRecent, "beta b1000000,alpha ×4,  a1000000,  zz a4000000,  ci ×2,    a3000000,    a2000000"},
 		// tokens: alpha 5.4k before beta 300; tasks by summed tokens, zz 5000 before ci 400
-		{sortTokens, "alpha,  a1000000,  zz,    a4000000,  ci,    a3000000,    a2000000,beta,  b1000000"},
+		{sortTokens, "alpha ×4,  a1000000,  zz a4000000,  ci ×2,    a3000000,    a2000000,beta b1000000"},
 		// subagent share: ci 50% first among tasks; repositories by summed share (alpha ~3.6%, beta 0)
-		{sortShare, "alpha,  a1000000,  ci,    a3000000,    a2000000,  zz,    a4000000,beta,  b1000000"},
+		{sortShare, "alpha ×4,  a1000000,  ci ×2,    a3000000,    a2000000,  zz a4000000,beta b1000000"},
 	} {
 		m.sortBy = c.sort
 		if got := rowNames(m); got != c.want {
@@ -785,19 +785,19 @@ func TestCursorSkipsGroupRows(t *testing.T) {
 }
 
 func TestScrollKeepsGroupRowsAboveTheFirstSession(t *testing.T) {
-	m := groupedModel(120, 20)
+	m := groupedModel(120, 15)
 	m.sortBy = sortTokens
 	if rows := m.dashRows(); rows >= len(m.rows()) {
 		t.Fatalf("table shows all %d of %d rows; the test needs scrolling", rows, len(m.rows()))
 	}
-	send(m, "G", "k", "k", "k") // a2, a3, a4: first session of task zz
-	if m.selID != "a4000000" {
+	send(m, "G", "k", "k") // a2, a3: first session of task ci
+	if m.selID != "a3000000" {
 		t.Fatalf("selected %s", m.selID)
 	}
 	if m.rows()[m.top].s != nil {
-		t.Fatalf("top row %d is a session; the task row above a4000000 must stay in view", m.top)
+		t.Fatalf("top row %d is a session; the task row above a3000000 must stay in view", m.top)
 	}
-	send(m, "k") // a1: first session of the repository
+	send(m, "k", "k") // a4, a1: first session of the repository
 	if m.selID != "a1000000" || m.rows()[m.top].s != nil {
 		t.Fatalf("a1000000 must keep its repository row in view (top %d)", m.top)
 	}
@@ -806,7 +806,7 @@ func TestScrollKeepsGroupRowsAboveTheFirstSession(t *testing.T) {
 func TestFilterMatchesLabel(t *testing.T) {
 	m := groupedModel(120, 40)
 	send(m, "/", "a", "l", "p", "h", "a", "/", "c", "i")
-	if got := rowNames(m); got != "alpha,  ci,    a3000000,    a2000000" {
+	if got := rowNames(m); got != "alpha ×2,  ci ×2,    a3000000,    a2000000" {
 		t.Fatalf("filter alpha/ci -> %s", got)
 	}
 	if got := m.totals().tokens; got != 400 {
@@ -832,7 +832,7 @@ func TestSortUsesGroupSums(t *testing.T) {
 		groupSession("p2000000", "r", "/r", "p", 20, 300, 0),
 		groupSession("q1000000", "r", "/r", "q", 30, 500, 0))
 	m.sortBy = sortTokens
-	if got, want := rowNames(m), "r,  p,    p2000000,    p1000000,  q,    q1000000"; got != want {
+	if got, want := rowNames(m), "r ×3,  p ×2,    p2000000,    p1000000,  q q1000000"; got != want {
 		t.Fatalf("got %s, want %s", got, want)
 	}
 }
@@ -841,7 +841,7 @@ func TestSameNameRepositoriesStaySeparate(t *testing.T) {
 	m := modelOf(120, 40,
 		groupSession("x1000000", "app", "/one/app", "", 10, 100, 0),
 		groupSession("y1000000", "app", "/two/app", "", 20, 100, 0))
-	if got, want := rowNames(m), "app,  y1000000,app,  x1000000"; got != want {
+	if got, want := rowNames(m), "app y1000000,app x1000000"; got != want {
 		t.Fatalf("got %s, want %s", got, want)
 	}
 }
@@ -862,7 +862,7 @@ func TestHiddenSelectionNeverSelectsAGroupRow(t *testing.T) {
 }
 
 func TestScrollPullsBackWhenTheWindowGrows(t *testing.T) {
-	m := groupedModel(120, 20)
+	m := groupedModel(120, 15)
 	m.sortBy = sortTokens
 	send(m, "G")
 	if m.top == 0 {

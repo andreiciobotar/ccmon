@@ -35,6 +35,7 @@ Known limits, to state in the README: a session started in a subdirectory of a r
 - `session` text view: the `project` line is replaced by `repo      <name> (<repo_path or project_dir>)` and `task      <task or ->`, with ` (also entered: a, b)` when `worktrees` holds other names.
 
 ## Dashboard (Go; attribution comes only from the JSON fields above)
+The table's columns, widths, signal pills and one-session groups described here were later changed by `docs/specs/group-aggregates.md`; `docs/specs/tui.md` describes the current table.
 - `data.Session` gains `Repo`, `RepoPath`, `Task` (empty when null). A session's label is `repo` or `repo/task`; it replaces `Project` in the breadcrumb, the session header and the Now running panel.
 - The sessions table is a tree in the same box, same columns, first column headed `REPO / TASK`:
   - a repository row: name in bold, totals of its visible sessions (tokens, main│sub bar, dispatches, signal pills; the time column shows the latest activity when sorted by recent, the earliest start otherwise; no session id);

@@ -72,12 +72,19 @@ relative to its own path (`CCMON_ROOT` overrides) and works from any directory;
 `--projects-dir` and `--agents-dir` are resolved against your working directory
 and passed through to the CLI.
 
-Views: dashboard (KPI tiles, sessions table grouped by repository and task with per-group totals, agent and model mix, Now running),
+Views: dashboard (KPI tiles, sessions table grouped by repository and task with per-group totals and signal columns, agent and model mix, Now running),
 session (header signals, timeline with a row per concurrent dispatch, dispatch
 list, detail pane), agents (per agent type token classes and p50/p90). A session
 is live when its transcript changed in the last 30 s. One 1 s poll of the
 transcripts' mtimes finds changed, new and deleted sessions; only those are
 re-read. Quitting stops every python process the dashboard started.
+
+Repository and task rows show `×N` (their session count) and the sum of their
+sessions: tokens, subagent share, dispatches, repeats, review loops, re-check
+rate and warnings, with a live dot when any session in the group is live. A
+group of one session is one row. Group numbers in the dashboard follow the
+filter and range; the same totals are in `sessions --json` under `repos`; live
+state is dashboard-only.
 
 Keys: `tab`/`shift+tab` or `1 2 3` views, `j k g G` or arrows to move,
 `enter` open, `esc`/`backspace` back, `r` range (24h 7d 30d all; retry on the
