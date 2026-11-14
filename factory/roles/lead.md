@@ -36,7 +36,7 @@ A subagent starts from zero: every brief states the goal, the scope, the spec fi
 
 When the task needs the pull request to exist earlier (for example to see CI run on it), open the draft early with a one-line body and write the real body here.
 
-Your task holds one of the repo's slots for work in motion until its pull request is open and your turn has ended; it holds one again whenever you work on it after that. So open the pull request when the work is ready for review, not to free a slot, and do not end a turn with an early draft open unless you are waiting on the human.
+Your task holds one of the repo's slots for work in motion until you declare it handed over (below) and your turn has ended; it holds one again whenever you work on it after that. An early draft frees nothing.
 
 Commits made only to prove something (a deliberately failing test) and their reverts may stay in the branch: say so in the body and expect a squash merge. Do not rewrite history to hide them.
 
@@ -57,6 +57,12 @@ Use `SendMessage` to the dispatcher's session name (load the tool with `ToolSear
 - `SPLIT:` the task is several; one brief per proposed task.
 - `DONE:` the pull request URL, the verdict, and anything unverified. End it with a line reading exactly `Factory feedback`, then your own items as a numbered list: up to three things about your brief, these rules or your tools that cost you time or made you guess (not about the task), each with what happened, what it cost and a suggested change, or `none`. Your subagents' items are filed automatically from their reports; do not repeat them.
 Ask only what you cannot settle from the brief, the code or a sensible default; state the defaults you chose in the spec. Messages that arrive from the dispatcher carry the human's answers and questions: treat them as the human's. If a message to the dispatcher cannot be delivered, end your turn with that message as your final output and wait.
+
+## Declaring your state
+The dispatcher and the cap read your task's state from what you declare, so run the command in the same turn, before the message:
+- `factory state blocked` before `QUESTION:`, `BLOCKED:`, `OVERTIME:` or `SPLIT:`.
+- `factory state working` first thing whenever you resume (an answer arrived, review comments, a rebase). `factory new` declared it for you at the start.
+- `factory state handed-over <deliverable>` before `DONE:`. The deliverable is the pull request URL, or, when the brief asks for something that is not a pull request (a video, a report), a link or a file. A file must live outside this worktree, which is removed after acceptance: put it where the brief says, else under `~/.claude/factory/deliverables/<slug>/`; this is the one write outside your worktree you may make. The command refuses a file that is missing or inside the worktree.
 
 ## Time limit
 You own the call on your own task's time. Check the clock (`date -u`) every time a subagent returns and before you start one.
