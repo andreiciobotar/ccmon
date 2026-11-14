@@ -29,16 +29,16 @@ Isshoni is two tools for people who run [Claude Code](https://claude.com/claude-
 
 ## Kaizen (改善), built in
 
-Most agent setups run on day 100 the way they ran on day 1. Isshoni's factory gets better with every task:
+Most agent setups run on day 100 the way they ran on day 1. Isshoni's factory learns from every task:
 
 - Every agent reports what slowed it down.
-- Every lead records what it decided without asking, and why.
-- Every task leaves a retrospective and, in the monitor, its cost.
-- Every alert from the site manager, the factory's watchdog, is marked acted-on or noise.
+- Every lead records the key calls it made without asking, and why.
+- Every finished task leaves a retrospective and, in the monitor, its cost.
+- Every site manager alert is marked acted-on or noise, so its precision and recall are measured.
 
-All of it is logged against the factory version that produced it. The dispatcher reads it and proposes edits to the factory's own rules; you approve them.
+Reports, decisions and retrospectives carry the factory version that produced them. The dispatcher reads it all and proposes edits to the factory's own rules; you decide.
 
-On day one, agents reported the same shell friction eleven times. It became a rule that day ([#8](https://github.com/andreiciobotar/isshoni/pull/8)).
+On day one, agents reported the same shell friction eleven times and counting. It became a rule that day ([#8](https://github.com/andreiciobotar/isshoni/pull/8)).
 
 ## Monitor
 
