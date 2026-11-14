@@ -17,6 +17,8 @@ STALE_SECONDS = 7 * 24 * 3600
 SLUG_RE = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*")
 BACKGROUNDED_RE = re.compile(r"backgrounded\s*·\s*(\S+)\s*·\s*(.+)")
 STORE = Path("~/.claude/factory")
+KEEP_MONTHS = 12
+BOUND_RE = re.compile(r"\d{4}-\d{2}(-\d{2}(T\d{2}(:\d{2}(:\d{2}Z?)?)?)?)?")
 WORKTREE_RE = re.compile(r"(.*?)/\.claude/worktrees/([^/]+)(?:/|$)")
 MODEL_RE = re.compile(rb'"model"\s*:\s*"([^"]+)"')
 ITEM_RE = re.compile(r"(?:[-*]|\d+\.)\s+")
@@ -313,6 +315,78 @@ def append(name, record):
         os.close(fd)
 
 
+def log(name, record):
+    """append to the file of the record's month; the first write of a month prunes that log."""
+    month = f"{name}-{record['ts'][:7]}"
+    fresh = not (STORE.expanduser() / f"{month}.jsonl").exists()
+    append(month, record)
+    if fresh:
+        prune(name)
+
+
+def log_files(name):
+    """[(month, path)] oldest first: the unsuffixed file (by its mtime's month), then <name>-YYYY-MM.jsonl."""
+    directory = STORE.expanduser()
+    legacy = directory / f"{name}.jsonl"
+    files = [(m.group(1), p) for p in sorted(directory.glob(f"{name}-*.jsonl"))
+             if (m := re.fullmatch(rf"{name}-(\d{{4}}-\d\d)\.jsonl", p.name))]
+    try:
+        files.insert(0, (time.strftime("%Y-%m", time.gmtime(legacy.stat().st_mtime)), legacy))
+    except FileNotFoundError:
+        pass
+    return files
+
+
+def read_file(path):
+    """The JSON objects in one log file; a vanished file reads as empty."""
+    try:
+        lines = path.read_text().splitlines()
+    except FileNotFoundError:
+        return
+    for line in lines:
+        try:
+            r = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(r, dict):
+            yield r
+
+
+def read_log(name, since=None, until=None):
+    """Records with since <= ts < until, oldest file first; month files outside the range are not opened."""
+    low, high = (since or "")[:7], (until or "9999-99")[:7]
+    for month, path in log_files(name):
+        if path.name != f"{name}.jsonl" and not low <= month <= high:
+            continue
+        for r in read_file(path):
+            ts = r.get("ts")
+            if (since or until) and not (isinstance(ts, str) and ts >= (since or "") and (not until or ts < until)):
+                continue
+            yield r
+
+
+def prune(name):
+    """Best effort, keeping the current month and the KEEP_MONTHS before it; see docs/specs/factory-events.md."""
+    n = int(now()[:4]) * 12 + int(now()[5:7]) - 1 - KEEP_MONTHS
+    cutoff = f"{n // 12:04d}-{n % 12 + 1:02d}"
+
+    def state(files):
+        return {e["id"]: (e["status"], e.get("pr")) for e in fold_feedback(r for _, p in files for r in read_file(p))}
+
+    try:
+        while name != "retros" and (files := log_files(name)) and files[0][0] < cutoff:
+            if name == "feedback":
+                before, after = state(files), state(files[1:])
+                carry = {i for i in before if before[i] != after.get(i)
+                         and (i in after or before[i][0] not in ("done", "rejected"))}
+                for r in read_file(files[0][1]):
+                    if r.get("id") in carry:
+                        append(f"feedback-{now()[:7]}", r)
+            files[0][1].unlink()
+    except Exception:
+        pass
+
+
 def record(repo, slug, role, model, session):
     version = json.loads((PLUGIN_ROOT / ".claude-plugin" / "plugin.json").read_text())["version"]
     return {"ts": now(), "repo": repo, "slug": slug, "role": role, "model": model,
@@ -386,27 +460,23 @@ def file_feedback(lines, tag):
     for text in feedback_items(lines):
         key = "\0".join([tag["repo"] or "", tag["slug"] or "", tag["role"], text])
         fid = hashlib.sha256(key.encode()).hexdigest()[:12]
-        append("feedback", {**tag, "id": fid, "text": text, "status": "open"})
+        log("feedback", {**tag, "id": fid, "text": text, "status": "open"})
         ids.append(fid)
     return ids
 
 
 def read_feedback():
     """Entries with their folded status, in filing order."""
-    try:
-        lines = (STORE.expanduser() / "feedback.jsonl").read_text().splitlines()
-    except FileNotFoundError:
-        return []
+    return fold_feedback(read_log("feedback"))
+
+
+def fold_feedback(records):
     entries, changes = {}, {}
-    for line in lines:
-        try:
-            r = json.loads(line)
-        except ValueError:
-            continue
-        if isinstance(r, dict) and "id" in r:
+    for r in records:
+        if "id" in r:
             if "text" in r:
                 entries.setdefault(r["id"], dict(r))
-            else:
+            elif str(r.get("ts", "")) >= str(changes.get(r["id"], {}).get("ts", "")):
                 changes[r["id"]] = r
     for fid, entry in entries.items():
         change = changes.get(fid, {})
@@ -448,7 +518,7 @@ def inside(path, base):
 def task_event(event, repo, slug, **extra):
     """TaskStarted / TaskRemoved, from the dispatcher; a failed write is ignored."""
     try:
-        append("events", {**record(repo.root, slug, "dispatcher", None, os.environ.get("CLAUDE_CODE_SESSION_ID")),
+        log("events", {**record(repo.root, slug, "dispatcher", None, os.environ.get("CLAUDE_CODE_SESSION_ID")),
                           "event": event, **extra})
     except (OSError, ValueError, KeyError):
         pass
@@ -751,7 +821,7 @@ def cmd_hook(args):
             fields["kind"] = next((k for k in KINDS if message.startswith(k + ":")), None)
             text = message if fields["kind"] == "DONE" else None
         tag = tags(p)
-        append("events", {**tag, "event": event, **fields})
+        log("events", {**tag, "event": event, **fields})
         if isinstance(text, str) and (lines := feedback_section(text)) is not None:
             file_feedback(lines, tag)
     except Exception:
@@ -777,7 +847,7 @@ def cmd_retro(args):
             isinstance(d, dict) and set(d) == {"caught_by", "what"} and d["caught_by"] in CAUGHT_BY
             and isinstance(d["what"], str) and d["what"].strip() for d in defects):
         raise Fail(f"retro: defects must be a list of objects with caught_by ({'|'.join(CAUGHT_BY)}) and a non-empty what")
-    append("retros", {**tag, **doc})
+    log("retros", {**tag, **doc})
     return 0
 
 
@@ -800,7 +870,7 @@ def cmd_feedback(args):
         found = [e["id"] for e in read_feedback() if e["id"].startswith(args.id)]
         if len(found) != 1:
             raise Fail(f"feedback: {'no entry' if not found else 'several entries'} matches {args.id!r}")
-        append("feedback", {"id": found[0], "ts": now(), "status": args.status, **({"pr": args.pr} if args.pr else {})})
+        log("feedback", {"id": found[0], "ts": now(), "status": args.status, **({"pr": args.pr} if args.pr else {})})
     else:
         entries = [e for e in read_feedback() if (not args.status or e["status"] == args.status)
                    and (not args.kind or e["kind"] == args.kind)]
@@ -809,6 +879,15 @@ def cmd_feedback(args):
         else:
             for e in entries:
                 print(f"{e['id']}  {e['status']}  {e['slug'] or '-'}  {e['role']}  {' '.join(e['text'].split())[:100]}")
+    return 0
+
+
+def cmd_log(args):
+    for bound in (args.since, args.until):
+        if bound is not None and not BOUND_RE.fullmatch(bound):
+            raise Fail(f"log: a bound is a ts prefix of at least YYYY-MM, got {bound!r}")
+    for r in read_log(args.name, args.since, args.until):
+        print(json.dumps(r))
     return 0
 
 
@@ -849,6 +928,10 @@ def parse_args(argv):
     change.add_argument("id")
     change.add_argument("status", choices=STATUSES)
     change.add_argument("--pr")
+    show = sub.add_parser("log", help="print stored events or retrospectives, oldest first")
+    show.add_argument("name", choices=("events", "retros"))
+    show.add_argument("--since", metavar="TS")
+    show.add_argument("--until", metavar="TS")
     return parser.parse_args(argv)
 
 
@@ -856,7 +939,7 @@ def main(argv=None):
     args = parse_args(sys.argv[1:] if argv is None else argv)
     try:
         return {"new": cmd_new, "status": cmd_status, "clean": cmd_clean, "state": cmd_state, "ack": cmd_ack, "hook": cmd_hook,
-                "retro": cmd_retro, "feedback": cmd_feedback}[args.cmd](args)
+                "retro": cmd_retro, "feedback": cmd_feedback, "log": cmd_log}[args.cmd](args)
     except Fail as e:
         print(f"factory: {e}", file=sys.stderr)
         return e.code

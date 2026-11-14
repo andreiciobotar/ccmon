@@ -4,9 +4,11 @@ Implements the "Collect" section of `docs/specs/telemetry.md` except pull reques
 
 ## Outcome
 A finished task leaves three kinds of record under `~/.claude/factory/`, which survives the worktree:
-- `events.jsonl`: one line per event, written by hooks the plugin ships and by `factory new` / `factory clean`.
-- `retros.jsonl`: one line per lead retrospective, written by `factory retro`.
-- `feedback.jsonl`: one line per "Factory feedback" item and one per status change, written by the hooks, `factory feedback add` and `factory feedback set`.
+- `events`: one line per event, written by hooks the plugin ships and by `factory new` / `factory clean`.
+- `retros`: one line per lead retrospective, written by `factory retro`.
+- `feedback`: one line per "Factory feedback" item and one per status change, written by the hooks, `factory feedback add` and `factory feedback set`.
+
+Each is a log of JSONL files, one per month (see "Month files and what is kept").
 
 Every record carries `ts` (UTC, `2026-11-14T00:01:02Z`), `repo`, `slug`, `role`, `model`, `version`, `session`.
 
@@ -45,6 +47,22 @@ Everything lives in `factory/bin/factory` (one owner, already on the Bash tool's
 ### Store
 `STORE = Path("~/.claude/factory")`. One function appends one JSON line to `<store>/<name>.jsonl` with a single `os.write` on a descriptor opened `O_WRONLY | O_APPEND | O_CREAT` (mode 0600), creating the directory when missing. It raises `OSError` on failure; the hook swallows it, the commands report it.
 
+#### Month files and what is kept (`docs/specs/event-log-bounds.md`)
+The three logs are written one file per UTC month, named by the record's own `ts`: `events-2026-11.jsonl`, `retros-2026-11.jsonl`, `feedback-2026-11.jsonl`. A file is only ever appended to, or deleted whole; nothing is rewritten in place, so the atomic append is the only thing concurrent writers rely on. The unsuffixed files written before this rule (`events.jsonl`, ...) are read first, as the oldest, and count as the month they were last modified in.
+
+What is kept (12 is the constant `KEEP_MONTHS`; there is no setting):
+- **Events:** the current month and the 12 before it. Older files are deleted, not archived.
+- **Retrospectives:** everything, forever (one line per task).
+- **Feedback:** every entry that is `open` or `accepted`, forever; `done` and `rejected` entries for at least 12 months. A file older than that is deleted, oldest first, after the lines it holds for entries that are still `open` or `accepted` (and any status line a remaining entry depends on) are appended, unchanged, to the current month's file. So a carried line's `ts` is older than its file's month, and feedback is read whole (`factory feedback`), not by time range.
+
+Deleting happens when a log's first record of a new month is written, in that process (a hook or a command), best effort: a failure is ignored and retried next month. So a store nobody writes to is never pruned.
+
+Reading:
+```
+factory log events|retros [--since <ts>] [--until <ts>]
+```
+prints the stored records, oldest file first, one JSON object per line. A bound is a `ts` or a prefix of one, at least `YYYY-MM` (`2026-11`, `2026-11-14`, `2026-11-14T09:30:00Z`); a record is printed when `since <= ts < until`, compared as strings. Only the month files inside the range are opened. Lines that are not JSON objects are skipped. A bad bound exits 2.
+
 ### `factory hook`
 Run by every hook. Reads the payload from stdin, appends one event, prints nothing, exits 0 whatever happens (bad JSON, unwritable store, any exception).
 
@@ -71,7 +89,7 @@ Feedback is filed by the same call from two texts: `tool_input.message` of a `Su
 - Items: a line starting with `- `, `* ` or `<digits>. ` starts an item; other lines continue the current one; a section with no such line is one item. The marker is dropped, the rest is kept verbatim. Lines before the first marker are dropped when there is one. An item that is empty or reads `none` (any case, quotes and trailing punctuation ignored) is not filed, so `none` and `- none` both file nothing.
 - Entry line: the tags, `id`, `text`, `status: "open"`. `id` is the first 12 hex digits of the SHA-256 of `repo`, `slug`, `role` and `text` joined by NUL, so the same item filed again (a resumed subagent hands back twice) has the same id.
 - Status line: `id`, `ts`, `status`, and `pr` when given. Lines are only ever appended.
-- Reading: an entry is the first line with that `id` and a `text`; its status and `pr` come from the last status line for the id (no `pr` on that line: none shown), else `open`. Lines that are not JSON objects are skipped.
+- Reading: an entry is the first line with that `id` and a `text`; its status and `pr` come from the status line for the id with the latest `ts` (the later line on a tie; no `pr` on that line: none shown), else `open`. Lines that are not JSON objects are skipped.
 - Kind: an entry whose text starts with `DECISION:` is a `decision` (a key decision a lead took without asking: what and why), every other entry an `issue`. The kind is computed on reading and never stored, so entries filed before kinds existed read correctly, and an item of a report's section that starts with `DECISION:` is a decision too.
 
 Commands:
@@ -87,7 +105,7 @@ factory feedback set <id> open|accepted|rejected|done [--pr <url>]
 - `set` takes an id or a unique prefix of one; no match or several is an error (exit 2).
 
 ### `factory retro`
-Reads one JSON object from stdin, appends it to `retros.jsonl` with the tags. Exactly these keys, or exit 2 naming the problem:
+Reads one JSON object from stdin, appends it to the `retros` log with the tags. Exactly these keys, or exit 2 naming the problem:
 ```json
 {"defects": [{"caught_by": "tests|reviewer|lead|ci|human", "what": "..."}],
  "slowed": ["..."], "rules_missing": ["..."], "rules_dead_weight": ["..."], "brief_questions": ["..."]}
@@ -110,7 +128,12 @@ A failed write is ignored; output and exit codes of `new`, `status` and `clean` 
 ## Known limits
 - A subagent in its own worktree (`isolation: worktree`) may report a `cwd` under `.claude/worktrees/agent-*`; `CLAUDE_PROJECT_DIR` is used first to avoid that, unverified for that case.
 - The lead's feedback is filed only from a `DONE:` message that was sent with `SendMessage`; a lead that ends with the message as plain output files it with `factory feedback add`.
-- Concurrent appends rely on `O_APPEND` writes of one line being atomic on a local filesystem.
+- Concurrent appends rely on `O_APPEND` writes of one line being atomic on a local filesystem. Counted on 2026-11-14 over the live store after a day of up to five concurrent leads: 0 malformed lines in 166; a test runs 8 writers against a pruner.
+- Within a file, lines are in write order; a reader that needs strict time order across the unsuffixed file and the month files sorts by `ts`. A session still running a plugin copy from before the month files keeps appending to the unsuffixed files; they are read, so nothing is lost, and while one is being written no older month file of that log is deleted.
+- A crash between carrying feedback lines and deleting their file, or two sessions pruning at once, leaves duplicate lines; they fold to the same entries.
+- `factory feedback` lists carried entries after newer ones.
+- A `feedback set` that reopens a closed entry more than 12 months old in the same instant its file is deleted is lost. Two status lines for one entry with the same `ts`, one of them carried, may swap which wins.
+- A month file has no size limit of its own: it holds what one month produces (about 280 bytes per event; 30 KB of events in the first ten hours of use).
 - A subagent that never calls `SubagentHandback` files nothing; the lead files its items with `factory feedback add`.
 - `PermissionDenied`, `TaskStarted` and `TaskRemoved` have not been seen in a live session (the end-to-end lead was started without `factory new`, which requires the dispatcher's session name); the last two are covered by tests.
 - A session started with `--plugin-dir` while another copy of the plugin is installed may find the other copy's `factory` first on `PATH` (seen in the end-to-end run).
@@ -124,6 +147,7 @@ A failed write is ignored; output and exit codes of `new`, `status` and `clean` 
 - `retro`: a valid object stored with tags; each invalid shape refused; refused outside a task worktree; unwritable store exits 1.
 - `new` and `clean` record their event, and behave the same when the store is unwritable (existing tests untouched and passing).
 - `hooks.json` parses, and every command is the `factory hook` line.
+- Month files, pruning, `factory log` and concurrent writers: listed in `docs/specs/event-log-bounds.md`.
 
 ## Done
 `make test` passes; one real lead run with this plugin leaves events, a retrospective and feedback entries, inspected by hand; the eight items of `fa1fc39c`'s `DONE:` are filed as the first entries, by a one-off script that gives them that session's tags (version `0.1.0`), which `feedback add` cannot.
