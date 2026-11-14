@@ -122,13 +122,15 @@ and decisions by status, and groups open issues by the first keyword topic that 
 (`permissions`, `brief`, `rules`, `tools`, `review`, `time`, else `other`).
 
 `site_manager` is the site manager's record over every repository, read from
-`firings.jsonl` and counted as `factory firings` counts it (`docs/factory.md`, "Site
-manager"): `escalated` firings and of those `acted`, `ignored` and `no_outcome`;
+the firing log (every month file) and counted as `factory firings` counts it
+(`docs/factory.md`, "Site manager"; a record without a `repo` counts nowhere): `escalated` firings and of those `acted`, `ignored` and `no_outcome`;
 `suppressed` firings; `missed` problems (`missed_suppressed` had fired and were
 suppressed, `missed_never_fired` the rest); `precision` is `acted / (acted + ignored)` and
 `recall` is `acted / (acted + missed)`, each 0 to 1, or null with nothing to divide by.
 With `--since` it counts the firings that fired, and the misses recorded, at or after the
-cutoff. Without the file every count is 0 and both ratios are null.
+cutoff. Without a log every count is 0 and both ratios are null. The factory keeps
+escalated firings and misses forever, so the two ratios are all-time; `suppressed` covers
+what the log still holds (about a year).
 
 Limits: no landed figure without `gh`; a stop logged before the hook stored a summary has no reason;
 the site manager's firings are counted, not listed (`factory firings` lists a

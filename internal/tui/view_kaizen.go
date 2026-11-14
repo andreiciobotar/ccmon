@@ -819,7 +819,7 @@ func (m *model) stopLines(p paint, w int) block {
 func (m *model) siteManagerLines(p paint, w int) block {
 	th := m.th
 	s := m.kz.doc.SiteManager
-	lines := block{m.heading(p, w, "site manager", "what it escalated to the human, and what came of it")}
+	lines := block{m.heading(p, w, "site manager", "what it escalated, and what came of it")}
 	if s.Escalated+s.Suppressed+s.Missed == 0 {
 		for _, l := range wrapPlain("nothing escalated, suppressed or missed yet · precision and recall start with the first outcome (factory firing <id> acted|ignored)", w-2) {
 			lines = append(lines, p.sp(1)+p.t(l, th.Faint))

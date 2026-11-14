@@ -363,6 +363,11 @@ def fired(fid, ts, repo=ALPHA):
     return {"ts": ts, "repo": repo, "id": fid, "criterion": "quiet", "escalate": "judge", "slug": "a1", "subject": "a1", "detail": "d"}
 
 
+def then(fid, hhmm, repo=ALPHA, **kw):
+    """A later record of a firing on DAY: its decision, outcome or clearing."""
+    return {"ts": "%sT%s:00Z" % (DAY, hhmm), "repo": repo, "id": fid, **kw}
+
+
 class SiteManagerTests(Store):
     EMPTY = {"escalated": 0, "acted": 0, "ignored": 0, "no_outcome": 0, "suppressed": 0, "missed": 0,
              "missed_suppressed": 0, "missed_never_fired": 0, "precision": None, "recall": None}
@@ -376,42 +381,46 @@ class SiteManagerTests(Store):
         self.assertEqual(self.record(), self.EMPTY)
 
     def test_fired_without_a_decision_or_an_outcome_gives_no_ratio(self):
-        self.log("firings.jsonl", [fired("f1", "2026-11-10T10:00:00Z"), fired("f2", "2026-11-10T10:01:00Z"),
-                                   {"ts": "2026-11-10T10:02:00Z", "id": "f2", "decision": "escalated", "by": "watch"}])
+        self.log("firings-2026-11.jsonl", [fired("f1", "2026-11-10T10:00:00Z"), fired("f2", "2026-11-10T10:01:00Z"),
+                                           then("f2", "10:02", decision="escalated", by="watch")])
         self.assertEqual(self.record(), {**self.EMPTY, "escalated": 1, "no_outcome": 1})
 
-    def test_counts_and_ratios_over_every_repository(self):
-        d = lambda fid, minute, decision: {"ts": "2026-11-10T11:%02d:00Z" % minute, "id": fid, "decision": decision}  # noqa: E731
-        o = lambda fid, minute, outcome: {"ts": "2026-11-10T12:%02d:00Z" % minute, "id": fid, "outcome": outcome}  # noqa: E731
-        self.log("firings.jsonl", [
-            "not json", {"ts": "2026-11-10T09:00:00Z", "id": 7, "criterion": "quiet"}, {"id": "zz", "outcome": "acted"},
-            o("f1", 9, "acted"),  # written out of order: records are folded by ts, as the factory reads them
-            *(fired("f%d" % i, "2026-11-10T10:%02d:00Z" % i, BETA if i == 2 else ALPHA) for i in range(1, 8)),
-            d("f1", 1, "escalated"), d("f1", 2, "suppressed"),  # the first decision stands
-            d("f2", 3, "escalated"), d("f3", 4, "escalated"), d("f4", 5, "escalated"), d("f5", 6, "escalated"),
-            d("f6", 7, "suppressed"), d("f7", 8, "suppressed"),
-            o("f2", 1, "ignored"), o("f2", 2, "acted"),  # the last outcome stands
-            o("f3", 3, "acted"), o("f4", 4, "ignored"),
-            o("f6", 5, "acted"),  # an outcome on a suppressed firing counts nowhere
-            {"ts": "2026-11-10T12:10:00Z", "id": "f1", "cleared": True},
+    def test_counts_and_ratios_over_every_repository_and_month_file(self):
+        self.log("firings.jsonl", [  # the legacy file and the month files are one log
+            "not json", {"ts": "2026-11-10T09:00:00Z", "repo": ALPHA, "id": 7, "criterion": "quiet"},
+            then("zz", "09:01", outcome="acted"),
+            *(fired("f%d" % i, "2026-11-10T10:%02d:00Z" % i) for i in range(1, 8)),
+            fired("f1", "2026-11-10T10:08:00Z", BETA),  # the same id in another repository is another firing
+            then("f1", "11:01", decision="escalated"), then("f1", "11:02", decision="suppressed"),  # the first decision stands
+            then("f2", "11:03", decision="escalated"), then("f3", "11:04", decision="escalated")])
+        self.log("firings-2026-11.jsonl", [
+            then("f1", "12:09", outcome="acted"),  # carried lines sit before newer ones: records are folded by ts
+            then("f4", "11:05", decision="escalated"), then("f5", "11:06", decision="escalated"),
+            then("f6", "11:07", decision="suppressed"), then("f7", "11:08", decision="suppressed"),
+            then("f1", "11:09", BETA, decision="escalated"), then("f1", "12:00", BETA, outcome="ignored"),
+            then("f2", "12:01", outcome="ignored"), then("f2", "12:02", outcome="acted"),  # the last outcome stands
+            then("f3", "12:03", outcome="acted"),
+            then("f6", "12:05", outcome="acted"),  # an outcome on a suppressed firing counts nowhere
+            then("f1", "12:10", cleared=True),
+            {"ts": "2026-11-10T12:11:00Z", "id": "f4", "outcome": "acted"},  # no repo: the factory counts it nowhere
+            {"ts": "2026-11-10T12:12:00Z", "miss": "no repo"},
             {"ts": "2026-11-10T13:00:00Z", "repo": ALPHA, "miss": "a lead was stuck", "slug": "a1", "firing": "f6"},
             {"ts": "2026-11-10T13:01:00Z", "repo": BETA, "miss": "nothing fired", "slug": None, "firing": None}])
         self.assertEqual(self.record(), {
-            "escalated": 5, "acted": 3, "ignored": 1, "no_outcome": 1, "suppressed": 2, "missed": 2,
+            "escalated": 6, "acted": 3, "ignored": 1, "no_outcome": 2, "suppressed": 2, "missed": 2,
             "missed_suppressed": 1, "missed_never_fired": 1, "precision": 0.75, "recall": 0.6})
 
     def test_since_keeps_firings_and_misses_by_their_own_time(self):
-        self.log("firings.jsonl", [
+        self.log("firings-2026-11.jsonl", [
             fired("old", "2026-11-10T10:00:00Z"), fired("new", "2026-11-10T12:00:00Z"),
-            {"ts": "2026-11-10T12:01:00Z", "id": "old", "decision": "escalated"},
-            {"ts": "2026-11-10T12:02:00Z", "id": "old", "outcome": "ignored"},
-            {"ts": "2026-11-10T12:03:00Z", "id": "new", "decision": "escalated"},
-            {"ts": "2026-11-10T12:04:00Z", "id": "new", "outcome": "acted"},
-            {"ts": "2026-11-10T11:59:59Z", "miss": "before"}, {"ts": "2026-11-10T12:00:00Z", "miss": "at the cutoff"},
-            {"miss": "no time"}])
+            then("old", "12:01", decision="escalated"), then("old", "12:02", outcome="ignored"),
+            then("new", "12:03", decision="escalated"), then("new", "12:04", outcome="acted"),
+            {"ts": "2026-11-10T11:59:59Z", "repo": ALPHA, "miss": "before"},
+            {"ts": "2026-11-10T12:00:00Z", "repo": ALPHA, "miss": "at the cutoff"}, {"repo": ALPHA, "miss": "no time"}])
         self.assertEqual(self.record(datetime(2026, 11, 10, 12, 0, 0, tzinfo=timezone.utc)), {
             **self.EMPTY, "escalated": 1, "acted": 1, "missed": 1, "missed_never_fired": 1, "precision": 1.0, "recall": 0.5})
-        self.assertEqual((self.record()["escalated"], self.record()["missed"], self.record()["precision"]), (2, 3, 0.5))
+        self.assertEqual(self.record(), {**self.EMPTY, "escalated": 2, "acted": 1, "ignored": 1, "missed": 3,
+                                         "missed_never_fired": 3, "precision": 0.5, "recall": 0.25})
 
     def test_agrees_with_the_factory_on_the_same_log(self):
         """The one place the two folds are compared: `factory firings --json` run on a store holding one repository."""

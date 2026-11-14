@@ -344,10 +344,12 @@ def _site_manager(records, cutoff):
     """The site manager's record, folded and counted as `factory firings` does, over every repository."""
     firings, misses = {}, 0
     suppressed_first = 0
-    for r in sorted(records, key=lambda r: str(r.get("ts"))):
-        fid = r.get("id")
-        f = firings.get(fid) if isinstance(fid, str) else None
-        if "miss" in r or (isinstance(fid, str) and "criterion" in r):
+    for r in sorted(records, key=lambda r: str(r.get("ts"))):  # a carried record sits in a newer file than its ts
+        if not _str(r, "repo"):
+            continue  # the factory reads the log by repository: such a record counts in none
+        fid = (r["repo"], r["id"]) if isinstance(r.get("id"), str) else None
+        f = firings.get(fid)
+        if "miss" in r or (fid and "criterion" in r):
             ts = _ts(r)
             if cutoff is not None and not (ts and ts >= cutoff):
                 continue
@@ -427,5 +429,5 @@ def build(factory_dir, load_sessions, prices, cutoff=None, now=None):
         "stops": [{k: v for k, v in s.items() if k != "_key"} for s in stops if s["_key"] in kept],
         "slowed": slowed, "rewards": _rewards([t for t in tasks if t["landed"]]),
         "outbox": _outbox(logs["feedback"], cutoff),
-        "site_manager": _site_manager(_records(os.path.join(factory_dir, "firings.jsonl")), cutoff),
+        "site_manager": _site_manager(read_log(factory_dir, "firings"), cutoff),
     }
