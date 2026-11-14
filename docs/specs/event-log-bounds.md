@@ -14,25 +14,27 @@ The rule itself is the "Store" section of `docs/specs/factory-events.md` (alread
 - **Month files, no rewriting.** A file is only ever appended to (the current month) or unlinked whole (an old month). No rotation by rename, no compaction, so no lock: the one concurrency mechanism stays the atomic `O_APPEND` write. Size-based rotation and compaction both need a lock taken by every hook.
 - **Events:** dropped after 12 full months, not archived. They are raw material; the measures compare plugin versions, and a year-old version is not a comparison anyone acts on.
 - **Retrospectives:** never dropped. One line per task (about 1.2 KB), and they are the record with no "closed" state.
-- **Feedback:** never dropped while open or accepted. A month file goes only when it is the oldest, older than 12 months, every entry that would disappear is `done` or `rejected`, and no surviving entry changes.
+- **Feedback:** never dropped while open or accepted; closed (`done`, `rejected`) entries go with their file after 12 months. Before an old file is deleted, the lines of its entries that are still live are appended to the current month's file (still append-only, no lock). Without the carry, one entry left open would keep every later file forever (review finding), and decisions (pull request #8) are filed open.
+- **The latest `ts` wins** among an entry's status lines, not the last line read: carried lines and old plugin copies writing the unsuffixed file both put lines out of file order.
 - **12 months is a constant** (`KEEP_MONTHS`), not a setting: `load_settings` fails on a broken settings file, and a hook must not lose an event to that.
 - **No migration of the unsuffixed files.** Readers read them first; they age out by the same rule using their modification time. Moving their lines would race with old plugin copies still appending (fact 6).
 - **Pruning runs at the first write of a month** for that name, inside the writer. No new command, no cron, no edit to `factory clean`.
-- **One reader command**, `factory log`, so the site manager and stats page need not know the layout.
+- **One reader command**, `factory log events|retros`, so the site manager and stats page need not know the layout. Not for feedback: carried lines make its month files inexact, and `factory feedback --json` already reads it.
 
 ## Code (`factory/bin/factory`, telemetry section only)
 Keep edits local: `append` is untouched; `cmd_new`, `cmd_status`, `cmd_clean`, `load_settings` are untouched.
 
-- `KEEP_MONTHS = 12`, `LOGS = ("events", "retros", "feedback")`.
+- `KEEP_MONTHS = 12`.
 - `log(name, record)`: `append` to `<name>-<record["ts"][:7]>`; when that file did not exist before the write, call `prune(name)`. The five existing `append("events"|"feedback"|"retros", ...)` calls become `log(...)`.
 - `log_files(name)`: `[(month, path)]`, oldest first: the unsuffixed `<name>.jsonl` first when it exists (its month is the UTC month of its mtime), then `<name>-YYYY-MM.jsonl` by name. Names that do not match exactly that pattern are ignored (`events-2026-11.jsonl.bak`, `events-old.jsonl`).
 - `read_log(name, since=None, until=None)`: yields the JSON objects of those files in order. A month file is skipped when its month is outside `since[:7] .. until[:7]`; the unsuffixed file is always read. A record is yielded when `since <= ts < until` (a missing bound does not filter; a record without a string `ts` is yielded only when no bound is given). Lines that are not JSON objects are skipped. A file that vanishes between listing and reading is skipped.
 - `read_feedback()` folds `read_log("feedback")`; the fold itself takes records, so `prune` can fold a subset of files.
-- `prune(name)`: best effort, swallows `OSError`. `cutoff` = the month `KEEP_MONTHS` before the current UTC month; a file is old when its month `< cutoff` (so the current month and the 12 before it are kept).
-  - `events`: unlink every old file.
-  - `feedback`: while the oldest file is old: fold all files (`before`) and all but the oldest (`after`), as `{id: (status, pr)}`. If every id in `before` missing from `after` is `done` or `rejected`, and every id in `after` has the same value as in `before`, unlink it and repeat; else stop.
+- `prune(name)`: best effort, swallows every exception. `cutoff` = the month `KEEP_MONTHS` before the current UTC month; a file is old when its month `< cutoff` (so the current month and the 12 before it are kept). While the oldest file (listed afresh each round) is old:
+  - `events`: unlink it.
+  - `feedback`: fold all files (`before`) and all but the oldest (`after`), as `{id: (status, pr)}`. The ids to carry are those whose value differs between the two and that either remain in `after` or are not `done`/`rejected`. Append every line of the oldest file with such an id to the current month's file, in order, then unlink it. A failed append leaves the file.
   - `retros`: nothing.
-- `factory log {events,retros,feedback} [--since TS] [--until TS]`: prints the records of `read_log`, one JSON object per line. A bound is a `ts` prefix of at least `YYYY-MM` (regex `\d{4}-\d{2}(-\d{2}(T\d{2}(:\d{2}(:\d{2}Z?)?)?)?)?`); anything else exits 2. Empty store: prints nothing, exits 0.
+- The feedback fold takes an entry's status from the status line with the greatest `ts`, the later line on a tie.
+- `factory log {events,retros} [--since TS] [--until TS]`: prints the records of `read_log`, one JSON object per line. A bound is a `ts` prefix of at least `YYYY-MM` (regex `\d{4}-\d{2}(-\d{2}(T\d{2}(:\d{2}(:\d{2}Z?)?)?)?)?`); anything else exits 2. Empty store: prints nothing, exits 0.
 
 `README.md` (the paragraph naming the three files and the command list) and `factory/skills/dispatch/SKILL.md` (the one sentence naming the files) are brought in line with the smallest edit: other open pull requests touch the neighbouring lines.
 
@@ -43,11 +45,12 @@ Existing tests keep passing with the `lines()` helper reading through the month 
 - `read_log`: half-open bounds with prefixes of several lengths (`2026-11`, `2026-11-14`, a full `ts`); month files outside the range are not opened (make one unreadable garbage and assert on the result, or patch `open`); the unsuffixed file is always read and filtered by `ts`; malformed and non-object lines skipped; a vanished file skipped.
 - Feedback across files: an entry in the unsuffixed file with its status line in a month file folds; `feedback set` on such an entry works.
 - `prune("events")`: with the clock patched, a file 13 months old is removed, one 12 months old and the current one stay; an old unsuffixed file (mtime set with `os.utime`) is removed, a fresh one stays.
-- `prune("feedback")`: an old file with only `done`/`rejected` entries goes; one with an `open` entry stays; one with an `accepted` entry stays; an old closed file behind an older blocked one stays (oldest first); an old file whose removal would reopen an entry (same id re-filed in a later file, the status line in the old file) stays; an old file whose status lines belong to entries in later files... cannot exist (status follows entry), so not tested.
+- `prune("feedback")`: an old file with only `done`/`rejected` entries goes; `open` and `accepted` entries of old files (unsuffixed and month) end up in the current month with the same folded status, closed ones gone; a status line in a later old file follows its carried entry; an entry closed in the old file and re-filed later stays closed; a carry that cannot be written keeps the old file.
+- The fold: a status line with a later `ts` in the unsuffixed file beats an earlier one in a month file.
 - `retros` are never pruned.
 - The first write of a month prunes (end to end through `factory hook` as a subprocess is not needed; call `log` with the clock patched), and a failing prune (unlink raising `OSError`) does not fail the write.
 - Concurrency, real processes: 8 processes each appending 300 records through `log` (line lengths from 100 bytes to 16 KB), while another process calls `prune("events")` in a loop over a store that also holds old month files. Afterwards: exactly 2400 lines in the current month, every one parses, every (process, sequence) pair present once, the old files are gone.
-- `factory log`: bounds, bad bound exits 2, empty store.
+- `factory log`: bounds, bad bound exits 2, empty store, `feedback` refused.
 
 ## Done
 `make test` passes. Run against a copy of the live store: `factory feedback --json` prints the same entries before and after the change; `factory log events` prints the 100+ existing events; a new hook event lands in `events-2026-11.jsonl`.

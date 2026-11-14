@@ -545,22 +545,42 @@ class PruneTests(LogCase):
                                              feedback_2026_11=self.entry("c", "2026-11-01T00:00:00Z")),
                          ["feedback-2026-11.jsonl"])
 
-    def test_open_or_accepted_feedback_stays(self):
-        for status in ("open", "accepted"):
-            with self.subTest(status):
-                shutil.rmtree(self.store, ignore_errors=True)
-                self.assertEqual(self.prune_feedback(feedback_2025_01=self.entry("a", "2025-01-01T00:00:00Z", status)),
-                                 ["feedback-2025-01.jsonl"])
+    def folded(self):
+        return {e["id"]: (e["status"], e.get("pr")) for e in factory.read_feedback()}
 
-    def test_pruning_goes_oldest_first(self):
-        self.assertEqual(self.prune_feedback(feedback_2025_01=self.entry("a", "2025-01-01T00:00:00Z"),
-                                             feedback_2025_02=self.entry("b", "2025-02-01T00:00:00Z", "done")),
-                         ["feedback-2025-01.jsonl", "feedback-2025-02.jsonl"])
+    def test_open_or_accepted_feedback_is_carried_to_the_current_month(self):
+        old = (self.entry("a", "2025-01-01T00:00:00Z") + self.entry("b", "2025-01-02T00:00:00Z", "accepted")
+               + self.entry("c", "2025-01-03T00:00:00Z", "done"))
+        self.put("feedback", old[0], mtime=1)
+        self.assertEqual(self.prune_feedback(feedback_2025_01=old[1:]), ["feedback-2026-11.jsonl"])
+        self.assertEqual(self.folded(), {"a": ("open", None), "b": ("accepted", None)})
+        self.assertEqual(self.lines("feedback"), old[:3])
 
-    def test_a_file_whose_removal_would_reopen_an_entry_stays(self):
-        self.assertEqual(self.prune_feedback(feedback_2025_01=self.entry("a", "2025-01-01T00:00:00Z", "done"),
-                                             feedback_2025_02=self.entry("a", "2025-02-01T00:00:00Z")),
-                         ["feedback-2025-01.jsonl", "feedback-2025-02.jsonl"])
+    def test_a_status_line_in_a_later_old_file_follows_its_entry(self):
+        names = self.prune_feedback(
+            feedback_2025_01=self.entry("a", "2025-01-01T00:00:00Z"),
+            feedback_2025_02=[{"id": "a", "ts": "2025-02-01T00:00:00Z", "status": "accepted", "pr": "u"}]
+            + self.entry("b", "2025-02-01T00:00:00Z", "done"),
+            feedback_2025_03=[{"id": "b", "ts": "2025-03-01T00:00:00Z", "status": "open"}])
+        self.assertEqual(names, ["feedback-2026-11.jsonl"])
+        self.assertEqual(self.folded(), {"a": ("accepted", "u"), "b": ("open", None)})
+
+    def test_closed_in_the_old_file_and_refiled_later_stays_closed(self):
+        names = self.prune_feedback(feedback_2025_01=self.entry("a", "2025-01-01T00:00:00Z", "done"),
+                                    feedback_2026_10=self.entry("a", "2026-10-01T00:00:00Z"))
+        self.assertEqual(names, ["feedback-2026-10.jsonl", "feedback-2026-11.jsonl"])
+        self.assertEqual(self.folded(), {"a": ("done", None)})
+
+    def test_a_carry_that_cannot_be_written_keeps_the_old_file(self):
+        with mock.patch.object(factory, "append", side_effect=PermissionError):
+            names = self.prune_feedback(feedback_2025_01=self.entry("a", "2025-01-01T00:00:00Z"))
+        self.assertEqual(names, ["feedback-2025-01.jsonl"])
+
+    def test_the_latest_status_wins_whatever_the_file_order(self):
+        self.put("feedback", *self.entry("a", "2026-11-01T00:00:00Z"),
+                 {"id": "a", "ts": "2026-11-14T11:00:00Z", "status": "done"})
+        self.put("feedback-2026-11", {"id": "a", "ts": "2026-11-14T10:00:00Z", "status": "accepted"})
+        self.assertEqual(self.folded(), {"a": ("done", None)})
 
     def test_the_first_write_of_a_month_prunes(self):
         self.put(self.old(), {})
@@ -620,6 +640,8 @@ class LogCommandTests(LogCase):
         code, out, _ = self.run_main(["log", "events", "--since", "2026-11", "--until", "2026-12"])
         self.assertEqual((code, [json.loads(line)["ts"] for line in out.splitlines()]), (0, ["2026-11-14T00:00:00Z"]))
         self.assertEqual(len(self.run_main(["log", "events"])[1].splitlines()), 3)
+        with self.assertRaises(SystemExit), mock.patch("sys.stderr"):
+            factory.main(["log", "feedback"])
 
     def test_bad_bound_exits_2(self):
         for bound in ("2026", "2026-1", "yesterday", "2026-11-14 09:00", ""):
@@ -629,7 +651,7 @@ class LogCommandTests(LogCase):
                 self.assertEqual(len(err.splitlines()), 1)
 
     def test_empty_store_prints_nothing(self):
-        for name in factory.LOGS:
+        for name in ("events", "retros"):
             self.assertEqual(self.run_main(["log", name]), (0, "", ""))
 
 
