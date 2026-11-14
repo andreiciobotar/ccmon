@@ -92,4 +92,4 @@ A site manager watches the factory for you: every 30 minutes, without running a 
 
 ## Status
 
-Early and changing; built with itself. There is no licence file yet, so this is public but not yet open source.
+Early and changing; built with itself. Source-available, not open source ([MIT with the Commons Clause](LICENSE)): use it, at work too, change it, [contribute](CONTRIBUTING.md). Don't sell it.
