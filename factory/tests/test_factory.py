@@ -75,6 +75,11 @@ def task_rec(slug, state, deliverable=None, repo=ROOT):
     return {"repo": repo, "slug": slug, "state": state, **({"deliverable": deliverable} if deliverable else {})}
 
 
+def written():
+    """The records of the tasks log, the unsuffixed file first, then the month files."""
+    return [r for _, path in factory.log_files("tasks") for r in factory.read_file(path)]
+
+
 def invoke(argv, answers, settings=None, env=None, tasks=(), cwd=None):
     """`tasks` seeds tasks.jsonl (records, or raw lines); the records written are returned as `fake.tasks`."""
     fake = FakeRun(answers)
@@ -86,11 +91,11 @@ def invoke(argv, answers, settings=None, env=None, tasks=(), cwd=None):
         if settings is not None:
             (store / "settings.json").write_text(settings)
         (store / "tasks.jsonl").write_text("".join((t if isinstance(t, str) else json.dumps(t)) + "\n" for t in tasks))
-        seeded = (store / "tasks.jsonl").read_text().splitlines()
+        seeded = written()
         with mock.patch.object(factory, "run", fake), redirect_stdout(out), redirect_stderr(err), \
                 mock.patch.object(os, "getcwd", return_value=cwd or ROOT):
             code = factory.main(argv)
-        fake.tasks = [json.loads(line) for line in (store / "tasks.jsonl").read_text().splitlines()[len(seeded):]]
+        fake.tasks = [r for r in written() if r not in seeded]
     return code, out.getvalue(), err.getvalue(), fake
 
 
@@ -270,7 +275,7 @@ class SettingsTests(unittest.TestCase):
 
     def test_defaults(self):
         want = {"worktree_cap": 5, "lead_model": "fable", "lead_permission_mode": "auto",
-                "task_time_limit_hours": 2}
+                "task_time_limit_hours": 2, "monitor": None}
         self.assertEqual(self.load(), want)
         self.assertEqual(self.load("{}"), want)
 
@@ -281,9 +286,9 @@ class SettingsTests(unittest.TestCase):
 
     def test_overrides(self):
         got = self.load('{"worktree_cap": 2, "lead_model": "opus", "lead_permission_mode": "plan", '
-                        '"task_time_limit_hours": 0.5}')
+                        '"task_time_limit_hours": 0.5, "monitor": "/bin/isshoni"}')
         self.assertEqual(got, {"worktree_cap": 2, "lead_model": "opus", "lead_permission_mode": "plan",
-                               "task_time_limit_hours": 0.5})
+                               "task_time_limit_hours": 0.5, "monitor": "/bin/isshoni"})
         self.assertEqual(self.load('{"worktree_cap": 9}')["lead_model"], "fable")
 
     def test_invalid_values_name_the_key(self):
@@ -294,7 +299,8 @@ class SettingsTests(unittest.TestCase):
                           ('{"task_time_limit_hours": 0}', "task_time_limit_hours"),
                           ('{"task_time_limit_hours": -1}', "task_time_limit_hours"),
                           ('{"task_time_limit_hours": "2"}', "task_time_limit_hours"),
-                          ('{"task_time_limit_hours": true}', "task_time_limit_hours")):
+                          ('{"task_time_limit_hours": true}', "task_time_limit_hours"),
+                          ('{"monitor": ""}', "monitor"), ('{"monitor": 3}', "monitor"), ('{"monitor": null}', "monitor")):
             with self.assertRaisesRegex(factory.Fail, key):
                 self.load(text)
 
@@ -1237,6 +1243,10 @@ print(os.environ["FAKE_PR"])
         self.assertFalse(task_dir.exists())
         self.assertEqual(self.git("branch", "--list", "worktree-demo-task"), "")
 
+    def declared(self):
+        files = sorted((self.home / ".claude/factory").glob("tasks-*.jsonl"))
+        return [json.loads(line) for f in files for line in f.read_text().splitlines()]
+
     def test_state_from_inside_a_worktree_shows_in_status(self):
         self.git("worktree", "add", "-q", "-b", "worktree-demo-task", ".claude/worktrees/demo-task")
         task_dir = self.repo / ".claude/worktrees/demo-task"
@@ -1245,7 +1255,7 @@ print(os.environ["FAKE_PR"])
         self.assertEqual((p.returncode, p.stdout, p.stderr), (0, "demo-task: working\n", ""))
         p = self.factory("state", "handed-over", "https://x/y", cwd=task_dir)
         self.assertEqual((p.returncode, p.stderr), (0, ""))
-        (rec,) = [json.loads(line) for line in (self.home / ".claude/factory/tasks.jsonl").read_text().splitlines()][1:]
+        (rec,) = self.declared()[1:]
         self.assertEqual((rec["repo"], rec["slug"], rec["state"]), (str(self.repo), "demo-task", "handed-over"))
         row = json.loads(self.factory("status", "--json").stdout)["rows"][0]
         self.assertEqual((row["state"], row["deliverable"], row["phase"]), ("handed-over", "https://x/y", "review"))
@@ -1266,7 +1276,7 @@ print(os.environ["FAKE_PR"])
         for given, stored in ((str(outside), outside), ("~/out.mp4", outside), (rel, self.home / "rel.mp4")):
             p = self.factory("state", "handed-over", given, cwd=task_dir)
             self.assertEqual((p.returncode, p.stderr), (0, ""))
-            last = json.loads((self.home / ".claude/factory/tasks.jsonl").read_text().splitlines()[-1])
+            last = self.declared()[-1]
             self.assertEqual(last["deliverable"], os.path.realpath(stored))
 
     def test_default_dispatcher_name_comes_from_the_main_checkout_inside_a_worktree(self):

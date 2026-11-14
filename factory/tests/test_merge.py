@@ -389,7 +389,7 @@ class LgtmTests(World):
 
     def test_the_same_blocker_is_not_sent_again(self):
         self.tick_lgtm([pr(1)], {1: [comment(at=NOW - 7200)]})
-        self.seed("firings", [{"ts": iso(NOW), "repo": ROOT, "id": self.records()[0]["id"], "decision": "escalated",
+        self.seed("firings", [{"ts": iso(NOW + 1), "repo": ROOT, "id": self.records()[0]["id"], "decision": "escalated",
                                "reason": "r", "by": "site-manager"}])
         self.tick_lgtm([pr(1)], {1: [comment(at=NOW - 7200)]}, at=NOW + 60)
         self.assertEqual(self.claude_runs(), [])

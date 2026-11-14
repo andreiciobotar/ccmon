@@ -9,8 +9,10 @@
 {"name": "review-loops", "escalate": "judgment", "threshold": 3, "what": "A task has had at least the threshold number of reviewer dispatches since it started."},
 {"name": "wrong-model", "escalate": "judgment", "threshold": null, "what": "A subagent or lead ran on a model other than the one pinned for its role."},
 {"name": "ci-red-handover", "escalate": "judgment", "threshold": null, "what": "A task handed over a pull request that has a failing check."},
-{"name": "deep-stack", "escalate": "judgment", "threshold": 3, "what": "A task is stacked on a chain of other tasks longer than the threshold."},
+{"name": "deep-stack", "escalate": "judgment", "threshold": 3, "what": "A task's stack, counting the task itself, is more than the threshold tasks deep."},
 {"name": "merged-not-cleaned", "escalate": "judgment", "threshold": 2, "what": "A task's pull request was merged, or the task was settled, more than the threshold, in hours, ago and it has not been cleaned."},
 {"name": "lgtm-blocked", "escalate": "always", "threshold": null, "what": "A pull request carries the human's lgtm but the merge job could not merge it, for a reason other than checks still running."},
-{"name": "base-merged", "escalate": "always", "threshold": null, "what": "A working or blocked task is stacked on a branch whose pull request has been merged into the default branch."}
+{"name": "base-merged", "escalate": "always", "threshold": null, "what": "A working or blocked task is stacked on a branch whose pull request has been merged into the default branch."},
+{"name": "cost-outlier", "escalate": "judgment", "threshold": 3, "what": "A working or blocked task has cost more than the threshold times the median cost of the repository's landed tasks (those with a merged pull request), as the monitor prices them."},
+{"name": "lead-heavy", "escalate": "judgment", "threshold": 85, "what": "A working or blocked task that has cost at least the median landed task has more than the threshold, in percent, of its cost in the lead's own session instead of its subagents."}
 ]
