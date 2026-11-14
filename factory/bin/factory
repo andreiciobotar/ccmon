@@ -22,7 +22,7 @@ MODEL_RE = re.compile(rb'"model"\s*:\s*"([^"]+)"')
 ITEM_RE = re.compile(r"(?:[-*]|\d+\.)\s+")
 KINDS = ("QUESTION", "BLOCKED", "OVERTIME", "SPLIT", "DONE")
 STATUSES = ("open", "accepted", "rejected", "done")
-DECISION = "DECISION: "  # an outbox entry whose text starts with this (less the space) is a decision, else an issue
+DECISION = "DECISION:"
 DECISION_MAX = 200
 CAUGHT_BY = ("tests", "reviewer", "lead", "ci", "human")
 RETRO_LISTS = ("slowed", "rules_missing", "rules_dead_weight", "brief_questions")
@@ -369,7 +369,7 @@ def read_feedback():
     for fid, entry in entries.items():
         change = changes.get(fid, {})
         entry["status"] = change.get("status", "open")
-        entry["kind"] = "decision" if entry["text"].startswith(DECISION.strip()) else "issue"
+        entry["kind"] = "decision" if entry["text"].startswith(DECISION) else "issue"
         entry.pop("pr", None)
         if "pr" in change:
             entry["pr"] = change["pr"]
@@ -649,7 +649,7 @@ def cmd_feedback(args):
         text = " ".join(args.text.split())
         if not 0 < len(text) <= DECISION_MAX:
             raise Fail(f"feedback decide: one line of what and why, 1 to {DECISION_MAX} characters (got {len(text)})")
-        print(*file_feedback([DECISION + text], tags()))
+        print(*file_feedback([f"{DECISION} {text}"], tags()))
     elif args.action == "set":
         found = [e["id"] for e in read_feedback() if e["id"].startswith(args.id)]
         if len(found) != 1:

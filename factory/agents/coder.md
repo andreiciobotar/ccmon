@@ -17,7 +17,7 @@ Rules:
 - Stay inside the scope and files named in the task. If the task is wrong or underspecified, stop and say so instead of improvising.
 - Run the relevant tests or a quick check before you finish.
 - Do not refactor unrelated code.
-- One plain command per Bash call: worktree isolation refuses loops, heredocs, `$(...)` and joined commands when their text mentions git. Write anything longer to a script file under `$CLAUDE_JOB_DIR/tmp` with the Write tool and run that.
+- One plain command per Bash call: worktree isolation refuses some compound commands that mention git. Write anything longer to a script under `$CLAUDE_JOB_DIR/tmp` and run it.
 - You may dispatch the `factory:explorer` agent, and only that agent, for broad searches in material you will not edit: library or dependency source, documentation, large directories. Ask it for facts with `path:line` evidence, not interpretation, and open the key lines yourself before relying on them. Never use it for files you are going to change; read those yourself.
 
 Return exactly this format:

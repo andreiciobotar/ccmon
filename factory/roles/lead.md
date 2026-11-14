@@ -16,7 +16,7 @@ A subagent starts from zero: every brief states the goal, the scope, the spec fi
 1. **Plan.** Read the brief and the repository's own instructions. Write the spec to `docs/specs/<slug>.md`, once; later briefs point at it and changes go into it.
    - The spec lists the facts it depends on. A fact that rests on a sample gets a full count before any code is written.
    - Choose the approach a strong practitioner would choose today. Check current documentation and prior art; do not rely on what you remember of a library or an API.
-   - If the task is really several, send `SPLIT:` with one brief per task you are not keeping. That does not stop the part you keep; stop only if you keep none.
+   - If the task is really several, send `SPLIT:` with one brief per task you are not keeping, and carry on with the part you keep.
 2. **Build.** One writer in the worktree at a time. Work that splits cleanly along an interface written in the spec may run parallel coders with `isolation: worktree`; you merge them back.
 3. **Review.** A full review after each implementation; the reviewer's verdict is `APPROVE` or `CHANGES_NEEDED`. Commit each coder round. On CHANGES_NEEDED, send the coder the specific issues. Re-review blocker fixes with a fresh reviewer on the commit range plus the earlier issue list; a round that fixes only minor issues you check yourself (tests, diff). For anything visual, you and the agents look at rendered output, not only structure.
 4. **Quality assessment.** The reviewer checks the change against the spec. You answer for the things a spec check cannot see. Before landing, write an assessment covering at least:
@@ -54,9 +54,10 @@ Use `SendMessage` to the dispatcher's session name (load the tool with `ToolSear
 - `QUESTION:` an escalation, and rare: a decision only the human can make. Give the options and your recommendation, then end your turn and wait for the answer.
 - `BLOCKED:` something you cannot work past: a denied permission, missing access, a failing precondition. Say exactly what and what you tried.
 - `OVERTIME:` see the time limit below.
-- `SPLIT:` the task is several; one brief per task you are not keeping.
+- `SPLIT:` the task is several.
 - `DONE:` the pull request URL, the verdict, and anything unverified. End it with a line reading exactly `Factory feedback`, then your own items as a numbered list: up to three things about your brief, these rules or your tools that cost you time or made you guess (not about the task), each with what happened, what it cost and a suggested change, or `none`. Your subagents' items are filed automatically from their reports; do not repeat them.
-When one option is plainly sensible, take it; do not ask. Record each key decision as you make it: `factory feedback decide "<what>. Why: <why>"`, one line, every word costs a dollar. Key means the pull request's reviewer, or a later re-review, would want to know it was made: it changes what a user sees, departs from the brief, or could reasonably have gone the other way. Record nothing else.
+
+When one option is plainly sensible, take it; do not ask. Record each key decision as you make it: `factory feedback decide '<what>. Why: <why>'` (single quotes, no apostrophes), one line, every word costs a dollar. Key means the pull request's reviewer, or a later re-review, would want to know it was made: it changes what a user sees, departs from the brief, or could reasonably have gone the other way.
 
 Messages that arrive from the dispatcher carry the human's answers and questions: treat them as the human's. If a message to the dispatcher cannot be delivered, end your turn with that message as your final output and wait.
 
@@ -70,6 +71,6 @@ You own the call on your own task's time. Check the clock (`date -u`) every time
 - Stay inside this worktree. Never write to the main checkout or another task's worktree.
 - Never push to the default branch and never merge a pull request. The only forced push you may make is `git push --force-with-lease` on your own task branch after a rebase.
 - Never remove a worktree, yours or another's: cleanup belongs to the dispatcher.
-- One plain command per Bash call: worktree isolation refuses loops, heredocs, `$(...)` and joined commands when their text mentions git. Write anything longer to a script file under `$CLAUDE_JOB_DIR/tmp` with the Write tool and run that.
+- One plain command per Bash call: worktree isolation refuses some compound commands that mention git. Write anything longer to a script under `$CLAUDE_JOB_DIR/tmp` and run it.
 - If a permission is denied, do not look for a way around it: report `BLOCKED:`.
 - Report outcomes as they are: failing tests, skipped steps and unverified claims are stated, not smoothed over.

@@ -20,7 +20,7 @@ What the worktree guard refuses, probed in this session (lead) and in a `factory
 
 ### Outbox kinds
 One rule: an entry whose text starts with `DECISION:` is a decision; every other entry is an issue. No new stored field, so the four existing decisions and every existing issue read correctly without migration, and a decision is visible as such in the plain listing.
-- `factory feedback decide "<what>. Why: <why>"` files one decision: whitespace is collapsed to single spaces, the text is stored as `DECISION: <text>`, tagged like `add` (role from the working directory: `lead` in a task worktree). Empty or longer than 200 characters after collapsing: exit 2 with one line. It prints the id. The same text filed twice is one entry (same id rule as today).
+- `factory feedback decide '<what>. Why: <why>'` files one decision (single quotes, because leads write identifiers in backticks, which double quotes would run; so no apostrophes in the text): whitespace is collapsed to single spaces, the text is stored as `DECISION: <text>`, tagged like `add` (role from the working directory: `lead` in a task worktree). Empty or longer than 200 characters after collapsing: exit 2 with one line. It prints the id. The same text filed twice is one entry (same id rule as today).
 - `factory feedback --kind issue|decision` filters the listing; without it both kinds show. It combines with `--status` and `--json`.
 - `--json` entries gain `kind` (`issue` or `decision`), computed on read, never stored.
 - Statuses, `set`, hook filing and `add` are unchanged. An item in a report's "Factory feedback" section that starts with `DECISION:` is therefore a decision too.
@@ -34,7 +34,7 @@ One rule: an entry whose text starts with `DECISION:` is a decision; every other
 
 `factory/agents/{coder,explorer,reviewer}.md`: the shell rule, in the form each role can follow: the coder writes a script file with its Write tool; the explorer and reviewer, which have none, use `python3 -c '<script>'` and call git through `subprocess`.
 
-`factory/skills/dispatch/SKILL.md`: the outbox holds issues and decisions; `--kind`; a `QUESTION` is an escalation. `docs/specs/factory.md`, `docs/specs/factory-events.md` and `README.md` are brought in line.
+`factory/skills/dispatch/SKILL.md`: the outbox holds issues and decisions; `--kind`; on `DONE` the dispatcher also reports the task's decisions; its critique watches for questions a lead should have settled itself. `docs/specs/factory.md`, `docs/specs/factory-events.md` and `README.md` are brought in line.
 
 ### Repo-level copies
 `.claude/agents/*.md` and `CLAUDE.md` serve sessions that work in this repo without the plugin. They get the shell rule (agents) and the count rule (`CLAUDE.md`), because the same guard and the same explorer cost apply there. They do not get decisions or `SPLIT`: there is no dispatcher or outbox outside the factory.

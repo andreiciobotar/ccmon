@@ -78,7 +78,7 @@ Commands:
 ```
 factory feedback [--json] [--status open|accepted|rejected|done] [--kind issue|decision]
 factory feedback add --role <role> [--slug <slug>] [--model <model>]   # text on stdin
-factory feedback decide "<what>. Why: <why>"
+factory feedback decide '<what>. Why: <why>'
 factory feedback set <id> open|accepted|rejected|done [--pr <url>]
 ```
 - The listing prints one entry per line: id, status, slug, role, the first 100 characters of the text on one line; `--json` prints the entries as a JSON array with every field plus `kind`. `--kind` and `--status` each narrow the listing; without `--kind` both kinds show.
