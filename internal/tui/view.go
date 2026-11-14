@@ -147,7 +147,7 @@ func (m *model) subheader(p paint) string {
 	case m.view == viewSession:
 		name := m.selID
 		if s := m.sessions[m.selID]; s != nil {
-			name = s.Project + " › " + short8(s.ID)
+			name = s.Label() + " › " + short8(s.ID)
 		}
 		left = p.t("Dashboard › ", th.Faint) + p.b(name, th.Text)
 	case m.view == viewAgents:
@@ -157,8 +157,8 @@ func (m *model) subheader(p paint) string {
 		}
 		left = p.b("Agents", th.Text) + p.t(fmt.Sprintf("  per agent type across %d sessions in %s", n, ranges[m.rangeIdx].label), th.Muted)
 	default:
-		n := len(m.visible())
-		left = p.b("Sessions", th.Text) + p.t(fmt.Sprintf("  %d in %s · sorted by %s", n, ranges[m.rangeIdx].label, m.sortBy), th.Muted)
+		repos, tasks := shownGroups(m.rows())
+		left = p.b("Sessions", th.Text) + p.t(fmt.Sprintf("  %d in %d repos, %d tasks · %s · sorted by %s", len(m.visible()), repos, tasks, ranges[m.rangeIdx].label, m.sortBy), th.Muted)
 		if m.filter != "" {
 			left += p.t("  · filter ", th.Faint) + p.b(m.filter, th.Purple)
 		}

@@ -315,35 +315,173 @@ func (m *model) liveCount() int {
 	return n
 }
 
-// visible is the filtered, sorted session list.
-func (m *model) visible() []*data.Session {
-	f := strings.ToLower(strings.TrimSpace(m.filter))
-	out := make([]*data.Session, 0, len(m.sessions))
-	for _, s := range m.sessions {
-		if f != "" && !strings.Contains(strings.ToLower(s.Project), f) && !strings.Contains(strings.ToLower(s.ID), f) {
-			continue
+// treeRow is one display row of the sessions table: a repository, a task or a session.
+type treeRow struct {
+	s     *data.Session   // set on session rows only: only these can be selected
+	name  string          // repository, task or 8-character session id
+	depth int             // indent in steps of two cells
+	task  bool            // a task row (else a repository row when s is nil)
+	group []*data.Session // what the row totals; a session row holds just itself
+}
+
+// rankKey is what a sort mode compares: a session or the sum of a group.
+type rankKey struct {
+	tokens, sub int64
+	act         time.Time
+}
+
+type unit struct {
+	group     []*data.Session
+	name, tie string
+	key       rankKey
+}
+
+func (m *model) unit(group []*data.Session, name, tie string) unit {
+	u := unit{group: group, name: name, tie: tie}
+	for _, s := range group {
+		u.key.tokens += s.Tokens.Total
+		u.key.sub += s.Tokens.Subagents
+		if a := m.activity(s); a.After(u.key.act) {
+			u.key.act = a
 		}
-		out = append(out, s)
 	}
-	sort.Slice(out, func(i, j int) bool {
-		a, b := out[i], out[j]
+	return u
+}
+
+// sortUnits orders units by the sort mode, then latest activity, then name.
+func (m *model) sortUnits(us []unit) {
+	share := func(k rankKey) float64 {
+		if k.tokens == 0 {
+			return 0
+		}
+		return float64(k.sub) / float64(k.tokens)
+	}
+	sort.Slice(us, func(i, j int) bool {
+		a, b := us[i], us[j]
 		switch m.sortBy {
 		case sortTokens:
-			if a.Tokens.Total != b.Tokens.Total {
-				return a.Tokens.Total > b.Tokens.Total
+			if a.key.tokens != b.key.tokens {
+				return a.key.tokens > b.key.tokens
 			}
 		case sortShare:
-			if a.Tokens.SubagentPct != b.Tokens.SubagentPct {
-				return a.Tokens.SubagentPct > b.Tokens.SubagentPct
+			if sa, sb := share(a.key), share(b.key); sa != sb {
+				return sa > sb
 			}
 		}
-		ta, tb := m.activity(a), m.activity(b)
-		if !ta.Equal(tb) {
-			return ta.After(tb)
+		if !a.key.act.Equal(b.key.act) {
+			return a.key.act.After(b.key.act)
 		}
-		return a.ID < b.ID
+		if a.name != b.name {
+			return a.name < b.name
+		}
+		return a.tie < b.tie
 	})
+}
+
+// sessionUnits makes one unit per session, named by its id.
+func (m *model) sessionUnits(ss []*data.Session) []unit {
+	us := make([]unit, len(ss))
+	for i, s := range ss {
+		us[i] = m.unit([]*data.Session{s}, s.ID, "")
+	}
+	m.sortUnits(us)
+	return us
+}
+
+// rows is the filtered, sorted sessions table, the one owner of display order:
+// repositories, each with its sessions without a task, then its tasks.
+func (m *model) rows() []treeRow {
+	f := strings.ToLower(strings.TrimSpace(m.filter))
+	type repo struct {
+		name, path string
+		bare       []*data.Session
+		tasks      map[string][]*data.Session
+		all        []*data.Session
+	}
+	byRepo := map[[2]string]*repo{}
+	for _, s := range m.sessions {
+		if f != "" && !strings.Contains(strings.ToLower(s.Label()+" "+s.Project+" "+s.ID), f) {
+			continue
+		}
+		k := [2]string{s.RepoPath, s.Repo}
+		r := byRepo[k]
+		if r == nil {
+			r = &repo{name: s.Repo, path: s.RepoPath, tasks: map[string][]*data.Session{}}
+			byRepo[k] = r
+		}
+		r.all = append(r.all, s)
+		if s.Task == "" {
+			r.bare = append(r.bare, s)
+		} else {
+			r.tasks[s.Task] = append(r.tasks[s.Task], s)
+		}
+	}
+	var repos []unit
+	for _, r := range byRepo {
+		repos = append(repos, m.unit(r.all, r.name, r.path))
+	}
+	m.sortUnits(repos)
+	var out []treeRow
+	for _, ru := range repos {
+		r := byRepo[[2]string{ru.tie, ru.name}]
+		out = append(out, treeRow{name: r.name, group: ru.group})
+		for _, u := range m.sessionUnits(r.bare) {
+			out = append(out, treeRow{s: u.group[0], name: short8(u.name), depth: 1, group: u.group})
+		}
+		var tasks []unit
+		for name, ss := range r.tasks {
+			tasks = append(tasks, m.unit(ss, name, ""))
+		}
+		m.sortUnits(tasks)
+		for _, tu := range tasks {
+			out = append(out, treeRow{name: tu.name, depth: 1, task: true, group: tu.group})
+			for _, u := range m.sessionUnits(tu.group) {
+				out = append(out, treeRow{s: u.group[0], name: short8(u.name), depth: 2, group: u.group})
+			}
+		}
+	}
 	return out
+}
+
+// visible is the filtered session list in table order, so an index into it is a selectable row.
+func (m *model) visible() []*data.Session {
+	var out []*data.Session
+	for _, r := range m.rows() {
+		if r.s != nil {
+			out = append(out, r.s)
+		}
+	}
+	return out
+}
+
+// shownGroups counts the repositories and tasks in the visible table.
+func shownGroups(rows []treeRow) (repos, tasks int) {
+	for _, r := range rows {
+		switch {
+		case r.s != nil:
+		case r.task:
+			tasks++
+		default:
+			repos++
+		}
+	}
+	return
+}
+
+// cursorRow is the display row of the selected session, and the first row of
+// the group rows directly above it (which stay in view with it).
+func (m *model) cursorRow(rows []treeRow) (cur, first int) {
+	for i, r := range rows {
+		if r.s != nil && r.s.ID == m.selID {
+			cur = i
+			break
+		}
+	}
+	first = cur
+	for first > 0 && rows[first-1].s == nil {
+		first--
+	}
+	return
 }
 
 func (m *model) cursor(vis []*data.Session) int {
@@ -384,14 +522,16 @@ func (m *model) normalizeSelection() {
 type totals struct {
 	tokens, main, sub                 int64
 	dispatches, repeats, loops, warns int
-	rechecked, candidates             int
+	rechecked, candidates, malformed  int
 	byAgent                           map[string]data.Usage
 	byModel                           map[string]data.Usage
 }
 
-func (m *model) totals() totals {
+func (m *model) totals() totals { return sumTotals(m.visible()) }
+
+func sumTotals(ss []*data.Session) totals {
 	t := totals{byAgent: map[string]data.Usage{}, byModel: map[string]data.Usage{}}
-	for _, s := range m.visible() {
+	for _, s := range ss {
 		t.tokens += s.Tokens.Total
 		t.main += s.Tokens.Main
 		t.sub += s.Tokens.Subagents
@@ -399,6 +539,7 @@ func (m *model) totals() totals {
 		t.repeats += s.Repeats
 		t.loops += s.ReviewLoops
 		t.warns += s.WarnCount
+		t.malformed += s.Malformed
 		t.rechecked += s.Recheck.Rechecked
 		t.candidates += s.Recheck.ExplorersWithCitations
 		for k, u := range s.ByAgent {
@@ -1105,11 +1246,16 @@ func (m *model) fixScroll() {
 		}
 		return max(0, top)
 	}
-	vis := m.visible()
-	m.top = keep(m.cursor(vis), m.top, m.dashRows())
+	rows := m.rows()
+	cur, first := m.cursorRow(rows)
+	n := m.dashRows()
+	if first < m.top {
+		m.top = first
+	}
+	m.top = keep(cur, m.top, n)
 	m.dtop = keep(m.dcursor, m.dtop, m.sessRows())
 	m.atop = keep(m.acursor, m.atop, m.agentRows())
-	if n := len(vis); m.top > max(0, n-1) {
+	if m.top > max(0, len(rows)-1) {
 		m.top = 0
 	}
 }

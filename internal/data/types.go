@@ -80,6 +80,9 @@ type Session struct {
 	ID              string            `json:"id"`
 	Project         string            `json:"project"`
 	ProjectDir      string            `json:"project_dir"`
+	Repo            string            `json:"repo"`
+	RepoPath        string            `json:"repo_path"` // empty when null
+	Task            string            `json:"task"`      // empty when null
 	Cwd             string            `json:"cwd"`
 	Path            string            `json:"path"`
 	Start           *time.Time        `json:"start"`
@@ -100,6 +103,14 @@ type Session struct {
 	// Local, not from JSON: the transcripts' newest mtime observed before this was read.
 	// A result with an older value never replaces one with a newer value.
 	LastChange time.Time `json:"-"`
+}
+
+// Label is how a session is named outside the tree: repo, or repo/task.
+func (s *Session) Label() string {
+	if s.Task == "" {
+		return s.Repo
+	}
+	return s.Repo + "/" + s.Task
 }
 
 // SessionsResult is `ccmon sessions --json`.

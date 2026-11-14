@@ -33,7 +33,7 @@ func fakeSession(id, project string, startMin int, main, sub int64) *data.Sessio
 	en := st.Add(30 * time.Minute)
 	tot := main + sub
 	return &data.Session{
-		ID: id, Project: project, Path: "/nonexistent/" + id + ".jsonl", Start: &st, End: &en,
+		ID: id, Project: project, Repo: project, Path: "/nonexistent/" + id + ".jsonl", Start: &st, End: &en,
 		Tokens: data.Tokens{Total: tot, Main: main, Subagents: sub,
 			MainPct: 100 * float64(main) / float64(tot), SubagentPct: 100 * float64(sub) / float64(tot)},
 		ByModel:       map[string]data.Usage{"claude-fable-5-2": usage(1, 2, 3, main), "claude-haiku-5-5": usage(1, 2, 3, sub)},
@@ -700,5 +700,118 @@ func TestTickOnlyWhenNeeded(t *testing.T) {
 	}
 	if m.animating() {
 		t.Fatal("settled counters stop the fast tick")
+	}
+}
+
+// ---- grouped table ---------------------------------------------------------------------------
+
+// groupedModel holds: repo alpha (a1 without a task, task ci with a2 and a3, task zz with a4) and repo beta (b1).
+func groupedModel(w, h int) *model {
+	m := newFake(Options{NoColor: true}, w, h)
+	mk := func(id, repo, task string, startMin int, main, sub int64) *data.Session {
+		s := fakeSession(id, repo, startMin, main, sub)
+		s.Repo, s.Task = repo, task
+		return s
+	}
+	m.sessions = map[string]*data.Session{}
+	m.preload([]*data.Session{
+		mk("a1000000", "alpha", "", 0, 100, 0),
+		mk("a2000000", "alpha", "ci", 10, 100, 100),
+		mk("a3000000", "alpha", "ci", 20, 100, 100),
+		mk("a4000000", "alpha", "zz", 30, 5000, 0),
+		mk("b1000000", "beta", "", 40, 300, 0),
+	}, nil, fakeAgents())
+	return m
+}
+
+func rowNames(m *model) string {
+	var out []string
+	for _, r := range m.rows() {
+		out = append(out, strings.Repeat("  ", r.depth)+r.name)
+	}
+	return strings.Join(out, ",")
+}
+
+func TestTreeOrderUnderEachSort(t *testing.T) {
+	m := groupedModel(120, 40)
+	for _, c := range []struct {
+		sort sortMode
+		want string
+	}{
+		// recent: beta ends last; in alpha the sessions without a task come first, then tasks by latest activity
+		{sortRecent, "beta,  b1000000,alpha,  a1000000,  zz,    a4000000,  ci,    a3000000,    a2000000"},
+		// tokens: alpha 5.4k before beta 300; tasks by summed tokens, zz 5000 before ci 400
+		{sortTokens, "alpha,  a1000000,  zz,    a4000000,  ci,    a3000000,    a2000000,beta,  b1000000"},
+		// subagent share: ci 50% first among tasks; repositories by summed share (alpha ~3.6%, beta 0)
+		{sortShare, "alpha,  a1000000,  ci,    a3000000,    a2000000,  zz,    a4000000,beta,  b1000000"},
+	} {
+		m.sortBy = c.sort
+		if got := rowNames(m); got != c.want {
+			t.Errorf("sort %v:\n got %s\nwant %s", c.sort, got, c.want)
+		}
+	}
+}
+
+func TestCursorSkipsGroupRows(t *testing.T) {
+	m := groupedModel(120, 40)
+	m.sortBy = sortTokens
+	send(m, "g")
+	var seen []string
+	for i := 0; i < 6; i++ {
+		seen = append(seen, short8(m.selID))
+		send(m, "j")
+	}
+	if got, want := strings.Join(seen, ","), "a1000000,a4000000,a3000000,a2000000,b1000000,b1000000"; got != want {
+		t.Fatalf("j order %s, want %s", got, want)
+	}
+	send(m, "k")
+	if m.selID != "a2000000" {
+		t.Fatalf("k -> %s", m.selID)
+	}
+	send(m, "G")
+	if m.selID != "b1000000" {
+		t.Fatalf("G -> %s", m.selID)
+	}
+}
+
+func TestScrollKeepsGroupRowsAboveTheFirstSession(t *testing.T) {
+	m := groupedModel(120, 20)
+	m.sortBy = sortTokens
+	if rows := m.dashRows(); rows >= len(m.rows()) {
+		t.Fatalf("table shows all %d of %d rows; the test needs scrolling", rows, len(m.rows()))
+	}
+	send(m, "G", "k", "k", "k") // a2, a3, a4: first session of task zz
+	if m.selID != "a4000000" {
+		t.Fatalf("selected %s", m.selID)
+	}
+	if m.rows()[m.top].s != nil {
+		t.Fatalf("top row %d is a session; the task row above a4000000 must stay in view", m.top)
+	}
+	send(m, "k") // a1: first session of the repository
+	if m.selID != "a1000000" || m.rows()[m.top].s != nil {
+		t.Fatalf("a1000000 must keep its repository row in view (top %d)", m.top)
+	}
+}
+
+func TestFilterMatchesLabel(t *testing.T) {
+	m := groupedModel(120, 40)
+	send(m, "/", "a", "l", "p", "h", "a", "/", "c", "i")
+	if got := rowNames(m); got != "alpha,  ci,    a3000000,    a2000000" {
+		t.Fatalf("filter alpha/ci -> %s", got)
+	}
+	if got := m.totals().tokens; got != 400 {
+		t.Fatalf("totals follow the filtered task: %d", got)
+	}
+}
+
+func TestGroupedRenderFitsEverySize(t *testing.T) {
+	for _, sz := range [][2]int{{60, 16}, {80, 24}, {100, 30}, {140, 40}} {
+		m := groupedModel(sz[0], sz[1])
+		m.fixScroll()
+		for i, line := range strings.Split(m.Render(), "\n") {
+			if width(line) > sz[0] {
+				t.Fatalf("%dx%d line %d is %d wide", sz[0], sz[1], i, width(line))
+			}
+		}
 	}
 }

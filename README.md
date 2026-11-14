@@ -64,7 +64,7 @@ relative to its own path (`CCMON_ROOT` overrides) and works from any directory;
 `--projects-dir` and `--agents-dir` are resolved against your working directory
 and passed through to the CLI.
 
-Views: dashboard (KPI tiles, sessions table, agent and model mix, Now running),
+Views: dashboard (KPI tiles, sessions table grouped by repository and task with per-group totals, agent and model mix, Now running),
 session (header signals, timeline with a row per concurrent dispatch, dispatch
 list, detail pane), agents (per agent type token classes and p50/p90). A session
 is live when its transcript changed in the last 30 s. One 1 s poll of the
