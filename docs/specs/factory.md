@@ -106,7 +106,7 @@ A task that has run longer than the limit (2 hours by default, counted from the 
 ## Stacked tasks
 A task may build on another open task instead of waiting for its pull request to merge.
 - The stacked task's worktree branches from the base task's branch, its lead reconciles with that branch (not the default branch) when landing, and its pull request targets that branch.
-- When a base task changes after review, the dispatcher tells the leads stacked on it to rebase onto the new tip and rerun their tests; when a base merges, they rebase onto the default branch, and retarget their pull requests. The recorded base is left alone: `status` stops showing a base that has merged, and for `clean` a task whose own pull request is merged into the default branch no longer protects its recorded base.
+- When a base task changes after review, the dispatcher tells the leads stacked on it to rebase onto the new tip and rerun their tests; when a base merges, they rebase onto the default branch and retarget their pull requests. The recorded base is left alone: `status` stops showing a base that has merged, and for `clean` a task whose own pull request is merged into the default branch no longer protects its recorded base.
 - Rebasing a pushed branch needs a forced push. A lead may run `git push --force-with-lease` on its own task branch and nothing else: never a plain force, never another branch.
 - The dispatcher keeps stacks shallow (three deep at most, as a rule of thumb) and lands them bottom-up.
 
