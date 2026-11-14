@@ -79,7 +79,7 @@ func TestKaizenPagesAndScroll(t *testing.T) {
 	dash := fakeModel(true, 100, 30)
 	send(dash, "l", "h")
 	if dash.kz.page != pagePulse {
-		t.Fatal("←→ do nothing outside the kaizen view")
+		t.Fatal("←→ turn the page only in the kaizen view")
 	}
 	for _, name := range []string{"Pulse", "Flow", "Board"} {
 		if !strings.Contains(plain(m), name) {

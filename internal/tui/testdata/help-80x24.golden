@@ -4,6 +4,7 @@
  │ ↑↓/jk         move                                                        │  
  │ g G           first · last                                                │  
  │ pgdn pgup     page                                                        │  
+ │ ←→/hl         fold repo                                                   │  
  │ enter         open                                                        │  
  │ esc           back                                                        │  
  │ tab           next view                                                   │  
@@ -20,5 +21,4 @@
  │ r cycles 24h · 7d · 30d · all; on the error screen it retries.            │  
  │ s sorts by recent · cost · subagent share.                                │  
  │ Mix panels follow the cursor row; the tiles total every session.          │  
- │ A dot pulses on sessions written in the last 30 seconds.                  │  
  ╰───────────────────────────────────────────────────────────────────────────╯  
