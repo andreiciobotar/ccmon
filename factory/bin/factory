@@ -677,6 +677,8 @@ def cmd_status(args):
 
 def keep_reason(repo, row, rows):
     """Why a task must stay, or None when every sign says it is finished."""
+    if inside(str(PLUGIN_ROOT), row["path"]):
+        return "this factory runs from it; leads started by it load their plugin from there"
     if not row["branch"]:
         return "detached HEAD, no branch to judge"
     if row["dirty"] is not False:
@@ -1163,6 +1165,40 @@ def c_merged_not_cleaned(p, threshold):
     return found
 
 
+def c_lgtm_blocked(p, _):
+    if "lgtm" not in p:
+        raise NotEvaluated("the lgtm step did not run")
+    if p["lgtm_unread"]:
+        raise NotEvaluated(p["lgtm_unread"])
+    found = []
+    for pr, kind, text in p["lgtm"]:
+        row = task_of(p, pr)
+        if kind not in ("merged", "pending"):
+            found.append((row and row["slug"], f"#{pr['number']}/{kind}", f"{text} {pr['url']}"))
+    return found
+
+
+def has_merge_of(p, url, path):
+    """Whether the worktree at `path` already contains the merge commit of the pull request at `url`."""
+    oid = (p["gh"](dict, "pr", "view", url, "--json", "mergeCommit").get("mergeCommit") or {}).get("oid")
+    return bool(oid) and p["repo"].git("merge-base", "--is-ancestor", oid, "HEAD", path=path)[0] == 0
+
+
+def c_base_merged(p, _):
+    found, repo = [], p["repo"]
+    for r in phased(p):
+        base = r.get("stacked_on")
+        landing = r["pr_state"] == "merged" or (r["pr_state"] == "open" and r["pr_base"] == repo.default)
+        if r["phase"] in ("motion", "blocked") and base and not landing:
+            state, url, _, into = pull_request(repo, base)
+            if state == "unknown":
+                raise NotEvaluated(f"the pull request state of {base} is unknown")
+            if (state, into) == ("merged", repo.default) and not has_merge_of(p, url, r["path"]):
+                found.append((r["slug"], r["slug"], f"its base {base} merged ({url}): tell its lead to rebase onto "
+                              f"{repo.remote}/{repo.default} and to open or retarget its pull request against {repo.default}"))
+    return found
+
+
 CRITERIA = {  # name -> (function, whether it needs a threshold)
     "past-limit": (c_past_limit, False), "ci-red-default": (c_ci_red_default, False),
     "dispatcher-missing": (c_dispatcher_missing, False), "quiet": (c_quiet, True),
@@ -1170,6 +1206,7 @@ CRITERIA = {  # name -> (function, whether it needs a threshold)
     "handover-unacknowledged": (c_handover_unacknowledged, True), "review-loops": (c_review_loops, True),
     "wrong-model": (c_wrong_model, False), "ci-red-handover": (c_ci_red_handover, False),
     "deep-stack": (c_deep_stack, True), "merged-not-cleaned": (c_merged_not_cleaned, True),
+    "lgtm-blocked": (c_lgtm_blocked, False), "base-merged": (c_base_merged, False),
 }
 
 
@@ -1359,7 +1396,9 @@ def report(repo, sent):
 def cmd_health(args):
     repo = Repo()
     criteria = load_criteria()
-    firings, skipped = evaluate(gather(repo, dispatcher_name(args, repo)), criteria)
+    p = gather(repo, dispatcher_name(args, repo))
+    lgtm_step(p, dry=True)
+    firings, skipped = evaluate(p, criteria)
     if args.json:
         print(json.dumps({"firings": firings, "not_evaluated": skipped}, indent=2))
         return 0
@@ -1376,7 +1415,7 @@ def cmd_watch(args):
     repo = Repo()
     criteria = load_criteria()
     print(f"{now()} watch {os.path.basename(repo.root)}")
-    p = gather(repo, dispatcher_name(args, repo))
+    p = watch_lgtm(gather(repo, dispatcher_name(args, repo)))
     current, skipped = evaluate(p, criteria)
     for s in skipped:
         print(f"not evaluated: {s['criterion']}: {s['why']}")
@@ -1520,6 +1559,232 @@ def cmd_schedule(args):
     return 0
 
 
+# ---- merge ------------------------------------------------------------------
+
+MERGEABLE_TRIES = 5
+MERGEABLE_WAIT = 3
+PR_FIELDS = "number,url,isDraft,headRefName,headRefOid,baseRefName,isCrossRepository"
+ACTIVITY = "repos/{owner}/{repo}/activity"
+FORK = ("fork", "its head is in another repository")
+
+
+def open_prs(p):
+    return p["gh"](list, "pr", "list", "--state", "open", "--limit", "100", "--json", PR_FIELDS)
+
+
+def bottom_up(prs):
+    """Pull requests ordered by number, each after the one whose head branch is its base."""
+    waiting, ordered = sorted(prs, key=lambda pr: pr["number"]), []
+    while waiting:
+        heads = {pr["headRefName"] for pr in waiting}
+        pr = next((w for w in waiting if w["baseRefName"] not in heads - {w["headRefName"]}), waiting[0])
+        waiting.remove(pr)
+        ordered.append(pr)
+    return ordered
+
+
+def task_of(p, pr):
+    return next((r for r in p["rows"] or [] if r["branch"] == pr["headRefName"]), None)
+
+
+def handover_reason(p, pr):
+    """Why the task of `pr` has not handed it over, or None."""
+    row = task_of(p, pr)
+    if row is None:
+        return "no task worktree has its head branch"
+    if row["phase"] != "review":
+        return f"task {row['slug']} is in phase {row['phase']} (declared {row['state'] or 'none'})"
+    if row["head"] != pr["headRefOid"]:
+        return f"task {row['slug']} has local commits that are not on the pull request"
+    return None
+
+
+def gh_step(repo, *args):
+    rc, out, err = run(["gh", *args], cwd=repo.root)
+    return None if rc == 0 else ("merge", f"gh {' '.join(args)}: {(err or out).strip() or rc}")
+
+
+def mergeability(p, n):
+    """(kind, reason) of what stops the merge of pull request `n`, or None when it is mergeable."""
+    try:
+        for attempt in range(MERGEABLE_TRIES):
+            if attempt:
+                time.sleep(MERGEABLE_WAIT)
+            state = p["gh"](dict, "pr", "view", n, "--json", "mergeable").get("mergeable")
+            if state != "UNKNOWN":
+                break
+    except NotEvaluated as e:
+        return "merge", str(e)
+    if state == "CONFLICTING":
+        return "conflict", "it conflicts with its base"
+    if state != "MERGEABLE":
+        return "pending", "GitHub has not computed its mergeability yet"
+    return None
+
+
+def merge_one(p, pr, merged, dry):
+    """Merge `pr` (with `dry`, only check it as if `merged`, the head branches merged so far, were). None, or the
+    (kind, reason) of the first blocker."""
+    repo, n, base = p["repo"], str(pr["number"]), pr["baseRefName"]
+    if pr["isCrossRepository"]:
+        return FORK
+    reason = handover_reason(p, pr)
+    if reason:
+        return "handover", reason
+    if base != repo.default and base not in merged:
+        state, _, _, into = pull_request(repo, base)
+        if state == "unknown":
+            return "pending", f"cannot read the pull request of its base {base}"
+        if (state, into) != ("merged", repo.default):
+            return "base", f"its base {base} is not {repo.default} nor the head of a pull request merged into it"
+    try:
+        checks = p["gh"](list, "pr", "checks", n, "--json", "name,bucket")
+    except NotEvaluated as e:
+        return "ci", str(e)
+    buckets = [c.get("bucket") for c in checks]
+    bad = [c.get("name") for c in checks if c.get("bucket") in ("fail", "cancel")]
+    if bad:
+        return "ci", f"failed or cancelled checks: {', '.join(map(str, bad))}"
+    if "pending" in buckets:
+        return "pending", "checks are still running"
+    if "pass" not in buckets:
+        return "ci", "no check passed"
+    retarget = base != repo.default
+    if retarget and not dry:
+        stop = gh_step(repo, "pr", "edit", n, "--base", repo.default)
+        if stop:
+            return stop
+    if not (retarget and dry):
+        stop = mergeability(p, n)
+        if stop:
+            return stop
+    if dry:
+        return None
+    for step in [*([["pr", "ready", n]] if pr["isDraft"] else []),
+                 ["pr", "merge", n, "--merge", "--match-head-commit", pr["headRefOid"]]]:
+        stop = gh_step(repo, *step)
+        if stop:
+            return stop
+    return None
+
+
+def run_clean():
+    try:
+        return cmd_clean(argparse.Namespace(dry_run=False))
+    except Fail as e:
+        print(f"factory: {e}", file=sys.stderr)
+        return 1
+
+
+def cmd_merge(args):
+    if bool(args.prs) == args.all:
+        raise Fail("merge: name pull request numbers or give --all, not both")
+    repo = Repo()
+    p = gather(repo, None)
+    try:
+        tasks(p)
+        prs = open_prs(p)
+    except NotEvaluated as e:
+        raise Fail(f"merge: {e}; nothing done", code=1)
+    by_number = {pr["number"]: pr for pr in prs}
+    unknown = [n for n in args.prs if n not in by_number]
+    if unknown:
+        raise Fail(f"merge: #{unknown[0]} is not an open pull request; nothing done")
+    selected = [by_number[n] for n in dict.fromkeys(args.prs)]
+    for pr in sorted(prs, key=lambda pr: pr["number"]) if args.all else []:
+        reason = handover_reason(p, pr)
+        if reason:
+            print(f"#{pr['number']} skipped: {reason}")
+        else:
+            selected.append(pr)
+    if not selected:
+        print("nothing to merge")
+    selected, merged, failed = bottom_up(selected), set(), False
+    for i, pr in enumerate(selected):
+        stop = merge_one(p, pr, merged, args.dry_run)
+        if stop:
+            failed = True
+            print(f"#{pr['number']} {'would stop' if args.dry_run else 'stopped'}: {stop[1]}")
+            if args.dry_run:
+                continue
+            for rest in selected[i + 1:]:
+                print(f"#{rest['number']} not attempted")
+            break
+        merged.add(pr["headRefName"])
+        if not args.dry_run:
+            print(f"#{pr['number']} merged {pr['url']}")
+        else:
+            print(f"#{pr['number']} would merge"
+                  + (f" (retarget onto {repo.default} first; mergeability is checked after that)"
+                     if pr["baseRefName"] != repo.default else "")
+                  + (" (draft: would be marked ready)" if pr["isDraft"] else ""))
+    if merged and not args.dry_run:
+        failed = run_clean() != 0 or failed
+    return 1 if failed else 0
+
+
+def newest_approval(p, pr, permission):
+    """The newest comment on `pr` that says exactly `lgtm` and comes from a login with write access, or None."""
+    # A tuple as the kind: gh_json checks a bare `list` for objects, and these are pages.
+    pages = p["gh"]((list,), "api", "--paginate", "--slurp", f"repos/{{owner}}/{{repo}}/issues/{pr['number']}/comments")
+    if not all(isinstance(g, list) and all(isinstance(c, dict) for c in g) for g in pages):
+        raise NotEvaluated("gh api answered with an unexpected shape")
+    approvals = []
+    for c in (c for g in pages for c in g):
+        login = (c.get("user") or {}).get("login")
+        if login and isinstance(c.get("body"), str) and c["body"].strip().lower() == "lgtm":
+            if login not in permission:
+                permission[login] = p["gh"](dict, "api", f"repos/{{owner}}/{{repo}}/collaborators/{login}/permission").get("permission")
+                if not isinstance(permission[login], str):
+                    raise NotEvaluated(f"gh api could not read the permission of {login}")
+            if permission[login] in ("admin", "write"):
+                approvals.append(c)
+    return max(approvals, key=lambda c: c.get("created_at") or "", default=None)
+
+
+def stale_approval(p, pr, approval):
+    """(kind, reason) when the head of `pr` cannot be shown to be unchanged since `approval`, or None."""
+    activity = p["gh"](list, "api", "-X", "GET", ACTIVITY, "-f", f"ref=refs/heads/{pr['headRefName']}", "-F", "per_page=1")
+    latest = activity[0] if activity else {}
+    approved, changed = epoch(approval.get("created_at")), epoch(latest.get("timestamp"))
+    if latest.get("after") != pr["headRefOid"] or approved is None or changed is None:
+        return "head-time", "cannot tell when its head last changed"
+    if approved <= changed:
+        return "stale", "its head changed after the lgtm; a fresh lgtm is needed"
+    return None
+
+
+def lgtm_step(p, dry):
+    """Merge (with `dry`, only check) each open pull request the human approved with `lgtm`. Leaves
+    p["lgtm"], a list of (pull request, "merged" or a blocker kind, the comment url or the reason), and
+    p["lgtm_unread"], why the rest could not be looked at."""
+    results, permission, merged = [], {}, set()
+    p["lgtm"], p["lgtm_unread"] = results, None
+    try:
+        phased(p)
+        for pr in bottom_up(open_prs(p)):
+            approval = newest_approval(p, pr, permission)
+            if approval:
+                stop = (FORK if pr["isCrossRepository"] else stale_approval(p, pr, approval)) or \
+                    merge_one(p, pr, merged, dry)
+                if not stop:
+                    merged.add(pr["headRefName"])
+                results.append((pr, *(stop or ("merged", approval.get("html_url") or pr["url"]))))
+    except NotEvaluated as e:
+        p["lgtm_unread"] = str(e)
+
+
+def watch_lgtm(p):
+    """The tick's lgtm step; after a merge, clean and a fresh picture that keeps its results."""
+    lgtm_step(p, dry=False)
+    for pr, kind, text in p["lgtm"]:
+        print(f"#{pr['number']} merged on lgtm {text}" if kind == "merged" else f"#{pr['number']} blocked: {text}")
+    if not any(kind == "merged" for _, kind, _ in p["lgtm"]):
+        return p
+    run_clean()
+    return {**gather(p["repo"], p["dispatcher"]), "lgtm": p["lgtm"], "lgtm_unread": p["lgtm_unread"]}
+
+
 def parse_args(argv):
     parser = argparse.ArgumentParser(prog="factory", description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -1575,6 +1840,10 @@ def parse_args(argv):
     miss.add_argument("--firing", help="the id of the firing that was suppressed or undecided")
     firings = sub.add_parser("firings", help="the firing log with precision and recall")
     firings.add_argument("--json", action="store_true")
+    merge = sub.add_parser("merge", help="merge handed-over pull requests that pass every check (no model takes part)")
+    merge.add_argument("prs", nargs="*", type=int, metavar="pr")
+    merge.add_argument("--all", action="store_true", help="every open pull request whose task is handed over")
+    merge.add_argument("--dry-run", action="store_true")
     schedule = sub.add_parser("schedule", help="install, remove or show the job that runs watch every 30 minutes")
     schedule.add_argument("action", choices=("install", "remove", "status"))
     schedule.add_argument("--dispatcher", help="the dispatcher's session name (default dispatcher-<repo directory>)")
@@ -1586,7 +1855,7 @@ def main(argv=None):
     try:
         return {"new": cmd_new, "status": cmd_status, "clean": cmd_clean, "state": cmd_state, "ack": cmd_ack, "hook": cmd_hook,
                 "retro": cmd_retro, "feedback": cmd_feedback, "log": cmd_log, "health": cmd_health, "watch": cmd_watch,
-                "firing": cmd_firing, "miss": cmd_miss, "firings": cmd_firings,
+                "firing": cmd_firing, "miss": cmd_miss, "firings": cmd_firings, "merge": cmd_merge,
                 "schedule": cmd_schedule}[args.cmd](args)
     except Fail as e:
         print(f"factory: {e}", file=sys.stderr)

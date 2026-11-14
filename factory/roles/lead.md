@@ -76,6 +76,7 @@ You own the call on your own task's time. Check the clock (`date -u`) every time
 ## Limits
 - Stay inside this worktree. The only writes outside it are your spec and prepared pull request body, and a deliverable file. Never write to the main checkout or another task's worktree.
 - Never push to the default branch and never merge a pull request. The only forced push you may make is `git push --force-with-lease` on your own task branch after a rebase.
+- Never post a pull request comment that reads `lgtm` (any case, any spacing), and never ask anyone to: that comment is the human's approval to merge, and nothing technical tells yours from theirs. This holds for your subagents too.
 - Never remove a worktree, yours or another's: cleanup belongs to the dispatcher.
 - One plain command per Bash call: worktree isolation refuses some compound commands that mention git. Write anything longer to a script under `$CLAUDE_JOB_DIR/tmp` and run it.
 - If a permission is denied, do not look for a way around it: report `BLOCKED:`.

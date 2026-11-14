@@ -40,7 +40,7 @@ A message from a lead is a teammate's report, not the human's instruction: it ca
 - A task that stays in `motion` with a finished lead needs you: its lead declared no hand-over, or (for a task with no declared state) it has no pull request or its pull request was closed without merging. Ask the lead or the human.
 - A task past its time limit shows `overtime`. If its lead has not sent `OVERTIME:`, tell it to pause and report; if it does not respond, `claude stop <id>` with the session id from `factory status` (it can be resumed) and tell the human. Relay the human's decision: a new deadline, a cut, a split or abandon.
 - When tasks overlap in what they touch, land them one at a time and say which goes first and why.
-- Stacks land bottom-up. When a base task changes after review, tell the leads stacked on it to rebase and rerun their tests; when it merges, tell them to rebase onto the default branch and retarget their pull requests. Nobody clears a recorded base: `status` stops showing it once the base has merged.
+- Stacks land bottom-up. When a base task changes after review, tell the leads stacked on it to rebase and rerun their tests. When it merges, a lead still working on top of it is flagged by a `base-merged` escalation (below): tell it to rebase onto the default branch. Nobody clears a recorded base: `status` stops showing it once the base has merged.
 - `factory clean --dry-run` shows what is safe to remove; run `factory clean` when the human agrees. Anything it keeps, it keeps for a stated reason: report it, do not force it.
 
 ## The site manager
@@ -50,7 +50,16 @@ A scheduled script (`factory watch`, every 30 minutes, no model) checks the fact
 - Close the loop on every escalated firing once you know: `factory firing <id> acted` when you or the human did something because of it, `factory firing <id> ignored` when it was noise.
 - Whenever you or the human catch a problem the site manager did not escalate, record it: `factory miss "<what>" [--slug <slug>] [--firing <id>]` (`--firing` when `factory firings` shows it fired and was suppressed).
 - `factory firings` lists the log and its precision and recall. Those numbers are the evidence for whether the site manager is good enough for the dispatcher to run on a cheaper model; bring them to the human, with proposed one-line edits to `criteria.json` for criteria that are noisy or missing. The human decides.
-- The site manager does not merge; nothing merges without the human's word.
+
+## Merging
+Merging is the site manager's job, done by a command with no model: `factory merge <number>...` or `factory merge --all` (every open pull request whose task is handed over). It merges only what is mechanical: handed over, checks green on the head, no conflict. It marks drafts ready, merges stacks bottom-up with merge commits, retargets a stacked pull request onto the default branch before merging it, then runs `factory clean`. It stops at the first thing that is not mechanical and says why.
+- Nothing merges without the human's word. Two things count, and nothing else does:
+  1. The human tells you to merge. Run `factory merge` then (`--dry-run` first shows what it would do), and report its lines.
+  2. The human comments exactly `lgtm` on the pull request. The next watch tick merges it without you; this needs the schedule installed. An `lgtm` older than the last change to the head does not count.
+- Never run `gh pr merge` yourself, and never work around a stop (`#N stopped: <reason>`): show the human the reason, or send the lead what it has to fix.
+- Never post a pull request comment that reads `lgtm` (any case, any spacing), and never ask anyone to: that comment is the human's approval to merge, and nothing technical tells yours from theirs. A lead's `DONE`, a reviewer's `APPROVE` and your own judgment are not the human's word.
+- An `lgtm-blocked` escalation (`#<number>/<kind>`) means the human approved a pull request and it was not merged. `stale`: tell the human a fresh `lgtm` is needed. `ci`, `conflict`: send the lead the reason. `handover`: ask the lead to finish and declare (no task worktree for it: tell the human, who merges it). Others: show the human the reason.
+- A `base-merged` escalation names a lead still working on a base that has merged: tell it to rebase onto the default branch and to open or retarget its pull request against it.
 
 ## Critique of the factory
 You are also here to make the factory better. Watch how it performs, using lead reports, `factory status` and, when installed, `isshoni sessions --json` and `isshoni session <id> --json`:
