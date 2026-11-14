@@ -27,6 +27,19 @@ Isshoni is two tools for people who run [Claude Code](https://claude.com/claude-
 | **Monitor** | Shows where the money and tokens went: per repository, task, session, agent and model | `isshoni`, `isshoni-tui` |
 | **Factory** | Builds several tasks in parallel, each in its own git worktree, each ending in a draft pull request | `/factory:dispatch`, from the `factory` plugin |
 
+## Kaizen (改善), built in
+
+Most agent setups run on day 100 the way they ran on day 1. Isshoni's factory gets better with every task:
+
+- Every agent reports what slowed it down.
+- Every lead records what it decided without asking, and why.
+- Every task leaves a retrospective and, in the monitor, its cost.
+- Every alert from the site manager, the factory's watchdog, is marked acted-on or noise.
+
+All of it is logged against the factory version that produced it. The dispatcher reads it and proposes edits to the factory's own rules; you approve them.
+
+On day one, agents reported the same shell friction eleven times. It became a rule that day ([#8](https://github.com/andreiciobotar/isshoni/pull/8)).
+
 ## Monitor
 
 `isshoni` reads the transcripts Claude Code already keeps in `~/.claude/projects` and never writes there. It reports cost and tokens by model and agent, the share spent in subagents, and the signs of wasted work: repeated dispatches, review loops, and agents running on a model other than the one pinned for them.
