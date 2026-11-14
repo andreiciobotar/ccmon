@@ -330,8 +330,8 @@ func (m *model) emptyTable(p paint, w, h int, title string) block {
 }
 
 type tableCols struct {
-	name, start, tok, split, subp, dis int // subp is 0 when the SUB% column is dropped
-	showStart, sig, bad                bool
+	name, start, tok, split, dis int
+	showStart, sig, subPct, bad  bool
 }
 
 const (
@@ -339,35 +339,28 @@ const (
 	minName, maxName = 14, 30
 )
 
+// tableCols adds the optional columns in a fixed order as the width allows (signals, time, SUB%, BAD),
+// so a wider table never loses a column.
 func (m *model) tableCols(iw int) tableCols {
-	c := tableCols{tok: 7, split: 8, dis: 4, start: 11, showStart: iw >= 60}
+	c := tableCols{tok: 7, split: 8, dis: 4, start: 11}
 	avail := iw - (3 + 1 + c.tok + 1 + c.split + 1 + c.dis)
-	if c.showStart {
-		avail -= c.start + 1
-	}
-	want := minName
+	want, malformed := minName, false
 	for _, r := range m.rows() {
 		want = max(want, 2*r.depth+width(r.name)+1+width(r.suffix))
+		malformed = malformed || r.s != nil && r.s.Malformed > 0
 	}
 	want = min(want, maxName)
-	if avail-1-sigW >= minName {
-		c.sig = true
-		avail -= 1 + sigW
-	}
-	if c.sig && avail-5 >= want {
-		c.subp = 4
-		avail -= 5
-	}
-	for _, s := range m.visible() {
-		if s.Malformed > 0 {
-			c.bad = true
+	add := func(on bool, w, keep int) bool {
+		if !on || avail-w < keep {
+			return false
 		}
+		avail -= w
+		return true
 	}
-	if c.subp > 0 && c.bad && avail-4 >= want {
-		avail -= 4
-	} else {
-		c.bad = false
-	}
+	c.sig = add(true, sigW+1, 12) // an indented session id still fits at the smallest terminal
+	c.showStart = add(c.sig, c.start+1, minName)
+	c.subPct = add(c.showStart, 5, want)
+	c.bad = add(c.subPct && malformed, 4, want)
 	c.name = min(want, avail)
 	slack := avail - c.name
 	grow := min(slack, 8)
@@ -382,8 +375,8 @@ func (c tableCols) header(timeLabel string) string {
 		s += cell(timeLabel, c.start, false) + " "
 	}
 	s += cell("TOKENS", c.tok, true) + " " + cell("MAIN│SUB", c.split, false)
-	if c.subp > 0 {
-		s += " " + cell("SUB%", c.subp, true)
+	if c.subPct {
+		s += " " + cell("SUB%", 4, true)
 	}
 	s += " " + cell("DISP", c.dis, true)
 	if c.sig {
@@ -492,13 +485,13 @@ func (m *model) treeLine(r treeRow, selected bool, c tableCols, iw int, base pai
 	}
 	line += q.t(cell(Human(tok), c.tok, true), th.Text) + q.sp(1)
 	line += q.stack(c.split, []seg{{float64(t.main), th.Yellow}, {float64(t.sub), th.Purple}})
-	if c.subp > 0 {
-		line += q.sp(1) + q.t(cell(share(t.sub, t.tokens), c.subp, true), th.Muted)
+	if c.subPct {
+		line += q.sp(1) + q.t(cell(share(t.sub, t.tokens), 4, true), th.Muted)
 	}
 	line += q.sp(1) + q.t(cell(fmt.Sprintf("%d", t.dispatches), c.dis, true), th.Muted)
 	if c.sig {
 		line += q.sp(1) + countCell(q, t.repeats, 3, th.Yellow, false) + q.sp(1) + countCell(q, t.loops, 4, th.Yellow, false)
-		line += q.sp(1) + m.recheckCell(q, t) + q.sp(1) + countCell(q, t.warns, 4, th.Red, true)
+		line += q.sp(1) + recheckCell(q, t) + q.sp(1) + countCell(q, t.warns, 4, th.Red, true)
 	}
 	if c.bad {
 		line += q.sp(1) + countCell(q, t.malformed, 3, th.Faint, false)
@@ -518,8 +511,8 @@ func countCell(q paint, n, w int, col color.Color, bold bool) string {
 }
 
 // recheckCell is the share of explorer claims re-read, from the summed counts.
-func (m *model) recheckCell(q paint, t totals) string {
-	th := m.th
+func recheckCell(q paint, t totals) string {
+	th := q.th
 	switch {
 	case t.candidates == 0:
 		return q.t(cell("·", 4, true), th.Faint)

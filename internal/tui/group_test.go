@@ -3,6 +3,7 @@ package tui
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -120,13 +121,16 @@ func TestColumnsDropInOrder(t *testing.T) {
 	}
 	var prev tableCols
 	var seen []string
-	for iw := 60; iw <= 130; iw++ {
+	for iw := 40; iw <= 130; iw++ {
 		c := m.tableCols(iw)
+		if w := width(c.header("ACTIVE")); w > iw {
+			t.Fatalf("iw %d: header is %d wide", iw, w)
+		}
 		state := ""
 		for _, f := range []struct {
 			on   bool
 			name string
-		}{{c.sig, "sig"}, {c.subp > 0, "sub%"}, {c.bad, "bad"}} {
+		}{{c.sig, "sig"}, {c.subPct, "sub%"}, {c.bad, "bad"}} {
 			if f.on {
 				state += f.name + " "
 			}
@@ -134,7 +138,7 @@ func TestColumnsDropInOrder(t *testing.T) {
 		if len(seen) == 0 || seen[len(seen)-1] != state {
 			seen = append(seen, state)
 		}
-		if prev.sig && !c.sig || c.subp < prev.subp || prev.bad && !c.bad {
+		if prev.sig && !c.sig || prev.subPct && !c.subPct || prev.showStart && !c.showStart || prev.bad && !c.bad {
 			t.Fatalf("iw %d: columns not monotonic: %+v after %+v", iw, c, prev)
 		}
 		prev = c
@@ -224,8 +228,10 @@ func TestGroupTotalsMatchTheJSON(t *testing.T) {
 		cmd.Dir = root
 		var so bytes.Buffer
 		cmd.Stdout = &so
-		if err := cmd.Run(); err != nil {
+		if err := cmd.Run(); errors.Is(err, exec.ErrNotFound) {
 			t.Skipf("python unavailable: %v", err)
+		} else if err != nil {
+			t.Fatal(err)
 		}
 		var out struct {
 			Sessions []*data.Session `json:"sessions"`

@@ -30,7 +30,7 @@ Left to right, one space between columns:
 |---|---|---|
 | marker, dot, space | 3 | dot: session rows as today; group rows a green pulsing dot when any session in the group is live, blank otherwise; merged rows as a session |
 | `REPO / TASK` | name | indent (2 per depth) + name + space + faint suffix |
-| `ACTIVE`/`STARTED` | 11 | as today (hidden when inner width < 60) |
+| `ACTIVE`/`STARTED` | 11 | as today; see allocation |
 | `TOKENS` | 7 | as today |
 | `MAIN│SUB` | 8..16 | the stack bar |
 | `SUB%` | 4 | Σsub/Σtokens as `42%`, muted; `-` when tokens are 0 |
@@ -44,10 +44,9 @@ Left to right, one space between columns:
 Headers are right-aligned over right-aligned columns. `signalPills` is deleted (and `flagPills` only if nothing else uses it).
 
 Width allocation, inner width `iw`, `want` = longest `2*depth + name + 1 + suffix` over all rows, clamped 14..30:
-1. Always: lead, name, time (if `iw >= 60`), TOKENS, MAIN│SUB at 8, DISP.
-2. The four signal columns (18 + 1 gap) are shown when the name column would still get at least 14 cells.
-3. `SUB%` is added only if the signals are shown and the name column still gets `want`; `BAD` (when it exists) only if `SUB%` is shown and the name still gets `want`. The column set therefore grows monotonically with width: signals, then `SUB%`, then `BAD`.
-4. name = min(want, what is left). Slack beyond that goes first to the MAIN│SUB bar (up to 16), then to the name column (up to 30); anything further stays blank at the right edge.
+1. Always: lead, name, TOKENS, MAIN│SUB at 8, DISP.
+2. Optional columns are added in a fixed chain, each only if the previous one is shown, so a wider table never loses a column: the four signal columns (18 + 1 gap) if the name keeps 12 cells (an indented session id; this holds at the 60-column minimum terminal); the time column if the name keeps 14; `SUB%` if the name keeps `want`; `BAD` (when it exists) if the name keeps `want`.
+3. name = min(want, what is left). Slack beyond that goes first to the MAIN│SUB bar (up to 16), then to the name column (up to 30); anything further stays blank at the right edge.
 A truncated name loses its suffix first (plain `cell` truncation with the ellipsis is fine).
 
 ### Name styling
