@@ -446,7 +446,7 @@ def fold_feedback(records):
         if "id" in r:
             if "text" in r:
                 entries.setdefault(r["id"], dict(r))
-            elif str(r.get("ts", "")) >=str(changes.get(r["id"], {}).get("ts", "")):
+            elif str(r.get("ts", "")) >= str(changes.get(r["id"], {}).get("ts", "")):
                 changes[r["id"]] = r
     for fid, entry in entries.items():
         change = changes.get(fid, {})
