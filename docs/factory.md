@@ -31,7 +31,7 @@ factory merge (<number>... | --all) [--dry-run]
 ```
 
 - **`new`** starts a lead: a background session in a new worktree, with `factory/roles/lead.md` appended to its system prompt, declared `working`. The calling session must be named `--dispatcher` (default `dispatcher-<main checkout's directory name>`; set it with `/rename`), and no other session may carry that name. It refuses a slug whose worktree, branch, session or pull request (in any state) already exists (when `gh` cannot say, it warns and goes on), and a repository at its cap. `--base` stacks the task on another open task's branch.
-- **`status`** prints one row per task worktree: slug, phase, declared state, branch, session, base, session state, age (`overtime` past the time limit), uncommitted changes, commits ahead and behind its base, last commit, pull request, and `stale` when the last commit and the session's start are both older than 7 days. Then the counts per phase against the cap, the leftover `agent-*` and outside worktrees, and one `waiting on the human: <slug> <deliverable>` line per task in review. Pull request state is `unknown` without `gh`.
+- **`status`** prints one row per task worktree: slug, phase, declared state, branch, session, base, session state, age (`overtime` past the time limit, only while the task is in `motion`), uncommitted changes, commits ahead and behind its base, last commit, pull request, and `stale` when the last commit and the session's start are both older than 7 days. Then the counts per phase against the cap, the leftover `agent-*` and outside worktrees, and one `waiting on the human: <slug> <deliverable>` line per task in review. Pull request state is `unknown` without `gh`.
 - **`clean`** removes finished tasks (session, worktree, branch) and says why it kept the rest. It never forces and keeps a task whenever anything is uncertain. A task goes only when its pull request is merged into the default branch with the local head equal to the merged head, or its state is `acknowledged` or `dismissed` with a recorded deliverable, a pull request that is not open and a head that is pushed; and in both cases nothing is uncommitted, no task is stacked on it, no session in it is unfinished and no other worktree is nested in it. It keeps a task on a detached HEAD, and one whose worktree is locked with no session (it prints the `git worktree unlock` to run). If sessions cannot be listed, or an unfinished session has no `cwd`, it removes nothing (exit 2). A dismissed branch that is not merged makes `git branch -d` refuse: reported, exit 1. Git-ignored files in a removed worktree go with it.
 - **`state`** is run by a lead inside its worktree. `handed-over` takes the deliverable: a link (`scheme://...`), or a file that exists and is outside the worktree.
 - **`ack`** is run by the dispatcher on the human's word, for a task that was handed over.
@@ -44,7 +44,7 @@ factory merge (<number>... | --all) [--dry-run]
 | `handed-over` | the lead, before `DONE:` and after any later turn | the deliverable is with the human |
 | `acknowledged`, `dismissed` | the dispatcher (`ack`) | the human accepted or dropped it |
 
-A session is unfinished if it is interactive, or a background session, unless that one is `done` and either idle or exited.
+A session is unfinished if it is interactive, or a background session whose turn has not ended. In `claude agents --json --all` a turn has ended when `status` is `idle` (a session stays `busy` while a background command it started still runs), or when the entry has no `status` and no `pid` and its `state` is `done` or `stopped` (the process exited, or `claude stop`). The `state` of a live session (`done`, `blocked`, `working`) is its own summary of its last turn and is not read: a lead woken by a message after its hand-over often ends `idle` with `working`. Anything else, such as `waiting`, an unknown status or an exited session with another `state`, is unfinished.
 
 | Phase | When | Holds a slot |
 |---|---|---|
@@ -64,7 +64,7 @@ The cap (`worktree_cap`) counts slots per repository. Only `new` checks it, so a
 | `worktree_cap` | 5 | tasks holding a slot, per repository; `isshoni-tui` can edit it |
 | `lead_model` | `fable` | |
 | `lead_permission_mode` | `auto` | `acceptEdits`, `auto`, `bypassPermissions`, `manual`, `dontAsk`, `plan` |
-| `task_time_limit_hours` | 2 | after it `status` shows `overtime`; the lead stops and reports |
+| `task_time_limit_hours` | 2 | after it `status` shows `overtime` on a task in `motion`; the lead stops and reports |
 
 ## Messages
 Leads and the dispatcher talk through Claude Code's `SendMessage`, by session name. A lead's first line starts with `QUESTION:`, `BLOCKED:`, `OVERTIME:`, `SPLIT:` or `DONE:` and its slug. The human can always `claude attach <slug>`.
