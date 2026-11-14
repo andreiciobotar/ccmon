@@ -18,7 +18,7 @@ The rule lives in two places, each one line: `role()` in `ccmon/metrics.py` and 
 - Repeats: dispatches are compared within one role, so `coder` and `factory:coder` prompts are compared with each other.
 - Model check: the expected model of a namespaced type cannot be found reliably (see Facts), so:
   - by default (`<cwd>/.claude/agents`, `~/.claude/agents`) a namespaced type is looked up under its full name, which finds nothing: no check, no warning. It is never compared with a bare `.claude/agents/<role>.md`, which is a different definition.
-  - with `--agents-dir DIR` the user has said where the definitions are, and a namespaced type is looked up there by its role (`DIR/coder.md` for `factory:coder`). `ccmon --agents-dir factory/agents ...` therefore checks factory agents. The warning text names the full type.
+  - with `--agents-dir DIR` the user has said where the definitions are, and a namespaced type is looked up there by its role (`DIR/coder.md` for `factory:coder`). The option replaces the default directories, so a bare `coder` in the same run is checked against the same file. `ccmon --agents-dir factory/agents ...` therefore checks factory agents. The warning text names the full type.
 
 ## Display (decided)
 - The full name is shown everywhere (`factory:coder`), never shortened: it says which definition ran, and a plugin's `coder` may pin a different model than the repository's.
@@ -30,6 +30,6 @@ The rule lives in two places, each one line: `role()` in `ccmon/metrics.py` and 
 - A namespaced agent's model is not checked unless `--agents-dir` is given.
 
 ## Tests
-- Python: a fixture session with `factory:reviewer` (CHANGES_NEEDED) answered by `factory:coder`, a `factory:explorer` with a citation that the main session then reads, and two similar `factory:coder` prompts: review loops, re-check and repeat are counted; with the fixture agents dir a wrong-model `factory:*` dispatch warns; `expected_model("factory:coder", cwd)` without an agents dir is `None` even when `<cwd>/.claude/agents/coder.md` exists. Existing tests pass unchanged.
+- Python: a fixture session with `factory:reviewer` (CHANGES_NEEDED) answered by `factory:coder`, a `factory:explorer` with a citation that the main session then reads, and a bare `coder` prompt followed by a similar `factory:coder` prompt: review loops, re-check and repeat are counted; with the fixture agents dir a wrong-model `factory:*` dispatch warns; `expected_model("factory:coder", cwd)` without an agents dir is `None` even when `<cwd>/.claude/agents/coder.md` exists. Existing tests pass unchanged.
 - Go: `AgentColor("factory:coder")` equals `AgentColor("coder")`; `agentLess` order with mixed bare and namespaced names.
 - Real data: `ccmon sessions --json` and `agents --json` before and after differ only in sessions that dispatched `factory:*` agents; one of the three factory leads is checked by hand against its transcript.

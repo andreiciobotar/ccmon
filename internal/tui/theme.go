@@ -87,7 +87,8 @@ func agentRole(agent string) string {
 	return agent[strings.LastIndex(agent, ":")+1:]
 }
 
-// AgentColor is the one stable color of an agent type; a plugin's agent has the color of its role.
+// AgentColor is the one stable color of an agent type; a plugin's agent has the color
+// of its role.
 func (th *Theme) AgentColor(agent string) color.Color {
 	switch agentRole(agent) {
 	case "main":
@@ -130,8 +131,8 @@ func agentLess(a, b string) bool {
 	if oa != ob {
 		return oa < ob
 	}
-	if len(a) != len(b) { // same role: the bare type first
-		return len(a) < len(b)
+	if (a == oa) != (b == ob) { // same role: the bare type first
+		return a == oa
 	}
 	return a < b
 }

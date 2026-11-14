@@ -400,8 +400,8 @@ func TestTimelineKeepsTheSelectedLane(t *testing.T) {
 }
 
 func TestAgentOrderIsFixed(t *testing.T) {
-	want := []string{"main", "coder", "factory:coder", "reviewer", "factory:reviewer", "explorer", "general-purpose", "Explore", "Plan", "fork", "alpha", "vercel:beta", "zed"}
-	got := []string{"zed", "factory:reviewer", "vercel:beta", "fork", "factory:coder", "Plan", "explorer", "alpha", "main", "Explore", "reviewer", "general-purpose", "coder"}
+	want := []string{"main", "coder", "factory:coder", "zz:coder", "reviewer", "factory:reviewer", "explorer", "general-purpose", "Explore", "Plan", "fork", "alpha", "vercel:beta", "zed"}
+	got := []string{"zz:coder", "zed", "factory:reviewer", "vercel:beta", "fork", "factory:coder", "Plan", "explorer", "alpha", "main", "Explore", "reviewer", "general-purpose", "coder"}
 	sort.Slice(got, func(i, j int) bool { return agentLess(got[i], got[j]) })
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("order %v", got)

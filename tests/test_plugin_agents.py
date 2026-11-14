@@ -22,7 +22,7 @@ class PluginAgentTests(unittest.TestCase):
 
     def test_full_name_is_kept(self):
         x = metrics.session_summary(load())
-        self.assertEqual(sorted(x["by_agent"]), ["factory:coder", "factory:explorer", "factory:reviewer", "main"])
+        self.assertEqual(sorted(x["by_agent"]), ["coder", "factory:coder", "factory:explorer", "factory:reviewer", "main"])
 
     def test_review_loop(self):
         s = load()
@@ -36,7 +36,7 @@ class PluginAgentTests(unittest.TestCase):
         self.assertEqual((s.recheck_candidates, s.rechecked), (1, 1))
         self.assertIn("rechecked", by_desc(s, "Find config loader").flags)
 
-    def test_repeat(self):
+    def test_repeat_across_bare_and_namespaced(self):
         s = load()
         d = by_desc(s, "Implement loader cache fixes")
         self.assertIn("repeat", d.flags)
@@ -55,7 +55,7 @@ class PluginAgentTests(unittest.TestCase):
                 f.write("---\nmodel: opus\n---\n")
             self.assertEqual(metrics.expected_model("reviewer", cwd), "opus")
             self.assertIsNone(metrics.expected_model("factory:reviewer", cwd))
-        self.assertEqual(load(agents_dir=None).warnings, [])
+        self.assertFalse([w for w in load(agents_dir=None).warnings if "factory:" in w])
 
 
 if __name__ == "__main__":
