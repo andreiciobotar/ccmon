@@ -42,7 +42,7 @@ bin/ccmon agents --since 7d      # per agent type: tokens, p50/p90, repeats
 
 Python 3.11+, no dependencies. Add `--json` for machine-readable output; [docs/ccmon.md](docs/ccmon.md) has the rest.
 
-`ccmon-tui` is the same data as a live terminal dashboard: sessions grouped by repository and task, a timeline per session, and what is running now.
+`ccmon-tui` is the same data as a live terminal dashboard: sessions grouped by repository and task, a timeline per session, and what is running now. Its factory view (`4`) lists each repository's factory tasks with their phase and how many hold a slot against the cap, and `c` there changes the cap: the one thing the dashboard writes (`worktree_cap` in `~/.claude/factory/settings.json`).
 
 ```sh
 make install    # needs Go 1.27+ and Python 3.11+; builds bin/ccmon-tui

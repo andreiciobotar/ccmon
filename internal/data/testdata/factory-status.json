@@ -1,0 +1,20 @@
+{
+  "rows": [
+    {
+      "slug": "cost-in-money", "branch": null, "path": "/r/.claude/worktrees/cost-in-money",
+      "session_id": null, "session": "none", "blocked": null, "base": "origin/main",
+      "elapsed": null, "overtime": false, "dirty": null, "behind": null, "ahead": null,
+      "head": "abc", "last_commit": null, "pr_state": "unknown", "pr_url": "", "pr_head": "", "pr_base": "",
+      "phase": "motion", "stale": false
+    },
+    {
+      "slug": "stacked", "branch": "worktree-stacked", "path": "/r/.claude/worktrees/stacked",
+      "session_id": "726710c0", "session": "working", "blocked": "busy", "base": "worktree-cost-in-money",
+      "elapsed": 252, "overtime": true, "dirty": false, "behind": 0, "ahead": 2,
+      "head": "def", "last_commit": 1794647916, "pr_state": "open", "pr_url": "https://github.com/o/r/pull/12", "pr_head": "h", "pr_base": "b",
+      "phase": "review", "stale": true
+    }
+  ],
+  "cap": 7, "open": 2, "in_motion": 1, "in_review": 1, "merged": 0,
+  "leftover_agent_worktrees": 0, "outside_worktrees": 0
+}

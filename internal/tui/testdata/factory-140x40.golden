@@ -1,0 +1,40 @@
+ ccmon  1 Dashboard  2 Session  3 Agents [4 Factory]                                                             24h [7d] 30d  all   ○ idle 
+ Factory  6 in motion · 2 waiting for review · 1 merged, not cleaned  · as of 11:00:00                                                      
+ worktree cap  5  per repo   c edit                                                                         ~/.claude/factory/settings.json 
+                                                                                                                                            
+ alpha                                                                                            in motion ●●●○○ 3/5   review 2   merged 1 
+  SLUG              PHASE                  ELAPSED  PR          BASE          FLAGS                                                         
+  login-flow        ⠋ in motion              2h15m  -           main          [overtime]                                                    
+  quiet-refactor    ⠋ in motion              4m12s  -           main                                                                        
+  stacked-on-login  ● in motion              1m35s  ?           ↳ login-flow                                                                
+  api-rate-limits   ◆ waiting for review     1h30m  #42         main                                                                        
+  rate-limit-docs   ◆ waiting for review         -  #40 closed  main          [stale]                                                       
+  old-experiment    ✓ merged, not cleaned    1m01s  #31         main                                                                        
+                                                                                                                                            
+ beta-é日本語                                                                                       in motion ●●● 3/2   review 0   merged 0 
+  SLUG              PHASE                  ELAPSED  PR          BASE          FLAGS                                                         
+  task-00           ⠋ in motion              1m00s  -           main                                                                        
+  task-01           ⠋ in motion              2m00s  -           main                                                                        
+  task-02           ⠋ in motion              3m00s  -           main                                                                        
+                                                                                                                                            
+ gamma                                                                                                                                      
+  ⚠ not inside a git repository                                                                                                             
+                                                                                                                                            
+                                                                                                                                            
+                                                                                                                                            
+                                                                                                                                            
+                                                                                                                                            
+                                                                                                                                            
+                                                                                                                                            
+                                                                                                                                            
+                                                                                                                                            
+                                                                                                                                            
+                                                                                                                                            
+                                                                                                                                            
+                                                                                                                                            
+                                                                                                                                            
+                                                                                                                                            
+                                                                                                                                            
+                                                                                                                                            
+                                                                                                                                            
+ ↑↓/jk move  ·  c edit cap  ·  r range  ·  tab next view  ·  ? help  ·  q quit                                                              
