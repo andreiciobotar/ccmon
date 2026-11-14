@@ -1178,6 +1178,12 @@ def c_lgtm_blocked(p, _):
     return found
 
 
+def has_merge_of(p, url, path):
+    """Whether the worktree at `path` already contains the merge commit of the pull request at `url`."""
+    oid = (p["gh"](dict, "pr", "view", url, "--json", "mergeCommit").get("mergeCommit") or {}).get("oid")
+    return bool(oid) and p["repo"].git("merge-base", "--is-ancestor", oid, "HEAD", path=path)[0] == 0
+
+
 def c_base_merged(p, _):
     found, repo = [], p["repo"]
     for r in phased(p):
@@ -1187,7 +1193,7 @@ def c_base_merged(p, _):
             state, url, _, into = pull_request(repo, base)
             if state == "unknown":
                 raise NotEvaluated(f"the pull request state of {base} is unknown")
-            if (state, into) == ("merged", repo.default):
+            if (state, into) == ("merged", repo.default) and not has_merge_of(p, url, r["path"]):
                 found.append((r["slug"], r["slug"], f"its base {base} merged ({url}): tell its lead to rebase onto "
                               f"{repo.remote}/{repo.default} and to open or retarget its pull request against {repo.default}"))
     return found
@@ -1559,6 +1565,7 @@ MERGEABLE_TRIES = 5
 MERGEABLE_WAIT = 3
 PR_FIELDS = "number,url,isDraft,headRefName,headRefOid,baseRefName,isCrossRepository"
 ACTIVITY = "repos/{owner}/{repo}/activity"
+FORK = ("fork", "its head is in another repository")
 
 
 def open_prs(p):
@@ -1620,12 +1627,14 @@ def merge_one(p, pr, merged, dry):
     (kind, reason) of the first blocker."""
     repo, n, base = p["repo"], str(pr["number"]), pr["baseRefName"]
     if pr["isCrossRepository"]:
-        return "fork", "its head is in another repository"
+        return FORK
     reason = handover_reason(p, pr)
     if reason:
         return "handover", reason
     if base != repo.default and base not in merged:
         state, _, _, into = pull_request(repo, base)
+        if state == "unknown":
+            return "pending", f"cannot read the pull request of its base {base}"
         if (state, into) != ("merged", repo.default):
             return "base", f"its base {base} is not {repo.default} nor the head of a pull request merged into it"
     try:
@@ -1714,6 +1723,7 @@ def cmd_merge(args):
 
 def newest_approval(p, pr, permission):
     """The newest comment on `pr` that says exactly `lgtm` and comes from a login with write access, or None."""
+    # A tuple as the kind: gh_json checks a bare `list` for objects, and these are pages.
     pages = p["gh"]((list,), "api", "--paginate", "--slurp", f"repos/{{owner}}/{{repo}}/issues/{pr['number']}/comments")
     if not all(isinstance(g, list) and all(isinstance(c, dict) for c in g) for g in pages):
         raise NotEvaluated("gh api answered with an unexpected shape")
@@ -1753,10 +1763,11 @@ def lgtm_step(p, dry):
         for pr in bottom_up(open_prs(p)):
             approval = newest_approval(p, pr, permission)
             if approval:
-                stop = stale_approval(p, pr, approval) or merge_one(p, pr, merged, dry)
+                stop = (FORK if pr["isCrossRepository"] else stale_approval(p, pr, approval)) or \
+                    merge_one(p, pr, merged, dry)
                 if not stop:
                     merged.add(pr["headRefName"])
-                results.append((pr, *(stop or ("merged", approval["html_url"]))))
+                results.append((pr, *(stop or ("merged", approval.get("html_url") or pr["url"]))))
     except NotEvaluated as e:
         p["lgtm_unread"] = str(e)
 

@@ -58,7 +58,7 @@ Merging is the site manager's job, done by a command with no model: `factory mer
   2. The human comments exactly `lgtm` on the pull request. The next watch tick merges it without you; this needs the schedule installed. An `lgtm` older than the last change to the head does not count.
 - Never run `gh pr merge` yourself, and never work around a stop (`#N stopped: <reason>`): show the human the reason, or send the lead what it has to fix.
 - Never post a pull request comment that reads `lgtm` (any case, any spacing), and never ask anyone to: that comment is the human's approval to merge, and nothing technical tells yours from theirs. A lead's `DONE`, a reviewer's `APPROVE` and your own judgment are not the human's word.
-- An `lgtm-blocked` escalation (`#<number>/<kind>`) means the human approved a pull request and it was not merged. `stale`: tell the human a fresh `lgtm` is needed. `ci`, `conflict`: send the lead the reason. `handover`: ask the lead to finish and declare. Others: show the human the reason.
+- An `lgtm-blocked` escalation (`#<number>/<kind>`) means the human approved a pull request and it was not merged. `stale`: tell the human a fresh `lgtm` is needed. `ci`, `conflict`: send the lead the reason. `handover`: ask the lead to finish and declare (no task worktree for it: tell the human, who merges it). Others: show the human the reason.
 - A `base-merged` escalation names a lead still working on a base that has merged: tell it to rebase onto the default branch and to open or retarget its pull request against it.
 
 ## Critique of the factory

@@ -1,5 +1,7 @@
+import io
 import json
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -141,6 +143,9 @@ class MergeCommandTests(World):
             "pending": (dict(prs=[pr(1)], checks=checks("pass", "pending")), "checks are still running"),
             "pending, none passed": (dict(prs=[pr(1)], checks=checks("pending")), "checks are still running"),
             "pending and failed": (dict(prs=[pr(1)], checks=checks("fail", "pending")), "failed or cancelled"),
+            "base unreadable": (dict(prs=[pr(2, base="worktree-t1")],
+                                     extra={("gh", "pr", "list", "--head", "worktree-t1"): (1, "", "boom")}),
+                                "cannot read the pull request of its base worktree-t1"),
             "conflicting": (dict(prs=[pr(1)], mergeable="CONFLICTING"), "conflicts with its base"),
             "never computed": (dict(prs=[pr(1)], mergeable="UNKNOWN"), "not computed"),
             "view fails": (dict(prs=[pr(1)], mergeable=(1, "", "boom")), "boom"),
@@ -429,6 +434,84 @@ class LgtmTests(World):
                 self.assertEqual(self.gh_mutations(), [])
                 self.assertNotIn({"ts": iso(NOW), "repo": ROOT, "id": "aaa", "cleared": True}, self.records())
 
+    def subjects(self):
+        return [r["subject"] for r in self.records() if r.get("criterion")]
+
+    def test_each_blocker_kind_fires_under_its_own_subject(self):
+        bucket = lambda b: [{"name": "c", "bucket": b}]
+        unreadable = {("gh", "pr", "list", "--head", "worktree-t0"): (1, "", "boom")}
+        cases = {
+            "#1/ci": [dict(checks=[]), dict(checks=bucket("fail")), dict(checks=bucket("skipping"))],
+            "#1/conflict": [dict(mergeable="CONFLICTING")],
+            "#1/handover": [dict(state="working")],
+            "#1/base": [dict(prs=[pr(1, base="worktree-t0")])],
+            "#1/merge": [dict(extra={("gh", "pr", "merge"): (1, "", "boom")})],
+            None: [dict(checks=bucket("pending")), dict(mergeable="UNKNOWN"),
+                   dict(prs=[pr(1, base="worktree-t0")], extra=unreadable)],
+        }
+        for subject, variants in cases.items():
+            for kw in variants:
+                with self.subTest(subject=subject, kw=kw), mock.patch.object(factory.time, "sleep"):
+                    self.setUp()
+                    self.tick_lgtm(kw.pop("prs", [pr(1)]), {1: [comment()]}, **kw)
+                    self.assertEqual(self.subjects(), [subject] if subject else [])
+
+    def test_a_fork_with_an_approval_fires_without_asking_for_its_activity(self):
+        self.tick_lgtm([pr(1, fork=True)], {1: [comment()]})
+        self.assertEqual(self.subjects(), ["#1/fork"])
+        self.assertFalse(any(ACTIVITY in c for c in self.fake.calls))
+        self.assertEqual(self.gh_mutations(), [])
+
+    def test_a_merged_result_without_a_comment_url_prints_the_pull_request(self):
+        bare = {k: v for k, v in comment().items() if k != "html_url"}
+        _, out, _ = self.tick_lgtm([pr(1)], {1: [bare]})
+        self.assertIn("#1 merged on lgtm https://x/pull/1\n", out)
+
+    def test_the_permission_of_a_login_is_asked_once_across_pull_requests(self):
+        self.tick_lgtm([pr(1), pr(2)], {1: [comment()], 2: [comment(n=2)]})
+        self.assertEqual(sum(c[:3] == ["gh", "api", "repos/{owner}/{repo}/collaborators/andrei/permission"]
+                             for c in self.fake.calls), 1)
+        self.assertEqual([c[2] for c in self.gh_mutations() if c[1] == "merge"], ["1", "2"])
+
+    def test_a_failure_after_a_merge_keeps_the_merge_and_cleans(self):
+        _, out, _ = self.tick_lgtm([pr(1), pr(2)], {1: [comment()]},
+                                   extra={("gh", "api", "--paginate", "--slurp", COMMENTS % 2): (1, "", "boom")})
+        self.assertIn("#1 merged on lgtm", out)
+        self.assertIn("kept t1:", out)
+        self.assertIn("not evaluated: lgtm-blocked: gh api --paginate failed: boom", out)
+        self.assertEqual([c[2] for c in self.gh_mutations() if c[1] == "merge"], ["1"])
+
+    def test_after_a_merge_the_picture_is_gathered_again_and_keeps_the_results(self):
+        results = [(pr(1), "merged", "u")]
+
+        def step(p, dry):
+            p["lgtm"], p["lgtm_unread"] = results, "why"
+        calls = mock.Mock()
+        calls.gather.return_value = {"rows": "fresh"}
+        with mock.patch.object(factory, "lgtm_step", step), mock.patch.object(factory, "run_clean", calls.clean), \
+                mock.patch.object(factory, "gather", calls.gather), redirect_stdout(io.StringIO()):
+            got = factory.watch_lgtm({"repo": "r", "dispatcher": "d", "rows": "old"})
+            self.assertEqual(got, {"rows": "fresh", "lgtm": results, "lgtm_unread": "why"})
+            self.assertEqual(calls.mock_calls, [mock.call.clean(), mock.call.gather("r", "d")])
+            results.clear()
+            same = {"rows": "old"}
+            self.assertIs(factory.watch_lgtm(same), same)
+
+    def test_phases_that_cannot_be_trusted_leave_lgtm_blocked_not_evaluated(self):
+        unplaced = {"id": "s9", "kind": "background", "status": "busy", "state": "working"}
+        cases = {"an unplaced session": (dict(), [unplaced], "no working directory"),
+                 "an unknown pull request state": (
+                     dict(extra={("gh", "pr", "list", "--head", "worktree-t1"): (1, "", "boom")}), [],
+                     "pull request state is unknown")}
+        for label, (kw, more, why) in cases.items():
+            with self.subTest(label):
+                self.setUp()
+                answers, sessions, slugs = self.lgtm_world([pr(1)], {1: [comment()]}, **kw)
+                _, out, _ = self.cli("watch", answers=answers, sessions=[*sessions, *more], entries=slugs)
+                self.assertIn("not evaluated: lgtm-blocked: ", out)
+                self.assertIn(why, out)
+                self.assertEqual((self.gh_mutations(), self.records()), ([], []))
+
     def test_health_checks_without_changing_anything(self):
         prs, comments = [pr(1), pr(2)], {1: [comment()], 2: [comment(at=NOW - 7200, n=2)]}
         answers, sessions, slugs = self.lgtm_world(prs, comments)
@@ -444,13 +527,17 @@ class LgtmTests(World):
 
 
 class BaseMergedTests(unittest.TestCase):
-    REPO = SimpleNamespace(root=ROOT, default="main", remote="origin")
+    REPO = SimpleNamespace(root=ROOT, default="main", remote="origin",
+                           git=lambda *a, path=None: factory.run(["git", *a], cwd=path))
     MERGED = {("gh", "pr", "list", "--head", "worktree-base"): (0, json.dumps([
         {"state": "MERGED", "url": "https://x/pull/5", "headRefOid": "z", "baseRefName": "main"}]), "")}
 
-    def found(self, phase="motion", base="worktree-base", answers=None, **kw):
-        p = pic(repo=self.REPO, rows=[row("x", phase=phase, stacked_on=base, **kw)])
-        with mock.patch.object(factory, "run", FakeRun(answers or self.MERGED)):
+    def found(self, phase="motion", base="worktree-base", answers=None, oid="abc", ancestor=1, **kw):
+        merge_commit = {"oid": oid} if oid else None
+        p = pic(repo=self.REPO, gh=lambda kind, *a: {"mergeCommit": merge_commit},
+                rows=[row("x", phase=phase, stacked_on=base, **kw)])
+        self.fake = FakeRun({**(answers or self.MERGED), ("git", "merge-base"): (ancestor, "", "")})
+        with mock.patch.object(factory, "run", self.fake):
             return check("base-merged", p)
 
     def test_fires_for_motion_and_blocked(self):
@@ -459,6 +546,14 @@ class BaseMergedTests(unittest.TestCase):
                 self.assertEqual(self.found(phase), [(
                     "x", "x", "its base worktree-base merged (https://x/pull/5): tell its lead to rebase onto "
                     "origin/main and to open or retarget its pull request against main")])
+        self.assertIn(["git", "merge-base", "--is-ancestor", "abc", "HEAD"], self.fake.calls)
+
+    def test_fires_without_a_merge_commit_or_when_it_is_not_an_ancestor(self):
+        self.assertEqual(len(self.found(oid=None)), 1)
+        self.assertEqual(len(self.found(ancestor=128)), 1)
+
+    def test_does_not_fire_once_the_worktree_has_the_merge_commit(self):
+        self.assertEqual(self.found(ancestor=0), [])
 
     def test_does_not_fire_otherwise(self):
         open_base = {("gh", "pr", "list", "--head", "worktree-base"): (0, json.dumps([

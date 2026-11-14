@@ -331,7 +331,7 @@ class CriteriaTests(Home):
     def test_phase_criteria_are_not_evaluated_when_phases_cannot_be_trusted(self):
         phase_based = [c for c in factory.load_criteria() if c["name"] in (
             "dispatcher-missing", "quiet", "ended-undeclared", "blocked-unanswered", "handover-unacknowledged",
-            "review-loops", "ci-red-handover", "merged-not-cleaned")]
+            "review-loops", "ci-red-handover", "merged-not-cleaned", "base-merged")]
         trusted = [c for c in factory.load_criteria() if c["name"] in ("past-limit", "wrong-model", "deep-stack")]
         unplaced = {"id": "s9", "kind": "background", "status": "busy", "state": "working"}
         for label, p in (("an unplaced session", pic(rows=[row("x")], sessions=[unplaced])),

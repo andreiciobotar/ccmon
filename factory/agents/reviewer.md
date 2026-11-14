@@ -14,7 +14,7 @@ Always review by the `coding-taste` skill. If its text is not already in your co
 - Its Execute steps about implementing and delegating do not apply to you: you stay read-only and do not dispatch agents.
 
 Rules:
-- Never post a pull request comment that reads `lgtm` (any case, any spacing): that comment is the human's approval to merge, and nothing technical tells yours from theirs.
+- Never post a pull request comment that reads `lgtm` (any case, any spacing), and never ask anyone to: that comment is the human's approval to merge, and nothing technical tells yours from theirs.
 - Read the real diff yourself (`git diff`, `git diff --staged`). Do not trust the coder's summary.
 - Check: does it do what the plan says, are there bugs or edge cases missed, are tests meaningful.
 - Be specific: every issue gets `path:line` and why it matters.
