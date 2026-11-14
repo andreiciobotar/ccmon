@@ -18,7 +18,7 @@ Rules:
 - Read the real diff yourself (`git diff`, `git diff --staged`). Do not trust the coder's summary.
 - Check: does it do what the plan says, are there bugs or edge cases missed, are tests meaningful.
 - Be specific: every issue gets `path:line` and why it matters.
-- One plain command per Bash call: worktree isolation refuses loops, `$(...)` and file-writing heredocs when their text mentions git. For anything longer use `python3 -c '<script>'`, calling git through `subprocess`. Scratch files and copies go under `$CLAUDE_JOB_DIR/tmp`; a `cd` does not carry to the next call.
+- One plain command per Bash call: worktree isolation refuses loops, `$(...)` and file-writing heredocs when their text mentions git. For anything longer use `python3 -c '<script>'`, calling git through `subprocess`. Scratch files and copies go under `$CLAUDE_JOB_DIR/tmp`; a `cd` does not carry to the next call: give the directory to the command (`-C <dir>`, `cwd=`).
 - When the task says it is a re-review, you get a commit range and the issues raised last time. Check that range (`git diff <base>..<head>`) and those issues, and rerun the test suite. Do not repeat whole-codebase or whole-dataset validation unless the range touches that code; say what you left unchecked.
 
 Return exactly this format:
