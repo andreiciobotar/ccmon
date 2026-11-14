@@ -17,14 +17,14 @@ Measured on Claude Code 2.1.325 with three probe sessions (`claude --bg --plugin
 2. Observed firing, with payload fields beyond the common `session_id`, `transcript_path`, `cwd`, `hook_event_name`:
    - `SessionStart`: `source`, `model`.
    - `SessionEnd`: `reason` (`other` on `claude stop`).
-   - `UserPromptSubmit`: `prompt`. Fires for the first prompt and for every subagent hand-back (`<agent-message from=...`); cross-session messages were not exercised.
+   - `UserPromptSubmit`: `prompt`. Fires for the first prompt, for every subagent hand-back (`<agent-message from=...`) and for a cross-session message (the dispatcher's answer in the end-to-end run, 7 seconds after the `QUESTION:`).
    - `Stop`: `last_assistant_message`, `background_tasks`.
    - `SubagentStart`: `agent_id`, `agent_type` (`factory:explorer`).
    - `SubagentStop`: `agent_id`, `agent_type`, `agent_transcript_path`. **No `last_assistant_message`** when the subagent delivered its report with the `SubagentHandback` tool.
    - `PostToolUse` for `SubagentHandback`, fired inside the subagent: `agent_id`, `agent_type`, `tool_input.message` holding the whole report, and the parent's `session_id`, `transcript_path`, `cwd`.
    - `PostToolUse` for `SendMessage`: `tool_input.to`, `tool_input.message`.
    - `PermissionRequest` (`tool_name`) then `Notification` (`notification_type: permission_prompt`, `message`) in a `manual`-mode background session that needed a permission.
-3. Full count over `fa1fc39c`: 2 subagents, 6 reports, all 6 delivered through `SubagentHandback`, none as a closing text message. So feedback is filed from the `SubagentHandback` hook; `SubagentStop.last_assistant_message` is used when present.
+3. Full count over `fa1fc39c`: 2 subagents, 6 reports, all 6 delivered through `SubagentHandback`, none as a closing text message. So feedback is filed from the `SubagentHandback` hook. In the end-to-end run a subagent first ended with a text report (`SubagentStop` carried it as `last_assistant_message`), then handed back a reworded copy five seconds later; filing from both gave two near-identical entries, so `SubagentStop` is not a feedback source.
 4. Not observed: `PermissionDenied`. The reference says it fires only for denials by the auto-mode classifier; the one command tried was allowed. It is registered on the reference's word.
 5. Not usable: `WorktreeCreate`. The reference: "Configuring a WorktreeCreate hook replaces that default git behavior." `WorktreeRemove` is not registered either: the factory removes worktrees itself. `factory new` and `factory clean` record `TaskStarted` and `TaskRemoved` instead.
 6. A hook's environment has `CLAUDE_PROJECT_DIR` (the session's directory), `CLAUDE_PLUGIN_ROOT`, `CLAUDE_CODE_SESSION_ID`. The Bash tool's shell has `CLAUDE_CODE_SESSION_ID` but not `CLAUDE_PROJECT_DIR`. A variable exported by the launcher did not reach the hooks, so `factory new` cannot pass the slug through the environment.
@@ -37,7 +37,7 @@ Everything lives in `factory/bin/factory` (one owner, already on the Bash tool's
 
 ### Tags
 - `repo`, `slug`: from the session directory (`CLAUDE_PROJECT_DIR`, else the payload's `cwd`, else the process's working directory for the commands). A path matching `<repo>/.claude/worktrees/<name>[/...]` gives `repo` and, unless `<name>` starts with `agent-`, `slug`. Any other path is its own `repo` with `slug` null. No `git` call.
-- `role`: the payload's `agent_type` without the `factory:` prefix when present; else `lead` when there is a slug; else `other` (the dispatcher and any other session that loads the plugin).
+- `role`: the payload's `agent_type` without the `factory:` prefix when present; else `subagent` when the payload has an `agent_id` (the end-to-end run showed one `SubagentStop` with no type); else `lead` when there is a slug; else `other` (the dispatcher and any other session that loads the plugin).
 - `model`: the payload's `model` when present; else the last `"model":"..."` in the final 64 KiB of the transcript, the subagent's (fact 8) when the payload has `agent_id`, the session's otherwise; null when there is none. The commands find the session transcript as `~/.claude/projects/*/<CLAUDE_CODE_SESSION_ID>.jsonl`. Transcripts are only read.
 - `version`: `version` from the plugin's `.claude-plugin/plugin.json`. A pull request that changes the rules bumps it; this one sets `0.2.0`.
 - `session`: the payload's `session_id`, or `CLAUDE_CODE_SESSION_ID`.
@@ -62,7 +62,7 @@ Event line: the tags, `event` (the hook's `hook_event_name` verbatim) and these 
 | `PermissionDenied` | `tool_name`, `reason` |
 | `PostToolUse` | `tool_name`, `agent_id`; for `SendMessage` also, always, `to` and `kind` (`QUESTION`, `BLOCKED`, `OVERTIME`, `SPLIT` or `DONE` when the message starts with that word and a colon, else null) |
 
-Feedback is filed by the same call from three texts: `tool_input.message` of a `SubagentHandback`; `tool_input.message` of a `SendMessage` whose `kind` is `DONE`; `last_assistant_message` of a `SubagentStop`.
+Feedback is filed by the same call from two texts: `tool_input.message` of a `SubagentHandback`, and `tool_input.message` of a `SendMessage` whose `kind` is `DONE`. A payload field of an unexpected type is treated as absent; the event is still recorded.
 
 `hooks.json` registers `SessionStart`, `SessionEnd`, `UserPromptSubmit`, `Stop`, `SubagentStart`, `SubagentStop`, `Notification`, `PermissionRequest`, `PermissionDenied`, and `PostToolUse` with matcher `SendMessage|SubagentHandback`, each as `"${CLAUDE_PLUGIN_ROOT}/bin/factory" hook` with `timeout` 10.
 
@@ -108,17 +108,19 @@ A failed write is ignored; output and exit codes of `new`, `status` and `clean` 
 - A subagent in its own worktree (`isolation: worktree`) may report a `cwd` under `.claude/worktrees/agent-*`; `CLAUDE_PROJECT_DIR` is used first to avoid that, unverified for that case.
 - The lead's feedback is filed only from a `DONE:` message that was sent with `SendMessage`; a lead that ends with the message as plain output files it with `factory feedback add`.
 - Concurrent appends rely on `O_APPEND` writes of one line being atomic on a local filesystem.
-- `UserPromptSubmit` for a cross-session message is assumed, not observed, until the end-to-end run.
+- A subagent that never calls `SubagentHandback` files nothing; the lead files its items with `factory feedback add`.
+- `PermissionDenied`, `TaskStarted` and `TaskRemoved` have not been seen in a live session (the end-to-end lead was started without `factory new`, which requires the dispatcher's session name); the last two are covered by tests.
+- A session started with `--plugin-dir` while another copy of the plugin is installed may find the other copy's `factory` first on `PATH` (seen in the end-to-end run).
 
 ## Tests (`factory/tests/test_telemetry.py`, standard library)
 - Tags: a task worktree path, a subdirectory of one, an `agent-` worktree, a plain directory; role from `agent_type`, from a slug, neither; model from the payload, from a transcript tail, from the subagent transcript, missing.
 - `hook`: one case per row of the table asserting the exact line; unknown event recorded with tags only; invalid JSON on stdin, and an unwritable store (a file where the directory should be), both exit 0 with empty stdout and stderr, run as a real subprocess of `bin/factory hook`.
 - Feedback parsing: heading forms (`## Factory feedback`, `**Factory feedback**`, `Factory feedback:`), bullets, numbers, multi-line items, no bullets, `none`, `None.`, no heading, a following `#` heading ends the section, the last heading wins.
-- Filing from `SubagentHandback`, from a `DONE:` `SendMessage` (and not from a `QUESTION:`), from `SubagentStop`; the same item twice folds to one entry.
+- Filing from `SubagentHandback`, from a `DONE:` `SendMessage` (and not from a `QUESTION:`), not from `SubagentStop`; the same item twice folds to one entry.
 - `feedback set`: status and `pr` fold, re-filing does not reopen, unique prefix, ambiguous and unknown ids; `--status` filter; `--json`.
 - `retro`: a valid object stored with tags; each invalid shape refused; refused outside a task worktree; unwritable store exits 1.
 - `new` and `clean` record their event, and behave the same when the store is unwritable (existing tests untouched and passing).
 - `hooks.json` parses, and every command is the `factory hook` line.
 
 ## Done
-`make test` passes; one real lead run with this plugin leaves events, a retrospective and feedback entries, inspected by hand; the eight items of `fa1fc39c`'s `DONE:` are filed with `factory feedback add --slug ci-workflow --role lead`.
+`make test` passes; one real lead run with this plugin leaves events, a retrospective and feedback entries, inspected by hand; the eight items of `fa1fc39c`'s `DONE:` are filed as the first entries, by a one-off script that gives them that session's tags (version `0.1.0`), which `feedback add` cannot.

@@ -285,7 +285,8 @@ def tags(payload=None):
     if match:
         repo = match.group(1)
         slug = None if match.group(2).startswith("agent-") else match.group(2)
-    role = str(p.get("agent_type") or "").removeprefix("factory:") or ("lead" if slug else "other")
+    role = (str(p.get("agent_type") or "").removeprefix("factory:")
+            or ("subagent" if p.get("agent_id") else "lead" if slug else "other"))
     session = p.get("session_id") or os.environ.get("CLAUDE_CODE_SESSION_ID")
     model, transcript = p.get("model"), p.get("transcript_path")
     if not model:
@@ -322,7 +323,7 @@ def feedback_items(lines):
         elif items:
             items[-1] += "\n" + line
     items = [i.strip() for i in items] or ["\n".join(lines).strip()]
-    return [i for i in items if i.lower().strip("\"'`.!:; ") not in ("", "none")]
+    return [i for i in items if i.lower().strip("\"'`*_.!:; ") not in ("", "none")]
 
 
 def file_feedback(lines, tag):
@@ -566,21 +567,19 @@ def cmd_hook(args):
     """Record one hook payload. Prints nothing and exits 0 whatever happens."""
     try:
         p = json.loads(sys.stdin.read())
-        event, tool_input = p["hook_event_name"], p.get("tool_input") or {}
+        event, tool_input = p["hook_event_name"], p.get("tool_input")
+        message = tool_input.get("message") if isinstance(tool_input, dict) else None
+        message = message if isinstance(message, str) else ""
         fields = {k: p[k] for k in COPIED.get(event, ()) if k in p}
         text = None
         if event == "UserPromptSubmit":
-            prompt = p.get("prompt") or ""
-            fields["from"] = next((v for start, v in PROMPT_FROM if prompt.startswith(start)), "human")
+            fields["from"] = next((v for start, v in PROMPT_FROM if str(p.get("prompt")).startswith(start)), "human")
         elif event == "Stop" and isinstance(p.get("background_tasks"), list):
             fields["background_tasks"] = len(p["background_tasks"])
-        elif event == "SubagentStop":
-            text = p.get("last_assistant_message")
         elif event == "PostToolUse" and p.get("tool_name") == "SubagentHandback":
-            text = tool_input.get("message")
+            text = message
         elif event == "PostToolUse" and p.get("tool_name") == "SendMessage":
-            message = tool_input.get("message") or ""
-            fields["to"] = tool_input.get("to")
+            fields["to"] = tool_input.get("to") if isinstance(tool_input, dict) else None
             fields["kind"] = next((k for k in KINDS if message.startswith(k + ":")), None)
             text = message if fields["kind"] == "DONE" else None
         tag = tags(p)

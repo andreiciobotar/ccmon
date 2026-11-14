@@ -77,6 +77,7 @@ class TagTests(StoreCase):
     def test_role(self):
         self.assertEqual(factory.tags({"cwd": TASK, "agent_type": "factory:coder"})["role"], "coder")
         self.assertEqual(factory.tags({"cwd": TASK})["role"], "lead")
+        self.assertEqual(factory.tags({"cwd": TASK, "agent_id": "a1"})["role"], "subagent")
         self.assertEqual(factory.tags({"cwd": "/plain/dir"})["role"], "other")
 
     def test_version_and_session(self):
@@ -194,7 +195,7 @@ class ParseTests(unittest.TestCase):
                          ["the brief was silent\non the base branch"])
 
     def test_none_and_empty(self):
-        for body in ("none", "None.", " NONE \n", "", "\n\n", "- none", "- \"none\"\n", "1. None."):
+        for body in ("none", "None.", " NONE \n", "", "\n\n", "- none", "- \"none\"\n", "1. None.", "**None**", "- _none_"):
             with self.subTest(body=body):
                 self.assertEqual(self.items(f"## Factory feedback\n{body}"), [])
 
@@ -228,11 +229,16 @@ class FilingTests(StoreCase):
         (entry,) = self.lines("feedback")
         self.assertEqual(entry["role"], "lead")
 
-    def test_from_subagent_stop(self):
+    def test_not_from_subagent_stop(self):
         self.fire({"hook_event_name": "SubagentStop", "session_id": SID, "agent_id": "a1",
                    "agent_type": "factory:explorer", "last_assistant_message": self.REPORT})
-        self.fire({"hook_event_name": "SubagentStop", "session_id": SID, "agent_id": "a2", "agent_type": "factory:explorer"})
-        self.assertEqual([e["role"] for e in self.lines("feedback")], ["explorer"])
+        self.assertEqual(self.lines("feedback"), [])
+
+    def test_odd_shapes_still_record_the_event(self):
+        for extra in ({"tool_input": "text"}, {"tool_input": {"message": {"type": "shutdown_request"}}}):
+            self.fire({"hook_event_name": "PostToolUse", "tool_name": "SendMessage", "session_id": SID, **extra})
+        self.fire({"hook_event_name": "UserPromptSubmit", "session_id": SID, "prompt": 5})
+        self.assertEqual([e["event"] for e in self.lines()], ["PostToolUse", "PostToolUse", "UserPromptSubmit"])
 
     def test_same_item_twice_is_one_entry(self):
         payload = {"hook_event_name": "PostToolUse", "tool_name": "SubagentHandback", "session_id": SID,
