@@ -20,6 +20,9 @@ STORE = Path("~/.claude/factory")
 WORKTREE_RE = re.compile(r"(.*?)/\.claude/worktrees/([^/]+)(?:/|$)")
 MODEL_RE = re.compile(rb'"model"\s*:\s*"([^"]+)"')
 ITEM_RE = re.compile(r"(?:[-*]|\d+\.)\s+")
+LINK_RE = re.compile(r"[a-z][a-z0-9+.-]*://")
+STATES = ("working", "blocked", "handed-over", "acknowledged", "dismissed")
+SETTLED = ("acknowledged", "dismissed")
 KINDS = ("QUESTION", "BLOCKED", "OVERTIME", "SPLIT", "DONE")
 STATUSES = ("open", "accepted", "rejected", "done")
 CAUGHT_BY = ("tests", "reviewer", "lead", "ci", "human")
@@ -205,19 +208,26 @@ def session_block(mine):
     return None
 
 
-def phase(pr_state, mine):
-    """Where a task stands against the cap: 'review' or 'merged' when its pull request is open or merged and
-    no session is unfinished in it, otherwise 'motion'. `mine` is None when its sessions cannot be told:
-    they cannot be listed, or an unfinished one has no cwd and could be in any task."""
-    if mine is None or session_block(mine) or pr_state not in ("open", "merged"):
+def phase(pr_state, mine, state=None):
+    """Where a task stands: 'motion' and 'blocked' hold a slot under the cap, 'review', 'merged' and 'settled'
+    do not. `mine` is None when its sessions cannot be told: they cannot be listed, or an unfinished one has
+    no cwd and could be in any task. `state` is the declared state, None when undeclared."""
+    if mine is None or session_block(mine) or state == "working":
         return "motion"
-    return "review" if pr_state == "open" else "merged"
+    if state is None:
+        return {"open": "review", "merged": "merged"}.get(pr_state, "motion")
+    if state == "blocked":
+        return "blocked"
+    if pr_state == "merged":
+        return "merged"
+    return "review" if state == "handed-over" else "settled"
 
 
 def collect(repo, sessions, limit_hours):
     """One row per task worktree; `sessions` is None when they cannot be listed."""
     now = time.time()
     placed = sessions is not None and not unplaced_block(sessions)
+    declared = read_tasks(repo.root)
     rows = []
     for wt in repo.tasks:
         path, branch = wt["path"], wt["branch"]
@@ -245,7 +255,9 @@ def collect(repo, sessions, limit_hours):
         row["last_commit"] = int(ts) if rc == 0 and ts.isdigit() else None
         row["pr_state"], row["pr_url"], row["pr_head"], row["pr_base"] = (
             pull_request(repo, branch) if branch else ("unknown", "", "", ""))
-        row["phase"] = phase(row["pr_state"], mine if placed else None)
+        row["state"] = declared.get(slug, {}).get("state")
+        row["deliverable"] = declared.get(slug, {}).get("deliverable")
+        row["phase"] = phase(row["pr_state"], mine if placed else None, row["state"])
         times = [t for t in (row["last_commit"], started and started / 1000) if t]
         row["stale"] = bool(times) and now - max(times) > STALE_SECONDS
         rows.append(row)
@@ -373,6 +385,33 @@ def read_feedback():
     return list(entries.values())
 
 
+def read_tasks(root):
+    """The last record of each task of the repo at `root`, by slug; a task whose last state is unknown is left out."""
+    try:
+        lines = (STORE.expanduser() / "tasks.jsonl").read_text().splitlines()
+    except OSError:
+        return {}
+    last = {}
+    for line in lines:
+        try:
+            r = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(r, dict) and r.get("repo") == root and isinstance(r.get("slug"), str):
+            last[r["slug"]] = r
+    return {slug: r for slug, r in last.items() if r.get("state") in STATES}
+
+
+def declare(repo, slug, role, state, deliverable=None):
+    extra = {"deliverable": deliverable} if deliverable else {}
+    append("tasks", {**record(repo.root, slug, role, None, os.environ.get("CLAUDE_CODE_SESSION_ID")),
+                     "state": state, **extra})
+
+
+def inside(path, base):
+    return (path + os.sep).startswith(base + os.sep)
+
+
 def task_event(event, repo, slug, **extra):
     """TaskStarted / TaskRemoved, from the dispatcher; a failed write is ignored."""
     try:
@@ -430,11 +469,17 @@ def cmd_new(args):
         raise Fail(f"a session named {args.slug} or inside {path} already exists")
     cap = settings["worktree_cap"]
     if len(repo.tasks) >= cap:
-        moving = [os.path.basename(t["path"]) for t in repo.tasks
-                  if phase(pull_request(repo, t["branch"])[0] if t["branch"] else "unknown",
-                           None if unplaced_block(sessions) else sessions_in(sessions, t["path"])) == "motion"]
-        if len(moving) >= cap:
-            raise Fail(f"at the cap of {cap} tasks in motion: {', '.join(moving)}")
+        declared = read_tasks(repo.root)
+        held = []
+        for t in repo.tasks:
+            name = os.path.basename(t["path"])
+            where = phase(pull_request(repo, t["branch"])[0] if t["branch"] else "unknown",
+                          None if unplaced_block(sessions) else sessions_in(sessions, t["path"]),
+                          declared.get(name, {}).get("state"))
+            if where in ("motion", "blocked"):
+                held.append(name + (" (blocked)" if where == "blocked" else ""))
+        if len(held) >= cap:
+            raise Fail(f"at the cap of {cap} tasks in motion: {', '.join(held)}")
     old_pr = pull_request(repo, branch)[0]
     if old_pr == "unknown":
         sys.stderr.write(f"factory: warning: cannot check for an existing pull request on {branch}; continuing\n")
@@ -462,6 +507,10 @@ def cmd_new(args):
         raise Fail(f"claude exited {rc} {what}; the session may be running, nothing was removed", code=1)
     print(f"started {match.group(2).strip()} (session {match.group(1)})")
     task_event("TaskStarted", repo, args.slug, base=base, lead_model=settings["lead_model"])
+    try:
+        declare(repo, args.slug, "dispatcher", "working")
+    except (OSError, ValueError, KeyError):
+        pass
     return 0
 
 
@@ -487,29 +536,35 @@ def cmd_status(args):
     cap = settings["worktree_cap"]
     rows = collect(repo, list_sessions(), settings["task_time_limit_hours"])
     counts = {key: sum(r["phase"] == p for r in rows)
-              for key, p in (("in_motion", "motion"), ("in_review", "review"), ("merged", "merged"))}
+              for key, p in (("blocked", "blocked"), ("in_review", "review"), ("merged", "merged"),
+                             ("settled", "settled"))}
+    counts["in_motion"] = sum(r["phase"] in ("motion", "blocked") for r in rows)
     if args.json:
         doc = {"rows": rows, "cap": cap, "open": len(rows), **counts,
                "leftover_agent_worktrees": repo.leftover, "outside_worktrees": repo.outside}
         print(json.dumps(doc, indent=2))
         return 0
     now = time.time()
-    table = [["SLUG", "PHASE", "BRANCH", "BASE", "SESSION", "ID", "ELAPSED", "CHANGES", "AHEAD/BEHIND", "LAST COMMIT", "PR", "FLAGS"]]
+    table = [["SLUG", "PHASE", "STATE", "BRANCH", "BASE", "SESSION", "ID", "ELAPSED", "CHANGES", "AHEAD/BEHIND", "LAST COMMIT", "PR", "FLAGS"]]
     for r in rows:
         ab = "?" if r["ahead"] is None else f"+{r['ahead']}/-{r['behind']}"
         changes = "?" if r["dirty"] is None else ("dirty" if r["dirty"] else "clean")
         pr = r["pr_state"] + (f" {r['pr_url']}" if r["pr_url"] else "")
         flags = " ".join(f for f in ("overtime" if r["overtime"] else "", "stale" if r["stale"] else "") if f)
         elapsed = "-" if r["elapsed"] is None else age(now - r["elapsed"], now)
-        table.append([r["slug"], r["phase"], r["branch"] or "(detached)", r["base"], r["session"], r["session_id"] or "-", elapsed, changes, ab,
+        table.append([r["slug"], r["phase"], r["state"] or "-", r["branch"] or "(detached)", r["base"], r["session"], r["session_id"] or "-", elapsed, changes, ab,
                       age(r["last_commit"], now), pr, flags])
     widths = [max(len(row[i]) for row in table) for i in range(len(table[0]))]
     if rows:
         for row in table:
             print("  ".join(c.ljust(w) for c, w in zip(row, widths)).rstrip())
-    print(f"in motion {counts['in_motion']}/{cap}; waiting for review {counts['in_review']}; "
-          f"merged, not cleaned {counts['merged']}; leftover agent worktrees {repo.leftover}; "
+    print(f"in motion {counts['in_motion']}/{cap} ({counts['blocked']} blocked); "
+          f"waiting for review {counts['in_review']}; merged, not cleaned {counts['merged']}; "
+          f"settled, not cleaned {counts['settled']}; leftover agent worktrees {repo.leftover}; "
           f"worktrees outside .claude/worktrees {repo.outside}")
+    for r in rows:
+        if r["phase"] == "review":
+            print(f"waiting on the human: {r['slug']} {r['deliverable'] or r['pr_url'] or '-'}")
     return 0
 
 
@@ -528,6 +583,25 @@ def keep_reason(repo, row, rows):
                and not (r["pr_state"] == "merged" and r["pr_base"] == repo.default)]
     if stacked:
         return f"{', '.join(stacked)} is stacked on it"
+    reason = merged_reason(repo, row)
+    if reason is None or row["state"] not in SETTLED:
+        return reason
+    if row["pr_state"] == "open":
+        return "settled, but its pull request is still open"
+    if not row["deliverable"]:
+        return "settled, but no deliverable is recorded"
+    if not LINK_RE.match(row["deliverable"]) and inside(row["deliverable"], row["path"]):
+        return "settled, but its deliverable is inside the worktree"
+    rc, out, _ = repo.git("branch", "-r", "--contains", "HEAD", path=row["path"])
+    if rc != 0:
+        return "settled, but cannot tell whether its head is pushed"
+    if not out.strip():
+        return "settled, but its head commit is on no remote-tracking branch"
+    return None
+
+
+def merged_reason(repo, row):
+    """Why rule 1 (merged into the default branch at the local head) does not hold, or None."""
     if row["pr_state"] == "unknown":
         return "its pull request state is unknown"
     if row["pr_state"] != "merged":
@@ -580,6 +654,39 @@ def cmd_clean(args):
                 print(f"removed {row['slug']}")
                 task_event("TaskRemoved", repo, row["slug"])
     return 1 if failed else 0
+
+
+def cmd_state(args):
+    repo = Repo()
+    cwd = os.path.realpath(os.getcwd())
+    task = next((t for t in repo.tasks if inside(cwd, t["path"])), None)
+    if not task:
+        raise Fail("state: run it from inside a task worktree")
+    deliverable = args.deliverable
+    if (args.state == "handed-over") != bool(deliverable):
+        raise Fail("state: handed-over needs a deliverable, the other states take none")
+    if deliverable and not LINK_RE.match(deliverable):
+        deliverable = os.path.realpath(os.path.expanduser(deliverable))
+        if not os.path.exists(deliverable):
+            raise Fail(f"state: deliverable {deliverable} does not exist")
+        if inside(deliverable, task["path"]):
+            raise Fail(f"state: deliverable {deliverable} is inside the worktree, which clean removes")
+    slug = os.path.basename(task["path"])
+    declare(repo, slug, "lead", args.state, deliverable)
+    print(f"{slug}: {args.state}")
+    return 0
+
+
+def cmd_ack(args):
+    repo = Repo()
+    if not any(os.path.basename(t["path"]) == args.slug for t in repo.tasks):
+        raise Fail(f"ack: {args.slug} is not a task worktree")
+    last = read_tasks(repo.root).get(args.slug, {})
+    if last.get("state") not in ("handed-over", *SETTLED):
+        raise Fail(f"ack: {args.slug} has not handed over its work")
+    declare(repo, args.slug, "dispatcher", args.state, last.get("deliverable"))
+    print(f"{args.slug}: {args.state}")
+    return 0
 
 
 def cmd_hook(args):
@@ -671,6 +778,12 @@ def parse_args(argv):
     status.add_argument("--json", action="store_true")
     clean = sub.add_parser("clean", help="remove finished tasks")
     clean.add_argument("--dry-run", action="store_true")
+    state = sub.add_parser("state", help="declare the state of the task whose worktree this is (a lead runs it)")
+    state.add_argument("state", choices=STATES[:3])
+    state.add_argument("deliverable", nargs="?", help="with handed-over: a link, or a path outside the worktree")
+    ack = sub.add_parser("ack", help="record the human's word on a task whose work was handed over")
+    ack.add_argument("slug")
+    ack.add_argument("state", choices=SETTLED)
     sub.add_parser("hook", help="record one hook payload read from stdin (run by the plugin's hooks)")
     sub.add_parser("retro", help="store a lead retrospective (a JSON object on stdin)")
     feedback = sub.add_parser("feedback", help="list or change the factory feedback outbox")
@@ -691,7 +804,7 @@ def parse_args(argv):
 def main(argv=None):
     args = parse_args(sys.argv[1:] if argv is None else argv)
     try:
-        return {"new": cmd_new, "status": cmd_status, "clean": cmd_clean, "hook": cmd_hook,
+        return {"new": cmd_new, "status": cmd_status, "clean": cmd_clean, "state": cmd_state, "ack": cmd_ack, "hook": cmd_hook,
                 "retro": cmd_retro, "feedback": cmd_feedback}[args.cmd](args)
     except Fail as e:
         print(f"factory: {e}", file=sys.stderr)

@@ -12,7 +12,7 @@ Checked in this worktree, 2026-11-14.
 ## The store
 `~/.claude/factory/tasks.jsonl`, append-only, written with the existing `append()`. One record per declaration: the usual tags from `record()` (`ts`, `repo` = the main checkout's real path, `slug`, `role`, `model` null, `version`, `session`) plus `state` and, for a hand-over and everything after it, `deliverable`.
 
-A task's declared state is the `state` of the last record with its `repo` and `slug`. No record, or a last record whose `state` is not one of the five below, means undeclared. Unreadable lines are skipped; a missing file means nothing is declared.
+A task's declared state is the `state` of the last record with its `repo` and `slug`. No record, or a last record whose `state` is not one of the five below, means undeclared. Unreadable lines are skipped; a missing or unreadable file means nothing is declared.
 
 | Declared state | Written by | Meaning |
 |---|---|---|
