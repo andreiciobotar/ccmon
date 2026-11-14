@@ -389,12 +389,12 @@ class SiteManagerTests(Store):
         self.log("firings.jsonl", [  # the legacy file and the month files are one log
             "not json", {"ts": "2026-11-10T09:00:00Z", "repo": ALPHA, "id": 7, "criterion": "quiet"},
             then("zz", "09:01", outcome="acted"),
-            *(fired("f%d" % i, "2026-11-10T10:%02d:00Z" % i) for i in range(1, 8)),
+            *(fired("f%d" % i, "2026-11-10T10:%02d:00Z" % i) for i in range(1, 5)),
             fired("f1", "2026-11-10T10:08:00Z", BETA),  # the same id in another repository is another firing
             then("f1", "11:01", decision="escalated"), then("f1", "11:02", decision="suppressed"),  # the first decision stands
             then("f2", "11:03", decision="escalated"), then("f3", "11:04", decision="escalated")])
         self.log("firings-2026-11.jsonl", [
-            then("f1", "12:09", outcome="acted"),  # carried lines sit before newer ones: records are folded by ts
+            then("f1", "12:09", outcome="acted"),
             then("f4", "11:05", decision="escalated"), then("f5", "11:06", decision="escalated"),
             then("f6", "11:07", decision="suppressed"), then("f7", "11:08", decision="suppressed"),
             then("f1", "11:09", BETA, decision="escalated"), then("f1", "12:00", BETA, outcome="ignored"),
@@ -405,7 +405,9 @@ class SiteManagerTests(Store):
             {"ts": "2026-11-10T12:11:00Z", "id": "f4", "outcome": "acted"},  # no repo: the factory counts it nowhere
             {"ts": "2026-11-10T12:12:00Z", "miss": "no repo"},
             {"ts": "2026-11-10T13:00:00Z", "repo": ALPHA, "miss": "a lead was stuck", "slug": "a1", "firing": "f6"},
-            {"ts": "2026-11-10T13:01:00Z", "repo": BETA, "miss": "nothing fired", "slug": None, "firing": None}])
+            {"ts": "2026-11-10T13:01:00Z", "repo": BETA, "miss": "nothing fired", "slug": None, "firing": None},
+            # carried into the new month after its first record: older than the lines above, so the fold is by ts
+            *(fired("f%d" % i, "2026-11-10T10:%02d:00Z" % i) for i in range(5, 8))])
         self.assertEqual(self.record(), {
             "escalated": 6, "acted": 3, "ignored": 1, "no_outcome": 2, "suppressed": 2, "missed": 2,
             "missed_suppressed": 1, "missed_never_fired": 1, "precision": 0.75, "recall": 0.6})
