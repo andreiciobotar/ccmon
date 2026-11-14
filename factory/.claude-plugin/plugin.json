@@ -1,0 +1,5 @@
+{
+  "name": "factory",
+  "description": "A dispatcher hands each task to a lead session in its own git worktree; leads plan, build through subagents and land a pull request.",
+  "version": "0.1.0"
+}

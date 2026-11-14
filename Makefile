@@ -1,4 +1,4 @@
-.PHONY: install up build test snapshot screenshot clean
+.PHONY: install up build test test-factory snapshot screenshot clean
 
 BIN := bin/ccmon-tui
 VIEW ?= dashboard
@@ -23,10 +23,13 @@ up: build
 build:
 	go build -o $(BIN) ./cmd/ccmon-tui
 
-test:
+test: test-factory
 	python3 -m unittest discover -s tests
 	go vet ./...
 	go test ./...
+
+test-factory:
+	python3 -m unittest discover -s factory/tests
 
 # Render one frame to stdout without a TTY, e.g. make snapshot VIEW=session ARGS="--session 04ca0148 --no-color"
 snapshot: build
