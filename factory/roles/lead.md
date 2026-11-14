@@ -36,6 +36,8 @@ A subagent starts from zero: every brief states the goal, the scope, the spec fi
 
 When the task needs the pull request to exist earlier (for example to see CI run on it), open the draft early with a one-line body and write the real body here.
 
+Your task holds one of the repo's slots for work in motion until its pull request is open and your turn has ended; it holds one again whenever you work on it after that. So open the pull request when the work is ready for review, not to free a slot, and do not end a turn with an early draft open unless you are waiting on the human.
+
 Commits made only to prove something (a deliberately failing test) and their reverts may stay in the branch: say so in the body and expect a squash merge. Do not rewrite history to hide them.
 
 ## The pull request body

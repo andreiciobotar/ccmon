@@ -205,9 +205,19 @@ def session_block(mine):
     return None
 
 
+def phase(pr_state, mine):
+    """Where a task stands against the cap: 'review' or 'merged' when its pull request is open or merged and
+    no session is unfinished in it, otherwise 'motion'. `mine` is None when its sessions cannot be told:
+    they cannot be listed, or an unfinished one has no cwd and could be in any task."""
+    if mine is None or session_block(mine) or pr_state not in ("open", "merged"):
+        return "motion"
+    return "review" if pr_state == "open" else "merged"
+
+
 def collect(repo, sessions, limit_hours):
     """One row per task worktree; `sessions` is None when they cannot be listed."""
     now = time.time()
+    placed = sessions is not None and not unplaced_block(sessions)
     rows = []
     for wt in repo.tasks:
         path, branch = wt["path"], wt["branch"]
@@ -235,6 +245,7 @@ def collect(repo, sessions, limit_hours):
         row["last_commit"] = int(ts) if rc == 0 and ts.isdigit() else None
         row["pr_state"], row["pr_url"], row["pr_head"], row["pr_base"] = (
             pull_request(repo, branch) if branch else ("unknown", "", "", ""))
+        row["phase"] = phase(row["pr_state"], mine if placed else None)
         times = [t for t in (row["last_commit"], started and started / 1000) if t]
         row["stale"] = bool(times) and now - max(times) > STALE_SECONDS
         rows.append(row)
@@ -417,9 +428,13 @@ def cmd_new(args):
         raise Fail(f"another session is also named {dispatcher!r}; rename or stop it")
     if any(s.get("name") == args.slug for s in sessions) or sessions_in(sessions, path):
         raise Fail(f"a session named {args.slug} or inside {path} already exists")
-    if len(repo.tasks) >= settings["worktree_cap"]:
-        open_tasks = ", ".join(os.path.basename(t["path"]) for t in repo.tasks)
-        raise Fail(f"at the cap of {settings['worktree_cap']} worktrees; open tasks: {open_tasks}")
+    cap = settings["worktree_cap"]
+    if len(repo.tasks) >= cap:
+        moving = [os.path.basename(t["path"]) for t in repo.tasks
+                  if phase(pull_request(repo, t["branch"])[0] if t["branch"] else "unknown",
+                           None if unplaced_block(sessions) else sessions_in(sessions, t["path"])) == "motion"]
+        if len(moving) >= cap:
+            raise Fail(f"at the cap of {cap} tasks in motion: {', '.join(moving)}")
     old_pr = pull_request(repo, branch)[0]
     if old_pr == "unknown":
         sys.stderr.write(f"factory: warning: cannot check for an existing pull request on {branch}; continuing\n")
@@ -471,26 +486,29 @@ def cmd_status(args):
     settings = load_settings()
     cap = settings["worktree_cap"]
     rows = collect(repo, list_sessions(), settings["task_time_limit_hours"])
+    counts = {key: sum(r["phase"] == p for r in rows)
+              for key, p in (("in_motion", "motion"), ("in_review", "review"), ("merged", "merged"))}
     if args.json:
-        doc = {"rows": rows, "cap": cap, "open": len(rows),
+        doc = {"rows": rows, "cap": cap, "open": len(rows), **counts,
                "leftover_agent_worktrees": repo.leftover, "outside_worktrees": repo.outside}
         print(json.dumps(doc, indent=2))
         return 0
     now = time.time()
-    table = [["SLUG", "BRANCH", "BASE", "SESSION", "ID", "ELAPSED", "CHANGES", "AHEAD/BEHIND", "LAST COMMIT", "PR", "FLAGS"]]
+    table = [["SLUG", "PHASE", "BRANCH", "BASE", "SESSION", "ID", "ELAPSED", "CHANGES", "AHEAD/BEHIND", "LAST COMMIT", "PR", "FLAGS"]]
     for r in rows:
         ab = "?" if r["ahead"] is None else f"+{r['ahead']}/-{r['behind']}"
         changes = "?" if r["dirty"] is None else ("dirty" if r["dirty"] else "clean")
         pr = r["pr_state"] + (f" {r['pr_url']}" if r["pr_url"] else "")
         flags = " ".join(f for f in ("overtime" if r["overtime"] else "", "stale" if r["stale"] else "") if f)
         elapsed = "-" if r["elapsed"] is None else age(now - r["elapsed"], now)
-        table.append([r["slug"], r["branch"] or "(detached)", r["base"], r["session"], r["session_id"] or "-", elapsed, changes, ab,
+        table.append([r["slug"], r["phase"], r["branch"] or "(detached)", r["base"], r["session"], r["session_id"] or "-", elapsed, changes, ab,
                       age(r["last_commit"], now), pr, flags])
     widths = [max(len(row[i]) for row in table) for i in range(len(table[0]))]
     if rows:
         for row in table:
             print("  ".join(c.ljust(w) for c, w in zip(row, widths)).rstrip())
-    print(f"open {len(rows)}/{cap}; leftover agent worktrees {repo.leftover}; "
+    print(f"in motion {counts['in_motion']}/{cap}; waiting for review {counts['in_review']}; "
+          f"merged, not cleaned {counts['merged']}; leftover agent worktrees {repo.leftover}; "
           f"worktrees outside .claude/worktrees {repo.outside}")
     return 0
 
@@ -506,7 +524,8 @@ def keep_reason(repo, row, rows):
     nested = [p for p in repo.worktree_paths if p.startswith(row["path"] + os.sep)]
     if nested:
         return f"another worktree is registered inside it: {nested[0]}"
-    stacked = [r["slug"] for r in rows if r["base"] == row["branch"]]
+    stacked = [r["slug"] for r in rows if r["base"] == row["branch"]
+               and not (r["pr_state"] == "merged" and r["pr_base"] == repo.default)]
     if stacked:
         return f"{', '.join(stacked)} is stacked on it"
     if row["pr_state"] == "unknown":

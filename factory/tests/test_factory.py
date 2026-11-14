@@ -325,6 +325,60 @@ class NewTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("cap of 1", err)
 
+    def at_cap(self, pr, sessions=()):
+        """`new` with a cap of 2 and tasks a and b; b has no pull request, a's pull requests are `pr`."""
+        answers = self.answers([task_entry("a"), task_entry("b")], sessions, self.OK, {
+            ("gh",): (0, "[]", ""), ("gh", "pr", "list", "--head", "worktree-a"): (0, json.dumps(pr), "")})
+        code, _, err, fake = invoke(self.ARGS, answers, '{"worktree_cap": 2}')
+        return code, err, fake
+
+    def test_cap_counts_only_tasks_in_motion(self):
+        done = {"cwd": f"{WT}/a", "kind": "background", "id": "s1", "status": "idle", "state": "done"}
+        frees = {
+            "open, no session": ([{"state": "OPEN"}], ()),
+            "open, finished session": ([{"state": "OPEN"}], [done]),
+            "merged, not cleaned": ([{"state": "MERGED"}], ()),
+        }
+        for name, (pr, sessions) in frees.items():
+            with self.subTest(name):
+                code, err, fake = self.at_cap(pr, sessions)
+                self.assertEqual(code, 0, err)
+                self.assertTrue(fake.ran("claude", "--bg"))
+        holds = {
+            "no pull request": ([], ()),
+            "closed": ([{"state": "CLOSED"}], ()),
+            "state unknown": ("not a list", ()),
+            "open, session working": ([{"state": "OPEN"}], [dict(done, status="busy", state="working")]),
+            "open, session idle but not done": ([{"state": "OPEN"}], [dict(done, state="working")]),
+            "open, interactive session": ([{"state": "OPEN"}], [dict(done, kind="interactive")]),
+            "merged, session working": ([{"state": "MERGED"}], [dict(done, status="busy", state="working")]),
+            "open, an unfinished session without cwd": ([{"state": "OPEN"}], [{"kind": "background", "status": "busy"}]),
+        }
+        for name, (pr, sessions) in holds.items():
+            with self.subTest(name):
+                code, err, fake = self.at_cap(pr, sessions)
+                self.assertEqual(code, 2, err)
+                self.assertRegex(err, "cap of 2 tasks in motion: a, b$")
+                self.assertFalse(fake.ran("claude", "--bg"))
+
+    def test_cap_lists_only_the_tasks_in_motion(self):
+        answers = self.answers([task_entry(s) for s in "abc"], (), self.OK, {
+            ("gh",): (0, "[]", ""), ("gh", "pr", "list", "--head", "worktree-a"): (0, '[{"state": "OPEN"}]', "")})
+        code, _, err, _ = invoke(self.ARGS, answers, '{"worktree_cap": 2}')
+        self.assertEqual(code, 2)
+        self.assertRegex(err, "cap of 2 tasks in motion: b, c$")
+
+    def test_detached_task_counts_as_in_motion(self):
+        answers = self.answers([(f"{WT}/a", None, False)], (), self.OK, {("gh",): (0, '[{"state": "OPEN"}]', "")})
+        code, _, err, _ = invoke(self.ARGS, answers, '{"worktree_cap": 1}')
+        self.assertEqual(code, 2)
+        self.assertRegex(err, "cap of 1 tasks in motion: a$")
+
+    def test_below_the_cap_asks_gh_only_about_the_new_branch(self):
+        code, _, err, fake = invoke(self.ARGS, self.answers([task_entry("a")], (), self.OK, {("gh",): (0, "[]", "")}))
+        self.assertEqual(code, 0, err)
+        self.assertEqual([c[4] for c in fake.calls if c[0] == "gh"], ["worktree-demo-task"])
+
     def test_invalid_settings_exit_2(self):
         code, _, err, _ = invoke(self.ARGS, self.answers([]), '{"worktree_cap": 0}')
         self.assertEqual((code, "worktree_cap" in err), (2, True))
@@ -379,6 +433,33 @@ class StatusTests(unittest.TestCase):
         self.assertEqual((row["dirty"], row["behind"], row["ahead"]), (True, 3, 1))
         self.assertEqual((row["pr_state"], row["pr_url"]), ("open", "http://pr/1"))
         self.assertFalse(row["stale"])
+        self.assertEqual((row["phase"], doc["in_motion"], doc["in_review"], doc["merged"]), ("review", 0, 1, 0))
+
+    def test_phase_and_counts(self):
+        entries = [task_entry(s) for s in ("moving", "working", "review", "merged")]
+        busy = {"id": "s1", "cwd": f"{WT}/working", "kind": "background", "status": "busy", "state": "working"}
+        prs = {("gh", "pr", "list", "--head", f"worktree-{slug}"): (0, json.dumps([{"state": state}]), "")
+               for slug, state in (("working", "OPEN"), ("review", "OPEN"), ("merged", "MERGED"))}
+        answers = repo_answers(entries, [busy], git_task_answers("x", time.time()), prs)
+        code, out, err, _ = invoke(["status", "--json"], answers)
+        self.assertEqual(code, 0, err)
+        doc = json.loads(out)
+        self.assertEqual([r["phase"] for r in doc["rows"]], ["motion", "motion", "review", "merged"])
+        self.assertEqual((doc["open"], doc["in_motion"], doc["in_review"], doc["merged"]), (4, 2, 1, 1))
+        _, out, _, _ = invoke(["status"], answers)
+        lines = out.splitlines()
+        self.assertEqual(lines[3].index("review", 6), lines[0].index("PHASE"))
+        self.assertTrue(lines[-1].startswith("in motion 2/5; waiting for review 1; merged, not cleaned 1; "))
+
+    def test_sessions_unlistable_counts_as_in_motion(self):
+        doc, _ = self.status([task_entry("alpha")], pr=[{"state": "OPEN"}])
+        self.assertEqual(doc["rows"][0]["phase"], "review")
+        answers = repo_answers([task_entry("alpha")], (), git_task_answers("x", time.time(), pr=[{"state": "OPEN"}]),
+                               {("claude", "agents"): (1, "", "boom")})
+        _, out, _, _ = invoke(["status", "--json"], answers)
+        self.assertEqual((json.loads(out)["rows"][0]["phase"], json.loads(out)["in_motion"]), ("motion", 1))
+        doc, _ = self.status([task_entry("alpha")], [{"kind": "background", "status": "busy"}], pr=[{"state": "OPEN"}])
+        self.assertEqual(doc["rows"][0]["phase"], "motion")
 
     def test_session_matching_is_by_worktree_path_prefix(self):
         inside = {"id": "in1", "cwd": f"{WT}/alpha/sub/dir", "kind": "background", "status": "idle", "state": "done"}
@@ -482,11 +563,13 @@ class StatusTests(unittest.TestCase):
         self.assertTrue(lines[1].startswith("alpha"))
         self.assertEqual(lines[1].index("worktree-alpha"), lines[0].index("BRANCH"))
         self.assertEqual(lines[1].index("origin/main"), lines[0].index("BASE"))
-        self.assertIn("open 1/5; leftover agent worktrees 1; worktrees outside .claude/worktrees 1", lines[-1])
+        self.assertEqual(lines[-1], "in motion 1/5; waiting for review 0; merged, not cleaned 0; "
+                                    "leftover agent worktrees 1; worktrees outside .claude/worktrees 1")
 
     def test_empty_table(self):
         out, _ = self.status([], as_json=False)
-        self.assertEqual(out.strip(), "open 0/5; leftover agent worktrees 0; worktrees outside .claude/worktrees 0")
+        self.assertEqual(out.strip(), "in motion 0/5; waiting for review 0; merged, not cleaned 0; "
+                                      "leftover agent worktrees 0; worktrees outside .claude/worktrees 0")
 
 
 class MalformedGhTests(unittest.TestCase):
@@ -612,13 +695,29 @@ class CleanTests(unittest.TestCase):
         code, out, _, _ = self.clean(sessions=[session])
         self.assertEqual((code, out.strip()), (0, "removed x"))
 
-    def test_kept_when_another_task_is_stacked_on_it(self):
+    def stacked(self, y_pr):
+        """`clean` with y's recorded base still x; x is merged into main, y's pull requests are `y_pr`."""
         answers = repo_answers([task_entry("x"), task_entry("y")], (),
                                git_task_answers("x", time.time(), pr=self.pr()),
-                               {("git", "config", "--get", "branch.worktree-y.factoryBase"): (0, "worktree-x\n", "")})
-        code, out, _, fake = invoke(["clean"], answers)
-        self.assertIn("kept x: y is stacked on it", out)
-        self.assertFalse(fake.ran("git", "worktree", "remove", f"{WT}/x"))
+                               {("git", "config", "--get", "branch.worktree-y.factoryBase"): (0, "worktree-x\n", ""),
+                                ("gh", "pr", "list", "--head", "worktree-y"): (0, json.dumps(y_pr), ""),
+                                ("git", "worktree", "remove"): (0, "", ""), ("git", "branch"): (0, "", "")})
+        _, out, _, fake = invoke(["clean"], answers)
+        return out, fake
+
+    def test_kept_when_another_task_is_stacked_on_it(self):
+        for name, y_pr in (("open", self.pr("OPEN", "worktree-x")), ("no pull request", []),
+                           ("merged into the base task", self.pr(base="worktree-x")),
+                           ("open, retargeted to main", self.pr("OPEN"))):
+            with self.subTest(name):
+                out, fake = self.stacked(y_pr)
+                self.assertIn("kept x: y is stacked on it", out)
+                self.assertFalse(fake.ran("git", "worktree", "remove", f"{WT}/x"))
+
+    def test_a_merged_stack_is_removed_although_the_recorded_base_was_never_cleared(self):
+        out, fake = self.stacked(self.pr())
+        self.assertEqual(out.splitlines(), ["removed x", "removed y"])
+        self.assertTrue(fake.ran("git", "worktree", "remove", f"{WT}/x"))
 
     def test_remove_without_session_uses_git(self):
         code, out, _, fake = self.clean()
@@ -722,6 +821,7 @@ print(os.environ["FAKE_PR"])
                          ("demo-task", "done", "96dc4869", 0, 0))
         self.assertEqual(row["pr_state"], "none")
         self.assertEqual((doc["open"], doc["leftover_agent_worktrees"], doc["outside_worktrees"]), (1, 0, 0))
+        self.assertEqual((row["phase"], doc["in_motion"]), ("motion", 1))
 
         p = self.factory("new", "demo-task", "--brief", "again", env={"FAKE_AGENTS": agents})
         self.assertEqual(p.returncode, 2)
