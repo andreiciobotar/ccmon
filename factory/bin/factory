@@ -334,9 +334,9 @@ def stops(repo, declared, rows):
     by_slug = {r["slug"]: r for r in rows}
     try:
         for e in read_log("events", since=min(blocked.values())):
-            slug, summary = e.get("slug"), e.get("summary")
+            slug, ts, summary = e.get("slug"), e.get("ts"), e.get("summary")
             if e.get("repo") == repo.root and e.get("kind") in STOPS and isinstance(slug, str) and slug in blocked \
-                    and e["ts"] >= blocked[slug]:  # read_log drops records whose ts is not a string
+                    and isinstance(ts, str) and ts >= blocked[slug]:
                 by_slug[slug]["stop_kind"] = e["kind"]
                 by_slug[slug]["stop_summary"] = summary if isinstance(summary, str) else None
     except (OSError, ValueError):  # ValueError: a file that is not UTF-8
