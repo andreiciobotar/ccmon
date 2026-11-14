@@ -6,6 +6,4 @@
 
 ## Licence of contributions
 
-Isshoni is published under MIT with the Commons Clause ([LICENSE](LICENSE)), so nobody who receives it under that licence may sell it. The owner, Andrei Ciobotar, needs to stay free to sell it or to change its licence.
-
-So by opening a pull request you license your contribution to Andrei Ciobotar under the MIT licence as written in [LICENSE](LICENSE), without the Commons Clause, and you say it is yours to license (your own work, or your employer lets you).
+By opening a pull request you license your contribution to the owner, Andrei Ciobotar, under the MIT licence in [LICENSE](LICENSE), without the Commons Clause, so the owner stays free to sell Isshoni or change its licence. You also say it is yours to license (your own work, or your employer lets you).
