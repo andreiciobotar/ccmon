@@ -764,16 +764,51 @@ class StatusTests(unittest.TestCase):
                 doc, _ = self.status([task_entry("alpha")], sessions, commit_age=commit_age)
                 self.assertEqual(doc["rows"][0]["stale"], stale)
 
+    def stacked(self, x_pr, *, x_worktree=True, x_branch=True):
+        """The row of y, whose recorded base is worktree-x, and the calls; `x_pr` is x's pull requests."""
+        entries = [task_entry("x"), task_entry("y")] if x_worktree else [task_entry("y")]
+        answers = repo_answers(entries, (), git_task_answers("y", time.time()),
+                               {("git", "config", "--get", "branch.worktree-y.factoryBase"): (0, "worktree-x\n", ""),
+                                ("git", "rev-parse", "--verify", "--quiet", "refs/heads/worktree-x"):
+                                    (0 if x_branch else 1, "", ""),
+                                ("gh", "pr", "list", "--head", "worktree-x"):
+                                    (0, json.dumps(x_pr), "") if x_pr != "missing" else (127, "", "no gh")})
+        code, out, err, fake = invoke(["status", "--json"], answers)
+        self.assertEqual(code, 0, err)
+        return json.loads(out)["rows"][-1], fake
+
     def test_recorded_base_and_ahead_behind_against_it(self):
-        answers = repo_answers([task_entry("alpha")], (), git_task_answers("x", time.time()),
-                               {("git", "config"): (0, "worktree-other\n", "")})
-        _, out, _, fake = invoke(["status", "--json"], answers)
-        self.assertEqual(json.loads(out)["rows"][0]["base"], "worktree-other")
-        self.assertIn(["git", "rev-list", "--left-right", "--count", "worktree-other...HEAD"], fake.calls)
+        merged_elsewhere = [{"state": "MERGED", "url": "u", "headRefOid": "h", "baseRefName": "worktree-w"}]
+        cases = [("base task open", [{"state": "OPEN", "url": "u", "headRefOid": "h", "baseRefName": "main"}], True),
+                 ("base task has no pull request", [], True),
+                 ("base task's pull request unknown", "missing", True),
+                 ("base task merged into another branch", merged_elsewhere, True),
+                 ("base has no worktree, branch left, not merged", [], False)]
+        for name, x_pr, x_worktree in cases:
+            with self.subTest(name):
+                row, fake = self.stacked(x_pr, x_worktree=x_worktree)
+                self.assertEqual((row["base"], row["stacked_on"]), ("worktree-x", "worktree-x"))
+                self.assertIn(["git", "rev-list", "--left-right", "--count", "worktree-x...HEAD"], fake.calls)
+
+    def test_a_merged_or_missing_recorded_base_is_not_shown(self):
+        merged = [{"state": "MERGED", "url": "u", "headRefOid": "h", "baseRefName": "main"}]
+        cases = [("base task merged into the default branch", merged, True, True),
+                 ("base has no worktree, branch left, merged", merged, False, True),
+                 ("base branch is gone", [], False, False)]
+        for name, x_pr, x_worktree, x_branch in cases:
+            with self.subTest(name):
+                row, fake = self.stacked(x_pr, x_worktree=x_worktree, x_branch=x_branch)
+                self.assertEqual((row["base"], row["stacked_on"]), ("origin/main", "worktree-x"))
+                self.assertIn(["git", "rev-list", "--left-right", "--count", "origin/main...HEAD"], fake.calls)
+                self.assertFalse(fake.ran("git", "rev-list", "--left-right", "--count", "worktree-x...HEAD"))
+        _, out, _, _ = invoke(["status"], repo_answers(
+            [task_entry("x"), task_entry("y")], (), git_task_answers("y", time.time(), pr=merged),
+            {("git", "config", "--get", "branch.worktree-y.factoryBase"): (0, "worktree-x\n", "")}))
+        self.assertNotIn("worktree-x ", out.splitlines()[2].split("worktree-y", 1)[1])
 
     def test_default_base_when_none_recorded(self):
         doc, _ = self.status([task_entry("alpha")])
-        self.assertEqual(doc["rows"][0]["base"], "origin/main")
+        self.assertEqual((doc["rows"][0]["base"], doc["rows"][0]["stacked_on"]), ("origin/main", None))
 
     def test_elapsed_and_overtime_on_both_sides_of_the_limit(self):
         now_ms = int(time.time() * 1000)

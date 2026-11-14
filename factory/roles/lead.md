@@ -71,7 +71,7 @@ The dispatcher and the cap read your task's state from what you declare, so run 
 You own the call on your own task's time. Check the clock (`date -u`) every time a subagent returns and before you start one.
 - Past your limit, start no new work. Send `OVERTIME:` with diagnostics: what is done, what is left, why it is slow, what it has cost so far if you can tell, and the options (continue with a new deadline, cut scope, split, abandon) with your recommendation. Then wait.
 - Do the same before the limit when the task is not converging: the same issue back from review a third time, a plan that keeps growing, a fix that keeps moving the problem.
-- If you are told to rebase because your base changed, do that first, rerun the tests, push with `--force-with-lease`, and report. If your base merged, rebase onto the default branch, rerun the tests, push with `--force-with-lease`, retarget your pull request to it (`gh pr edit --base <default branch>`), clear the recorded base with `git config --unset branch.worktree-<slug>.factoryBase`, and report.
+- If you are told to rebase because your base changed, do that first, rerun the tests, push with `--force-with-lease`, and report. If your base merged, rebase onto the default branch, rerun the tests, push with `--force-with-lease`, retarget your pull request to it (`gh pr edit --base <default branch>`), and report. The recorded base needs no clearing: `factory status` stops showing a base once it has merged.
 
 ## Limits
 - Stay inside this worktree. Never write to the main checkout or another task's worktree.
