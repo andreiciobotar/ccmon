@@ -385,6 +385,7 @@ func TestFactoryAnimatesOnlyWhileSomethingMoves(t *testing.T) {
 
 func TestFactoryViewKeys(t *testing.T) {
 	m := fakeModel(true, 120, 40)
+	send(m, "j") // off the all row: the session view needs a session
 	for _, want := range []viewID{viewSession, viewAgents, viewFactory, viewDashboard} {
 		send(m, "tab")
 		if m.view != want {

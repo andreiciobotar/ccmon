@@ -93,9 +93,9 @@ type model struct {
 	agents   *data.Agents
 	prices   data.Prices
 
-	selID      string
-	top        int // first visible session row
-	dcursor    int // dispatch cursor in session view
+	selID      string // key of the row under the dashboard cursor: a session id, or a group row's key
+	top        int    // first visible table row
+	dcursor    int    // dispatch cursor in session view
 	dtop       int
 	detailOnly bool // narrow terminals: enter swaps the list for the detail pane
 	acursor    int
@@ -325,18 +325,23 @@ const (
 	kindRepo rowKind = iota
 	kindTask
 	kindSession
+	kindAll
 )
 
-// treeRow is one display row of the sessions table: a repository, a task or a session.
+// treeRow is one display row of the sessions table: all sessions, a repository, a task or a session.
 // A group of exactly one session is merged into that session's row: s is set, the kind stays the group's.
 type treeRow struct {
 	kind   rowKind
-	s      *data.Session   // set on session rows and merged rows only: only these can be selected
+	key    string          // what selID holds while the cursor is here: the session id when s is set, else a group key that is never an id
+	s      *data.Session   // set on session rows and merged rows only: the rows that open in the session view
 	name   string          // repository, task or 8-character session id
 	suffix string          // faint, after the name: ×N sessions of a group, the id of a merged row
 	depth  int             // indent in steps of two cells
 	group  []*data.Session // what the row totals; a session row holds just itself
 }
+
+// groupKey is the key of a group row; the NUL bytes keep it from ever equalling a session id.
+func groupKey(parts ...string) string { return "\x00" + strings.Join(parts, "\x00") }
 
 // rankKey is what a sort mode compares: a session or the sum of a group.
 type rankKey struct {
@@ -436,15 +441,18 @@ func (m *model) rows() []treeRow {
 	}
 	m.sortUnits(repos)
 	var out []treeRow
+	var shown []*data.Session
 	for _, ru := range repos {
 		r := byRepo[[2]string{ru.tie, ru.name}]
+		shown = append(shown, r.all...)
+		repoKey := groupKey("repo", r.path, r.name)
 		if len(r.all) == 1 && len(r.bare) == 1 {
-			out = append(out, treeRow{kind: kindRepo, s: r.all[0], name: r.name, suffix: short8(r.all[0].ID), group: ru.group})
+			out = append(out, treeRow{kind: kindRepo, key: r.all[0].ID, s: r.all[0], name: r.name, suffix: short8(r.all[0].ID), group: ru.group})
 			continue
 		}
-		out = append(out, treeRow{kind: kindRepo, name: r.name, suffix: fmt.Sprintf("×%d", len(ru.group)), group: ru.group})
+		out = append(out, treeRow{kind: kindRepo, key: repoKey, name: r.name, suffix: fmt.Sprintf("×%d", len(ru.group)), group: ru.group})
 		for _, u := range m.sessionUnits(r.bare) {
-			out = append(out, treeRow{kind: kindSession, s: u.group[0], name: short8(u.name), depth: 1, group: u.group})
+			out = append(out, treeRow{kind: kindSession, key: u.group[0].ID, s: u.group[0], name: short8(u.name), depth: 1, group: u.group})
 		}
 		var tasks []unit
 		for name, ss := range r.tasks {
@@ -453,19 +461,24 @@ func (m *model) rows() []treeRow {
 		m.sortUnits(tasks)
 		for _, tu := range tasks {
 			if len(tu.group) == 1 {
-				out = append(out, treeRow{kind: kindTask, s: tu.group[0], name: tu.name, suffix: short8(tu.group[0].ID), depth: 1, group: tu.group})
+				out = append(out, treeRow{kind: kindTask, key: tu.group[0].ID, s: tu.group[0], name: tu.name, suffix: short8(tu.group[0].ID), depth: 1, group: tu.group})
 				continue
 			}
-			out = append(out, treeRow{kind: kindTask, name: tu.name, suffix: fmt.Sprintf("×%d", len(tu.group)), depth: 1, group: tu.group})
+			out = append(out, treeRow{kind: kindTask, key: groupKey("task", r.path, r.name, tu.name), name: tu.name, suffix: fmt.Sprintf("×%d", len(tu.group)), depth: 1, group: tu.group})
 			for _, u := range m.sessionUnits(tu.group) {
-				out = append(out, treeRow{kind: kindSession, s: u.group[0], name: short8(u.name), depth: 2, group: u.group})
+				out = append(out, treeRow{kind: kindSession, key: u.group[0].ID, s: u.group[0], name: short8(u.name), depth: 2, group: u.group})
 			}
 		}
 	}
-	return out
+	if len(shown) == 0 {
+		return nil
+	}
+	all := treeRow{kind: kindAll, key: groupKey("all"), name: "all", suffix: fmt.Sprintf("×%d", len(shown)), group: shown}
+	return append([]treeRow{all}, out...)
 }
 
-// visible is the filtered session list in table order, so an index into it is a selectable row.
+// visible is the filtered session list in table order: the rows that carry a session. An index into it is
+// not a cursor position.
 func (m *model) visible() []*data.Session {
 	var out []*data.Session
 	for _, r := range m.rows() {
@@ -489,22 +502,11 @@ func shownGroups(rows []treeRow) (repos, tasks int) {
 	return
 }
 
-// cursorRow is the display row of the selected session, and the first row of
-// the group rows directly above it (which stay in view with it).
+// cursorRow is the display row under the dashboard cursor (the first row when selID is not shown), and the
+// first row of the group rows directly above it (which stay in view with it).
 func (m *model) cursorRow(rows []treeRow) (cur, first int) {
-	found := false
-	for i, r := range rows {
-		if r.s == nil {
-			continue
-		}
-		if !found {
-			cur, found = i, true // a selection that is not shown falls back to the first session
-		}
-		if r.s.ID == m.selID {
-			cur = i
-			break
-		}
-	}
+	cur = slices.IndexFunc(rows, func(r treeRow) bool { return r.key == m.selID })
+	cur = max(cur, 0)
 	first = cur
 	for first > 0 && rows[first-1].s == nil {
 		first--
@@ -512,13 +514,14 @@ func (m *model) cursorRow(rows []treeRow) (cur, first int) {
 	return
 }
 
-func (m *model) cursor(vis []*data.Session) int {
-	for i, s := range vis {
-		if s.ID == m.selID {
-			return i
-		}
+// scope is the row under the cursor: what the mix panels show.
+func (m *model) scope() (treeRow, bool) {
+	rows := m.rows()
+	if len(rows) == 0 {
+		return treeRow{}, false
 	}
-	return 0
+	cur, _ := m.cursorRow(rows)
+	return rows[cur], true
 }
 
 // mostRecent is the visible session with the latest activity.
@@ -532,19 +535,19 @@ func (m *model) mostRecent() *data.Session {
 	return best
 }
 
-// normalizeSelection keeps selID valid for the current visible list.
+// normalizeSelection keeps selID the key of a shown row: the all row when it is not. The session view never
+// shows a session that is gone.
 func (m *model) normalizeSelection() {
-	vis := m.visible()
-	if len(vis) == 0 {
+	rows := m.rows()
+	switch {
+	case len(rows) == 0:
 		m.selID = ""
-		return
+	case !slices.ContainsFunc(rows, func(r treeRow) bool { return r.key == m.selID }):
+		m.selID = rows[0].key
 	}
-	for _, s := range vis {
-		if s.ID == m.selID {
-			return
-		}
+	if m.view == viewSession && m.sessions[m.selID] == nil {
+		m.view = viewDashboard
 	}
-	m.selID = vis[0].ID
 }
 
 type totals struct {
@@ -771,9 +774,6 @@ func (m *model) mergeSession(ns *data.Session) {
 	m.flash[ns.ID] = m.now().Add(flashFor)
 	m.agentsDirty = true
 	m.lastUpdate = m.now()
-	if m.selID == "" {
-		m.selID = ns.ID
-	}
 	m.retarget(false)
 }
 
@@ -859,9 +859,6 @@ func (m *model) applyScan(cur map[string]time.Time) []tea.Cmd {
 			delete(m.retry, id)
 			delete(m.sessions, id)
 			m.agentsDirty = true
-			if m.view == viewSession && m.selID == id {
-				m.view = viewDashboard
-			}
 		}
 	}
 	m.pruneCaches()
@@ -1221,9 +1218,6 @@ func (m *model) ensureDetail() tea.Cmd {
 func (m *model) enter() tea.Cmd {
 	switch m.view {
 	case viewDashboard:
-		if len(m.visible()) == 0 {
-			return nil
-		}
 		return m.switchView(viewSession)
 	case viewSession:
 		m.detailOnly = !m.detailOnly
@@ -1247,7 +1241,7 @@ func (m *model) back() {
 func (m *model) listLen() int {
 	switch m.view {
 	case viewDashboard:
-		return len(m.visible())
+		return len(m.rows())
 	case viewSession:
 		if d := m.details[m.selID]; d != nil {
 			return len(d.Dispatches)
@@ -1272,7 +1266,7 @@ func (m *model) move(delta int) {
 	var cur int
 	switch m.view {
 	case viewDashboard:
-		cur = m.cursor(m.visible())
+		cur, _ = m.cursorRow(m.rows())
 	case viewSession:
 		cur = m.dcursor
 	case viewAgents:
@@ -1291,7 +1285,7 @@ func (m *model) moveTo(i int) {
 	i = max(0, min(n-1, i))
 	switch m.view {
 	case viewDashboard:
-		m.selID = m.visible()[i].ID
+		m.selID = m.rows()[i].key
 		if m.follow {
 			m.follow = false
 			m.setToast("follow mode off", false)

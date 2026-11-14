@@ -33,6 +33,7 @@ type SnapshotOptions struct {
 	Options
 	View    string // dashboard, session, agents, factory, help
 	Session string // id prefix for the session view
+	Row     int    // dashboard: cursor on this table row, 0 is the all row
 	W, H    int
 }
 
@@ -113,6 +114,10 @@ func Snapshot(so SnapshotOptions) (string, error) {
 		}
 	}
 	m.normalizeSelection()
+	if m.view == viewDashboard && so.Row > 0 && len(m.rows()) > 0 {
+		rows := m.rows()
+		m.selID = rows[min(so.Row, len(rows)-1)].key
+	}
 	return m.finishSnapshot(), nil
 }
 
