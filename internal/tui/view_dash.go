@@ -427,8 +427,14 @@ func (m *model) tableCols(iw int) tableCols {
 	avail := iw - (3 + 1 + c.cost + 1 + c.split + 1 + c.dis)
 	want, malformed := minName, false
 	for _, r := range m.rows() {
-		want = max(want, 2*r.depth+width(r.name)+1+width(r.suffix))
-		malformed = malformed || r.s != nil && r.s.Malformed > 0
+		w := 2*r.depth + width(r.name) + 1 + width(r.suffix)
+		if r.folded {
+			w += 2
+		}
+		want = max(want, w)
+	}
+	for _, s := range m.visible() { // folded or not: folding does not drop the BAD column
+		malformed = malformed || s.Malformed > 0
 	}
 	want = min(want, maxName)
 	add := func(on bool, w, keep int) bool {
@@ -538,6 +544,9 @@ func (m *model) treeLine(r treeRow, selected bool, c tableCols, iw int, base pai
 	text := lead
 	if r.suffix != "" {
 		text += " " + r.suffix
+	}
+	if r.folded {
+		text += " ▸"
 	}
 	text = cell(text, c.name, false)
 	n := min(width(lead), c.name)

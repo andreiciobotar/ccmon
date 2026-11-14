@@ -198,7 +198,7 @@ func (m *model) subheader(p paint) string {
 		}
 		left = p.b("Agents", th.Text) + p.t(fmt.Sprintf("  per agent type across %d sessions in %s", n, ranges[m.rangeIdx].label), th.Muted)
 	default:
-		repos, tasks := shownGroups(m.rows())
+		repos, tasks := shownGroups(m.tree())
 		left = p.b("Sessions", th.Text) + p.t(fmt.Sprintf("  %d in %d repos, %d tasks · %s · sorted by %s", len(m.visible()), repos, tasks, ranges[m.rangeIdx].label, m.sortBy), th.Muted)
 		if m.filter != "" {
 			left += p.t("  · filter ", th.Faint) + p.b(m.filter, th.Purple)

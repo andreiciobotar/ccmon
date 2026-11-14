@@ -34,6 +34,7 @@ type SnapshotOptions struct {
 	View    string // dashboard, session, agents, factory, kaizen, kaizen-flow, kaizen-board, help
 	Session string // id prefix for the session view
 	Row     int    // dashboard: cursor on this table row, 0 is the all row
+	Fold    bool   // dashboard: collapse the repository the cursor is in
 	W, H    int
 }
 
@@ -125,6 +126,9 @@ func Snapshot(so SnapshotOptions) (string, error) {
 	if m.view == viewDashboard && so.Row > 0 && len(m.rows()) > 0 {
 		rows := m.rows()
 		m.selID = rows[min(so.Row, len(rows)-1)].key
+	}
+	if so.Fold && m.view == viewDashboard {
+		m.fold(true)
 	}
 	return m.finishSnapshot(), nil
 }
