@@ -370,7 +370,7 @@ def read_log(name, since=None, until=None):
 
 
 def prune(name):
-    """Best effort, keeping the current month and the KEEP_MONTHS before it; see docs/specs/factory-events.md."""
+    """Best effort, keeping the current month and the KEEP_MONTHS before it; see docs/factory.md."""
     n = int(now()[:4]) * 12 + int(now()[5:7]) - 1 - KEEP_MONTHS
     cutoff = f"{n // 12:04d}-{n % 12 + 1:02d}"
 
