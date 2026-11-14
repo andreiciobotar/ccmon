@@ -67,7 +67,7 @@ In Claude Code, in the repository you want work done in:
 
 Describe a task, then ask for progress whenever you like: the dispatcher answers from `factory status`, which lists every task with its phase and pull request. To try it for one session without installing, start `claude --plugin-dir <clone>/factory`.
 
-It needs `git`, an authenticated [`gh`](https://cli.github.com) and Python 3.11+. By default leads run unattended on Fable in `auto` permission mode, and five tasks may be in motion per repository. Every session event, lead retrospective and decision a lead took without asking is logged under `~/.claude/factory/`; `factory feedback` lists the decisions and what agents reported about the factory itself.
+It needs `git`, an authenticated [`gh`](https://cli.github.com) and Python 3.11+. By default leads run unattended on Fable in `auto` permission mode, and five tasks may be in motion per repository. Every session event, lead retrospective and decision a lead took without asking is logged under `~/.claude/factory/` (events for 12 months); `factory feedback` lists the decisions and what agents reported about the factory itself.
 
 <!-- screenshot: factory status with several tasks -->
 
