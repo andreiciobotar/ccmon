@@ -157,6 +157,8 @@ class HookTests(StoreCase):
                 ("OVERTIME: my-task\n\n  review is not converging  \nOptions: secret", "OVERTIME", "review is not converging"),
                 ("QUESTION: which?", "QUESTION", "which?"),
                 ("BLOCKED: other-task: x", "BLOCKED", "other-task: x"),
+                ("BLOCKED: my-tasks are stuck\rsecret", "BLOCKED", "my-tasks are stuck"),
+                ("QUESTION: my-task-two: x", "QUESTION", "my-task-two: x"),
                 ("OVERTIME: my-task " + "x" * 300, "OVERTIME", "x" * 200)):
             self.event({"hook_event_name": "PostToolUse", "tool_name": "SendMessage", "tool_input": {"to": "d1", "message": message}},
                        event="PostToolUse", tool_name="SendMessage", to="d1", kind=kind, summary=summary)

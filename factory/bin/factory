@@ -828,8 +828,10 @@ def cmd_hook(args):
             fields["kind"] = next((k for k in KINDS if message.startswith(k + ":")), None)
             text = message if fields["kind"] == "DONE" else None
             if fields["kind"] in STOPS:
-                why = message[len(fields["kind"]) + 1:].lstrip().removeprefix(tag["slug"] or "")
-                if why := why.lstrip(" \t\r\n:-–—.,").partition("\n")[0].strip()[:200]:
+                why = message[len(fields["kind"]) + 1:].lstrip()
+                if tag["slug"] and re.match(re.escape(tag["slug"]) + r"(?![\w-])", why):
+                    why = why[len(tag["slug"]):]
+                if why := "".join(why.lstrip(" \t\r\n:-–—.,").splitlines()[:1]).strip()[:200]:
                     fields["summary"] = why
         log("events", {**tag, "event": event, **fields})
         if isinstance(text, str) and (lines := feedback_section(text)) is not None:
