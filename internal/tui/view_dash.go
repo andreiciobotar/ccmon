@@ -269,6 +269,12 @@ func (m *model) tiles(p paint, w int, compact bool) block {
 			tile{"RE-CHECK RATE", rate, "claims re-read", rateCol},
 			tile{"MODEL WARNINGS", wv, "wrong model used", wc})
 	}
+	return m.tileRow(p, w, tiles, gauge)
+}
+
+// tileRow lays the tiles side by side across w cells, the first ones a cell wider when
+// the width does not divide.
+func (m *model) tileRow(p paint, w int, tiles []tile, gauge func(int) string) block {
 	n := len(tiles)
 	gap := 1
 	tw := (w - gap*(n-1)) / n
@@ -306,6 +312,8 @@ func (m *model) renderTile(p paint, tl tile, w int, gauge func(int) string) bloc
 	switch {
 	case sub == "\x00gauge":
 		s3 = gauge(w)
+	case strings.HasPrefix(sub, "\x00"):
+		s3 = sub[1:]
 	default:
 		s3 = sp.t(sub, th.Muted)
 	}

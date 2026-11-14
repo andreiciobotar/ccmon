@@ -386,14 +386,14 @@ func TestFactoryAnimatesOnlyWhileSomethingMoves(t *testing.T) {
 func TestFactoryViewKeys(t *testing.T) {
 	m := fakeModel(true, 120, 40)
 	send(m, "j") // off the all row: the session view needs a session
-	for _, want := range []viewID{viewSession, viewAgents, viewFactory, viewDashboard} {
+	for _, want := range []viewID{viewSession, viewAgents, viewFactory, viewKaizen, viewDashboard} {
 		send(m, "tab")
 		if m.view != want {
 			t.Fatalf("tab -> %v, want %v", m.view, want)
 		}
 	}
 	send(m, "shift+tab")
-	if m.view != viewFactory {
+	if m.view != viewKaizen {
 		t.Fatalf("shift+tab from the dashboard -> %v", m.view)
 	}
 	send(m, "1", "4")
@@ -410,24 +410,24 @@ func TestFactoryViewKeys(t *testing.T) {
 
 	bare := New(Options{Static: true})
 	bare.loading = false
-	for _, want := range []viewID{viewAgents, viewFactory, viewDashboard} {
+	for _, want := range []viewID{viewAgents, viewFactory, viewKaizen, viewDashboard} {
 		send(bare, "tab")
 		if bare.view != want || bare.toast.text != "" {
 			t.Fatalf("without a session tab skips the session view: got %v, want %v, toast %q", bare.view, want, bare.toast.text)
 		}
 	}
-	send(bare, "shift+tab", "shift+tab", "shift+tab")
+	send(bare, "shift+tab", "shift+tab", "shift+tab", "shift+tab")
 	if bare.view != viewDashboard {
 		t.Fatalf("shift+tab skips it too: %v", bare.view)
 	}
 }
 
 func TestHeaderKeepsTheActiveRangeChipAtSixtyColumns(t *testing.T) {
-	for _, view := range []viewID{viewDashboard, viewSession, viewAgents, viewFactory} {
+	for _, view := range []viewID{viewDashboard, viewSession, viewAgents, viewFactory, viewKaizen} {
 		m := fakeModel(true, 60, 20)
 		m.view = view
 		header := strings.Split(plain(m), "\n")[0]
-		if want := "[" + ranges[m.rangeIdx].label + "]"; !strings.Contains(header, want) || !strings.Contains(header, "4 Factory") {
+		if want := "[" + ranges[m.rangeIdx].label + "]"; !strings.Contains(header, want) || !strings.Contains(header, "4 Factory") || !strings.Contains(header, "5 Kaizen") {
 			t.Errorf("view %v: header lacks %s or the fourth tab: %q", view, want, header)
 		}
 	}
@@ -447,7 +447,7 @@ func TestFactoryHelpAndFooter(t *testing.T) {
 	}
 	m.fac.editing, m.help = false, true
 	out := plain(m)
-	for _, want := range []string{"1 2 3 4", "dashboard · session · agents · factory", "c", "edit cap", "refreshes every 30 s while shown"} {
+	for _, want := range []string{"1 2 3 4 5", "dashboard · session · agents · factory · kaizen", "←→/hl", "kaizen page", "c", "edit cap", "refreshes every 30 s while shown"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("help lacks %q:\n%s", want, out)
 		}

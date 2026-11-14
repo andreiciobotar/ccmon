@@ -237,3 +237,134 @@ func (p paint) center(b block, w, h int) block {
 	}
 	return out
 }
+
+// ---- column chart -----------------------------------------------------------------
+
+const chartRows = 5 // rows tall; each holds eight levels
+
+var chartBlocks = []rune("▁▂▃▄▅▆▇█")
+
+// chartOpts describes a run chart: one column per value, oldest first.
+type chartOpts struct {
+	vals      []float64
+	median    float64
+	hasMedian bool
+	label     func(float64) string    // y labels
+	pick      func(i int) color.Color // the colour of column i, before the older ones are dimmed
+	star      bool                    // mark the newest column with ★
+	grow      float64                 // 0..1, the share of its height each column shows
+}
+
+// chartOut is what the caller needs to draw an axis under the columns.
+type chartOut struct {
+	lines  block // chartRows lines of exactly the width asked for
+	first  int   // index of the first value drawn: the newest ones that fit are kept
+	gutter int   // cells left of the first column
+	stride int   // cells from one column to the next
+}
+
+// chart draws o in w cells on p's background. The y labels give the largest drawn value
+// and the median; the median is a dotted rule across the empty cells of its row; the
+// newest column is bright and the older ones dimmed.
+func (p paint) chart(o chartOpts, w int) chartOut {
+	th := p.th
+	n := len(o.vals)
+	// the gutter holds the widest label any value, the median or the shown maximum can have
+	gutter := 1
+	for _, v := range o.vals {
+		gutter = max(gutter, width(o.label(v))+1)
+	}
+	if o.hasMedian {
+		gutter = max(gutter, width(o.label(o.median))+1)
+	}
+	pw := max(1, w-gutter)
+	// columns are two cells wide with a gap when all fit that way, else one wide with a gap
+	colW, gap := 1, 1
+	if n*3-1 <= pw {
+		colW = 2
+	}
+	out := chartOut{gutter: gutter, stride: colW + gap}
+	shown := min(n, (pw+gap)/out.stride)
+	out.first = n - shown
+	vals := o.vals[out.first:]
+	hi := 0.0
+	for _, v := range vals {
+		hi = math.Max(hi, v)
+	}
+	level := func(v float64) int {
+		if hi <= 0 || o.grow <= 0 {
+			return 0
+		}
+		return max(1, int(math.Round(v/hi*float64(chartRows*8)*o.grow)))
+	}
+	medRow := -1
+	if o.hasMedian && hi > 0 {
+		ml := min(chartRows*8, max(1, int(math.Round(o.median/hi*float64(chartRows*8)))))
+		medRow = chartRows - 1 - (ml-1)/8
+	}
+	type glyph struct {
+		r rune
+		k uint32 // key24 of c: colours compare by value
+		c color.Color
+	}
+	mk := func(r rune, c color.Color) glyph { return glyph{r, key24(c), c} }
+	grid := make([][]glyph, chartRows)
+	for r := range grid {
+		grid[r] = make([]glyph, pw)
+		for x := range grid[r] {
+			grid[r][x] = glyph{' ', 0, nil}
+		}
+		if r == medRow {
+			for x := range grid[r] {
+				grid[r][x] = mk('·', th.Faint)
+			}
+		}
+	}
+	for j, v := range vals {
+		x := j * out.stride
+		base := o.pick(out.first + j)
+		col := mix(base, p.bg, 0.3)
+		if j == shown-1 {
+			col = base
+		}
+		l := level(v)
+		for r := 0; r < chartRows; r++ {
+			for c := 0; c < colW; c++ {
+				if fill := l - (chartRows-1-r)*8; fill >= 8 {
+					grid[r][x+c] = mk('█', col)
+				} else if fill > 0 {
+					grid[r][x+c] = mk(chartBlocks[fill-1], col)
+				}
+			}
+		}
+		if o.star && j == shown-1 && l > 0 {
+			grid[max(0, chartRows-1-(l-1)/8-1)][x] = mk('★', th.Yellow)
+		}
+	}
+	for r := 0; r < chartRows; r++ {
+		lab := ""
+		switch {
+		case r == 0:
+			lab = o.label(hi)
+		case r == medRow:
+			lab = o.label(o.median)
+		}
+		var sb strings.Builder
+		sb.WriteString(p.t(cell(lab, gutter-1, true), th.Muted) + p.sp(1))
+		for x := 0; x < pw; {
+			y := x + 1
+			for y < pw && grid[r][y] == grid[r][x] {
+				y++
+			}
+			g := grid[r][x]
+			if g.c == nil {
+				sb.WriteString(p.sp(y - x))
+			} else {
+				sb.WriteString(p.t(strings.Repeat(string(g.r), y-x), g.c))
+			}
+			x = y
+		}
+		out.lines = append(out.lines, fit(sb.String(), w, p))
+	}
+	return out
+}

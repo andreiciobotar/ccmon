@@ -19,7 +19,7 @@ func main() {
 		agents   = flag.String("agents-dir", "", "agent definitions dir, passed to isshoni")
 		prices   = flag.String("prices", "", "price file, passed to isshoni (default isshoni/prices.toml)")
 		rng      = flag.String("range", "7d", "initial range: 24h, 7d, 30d, all")
-		snapshot = flag.String("snapshot", "", "render one frame to stdout and exit: dashboard, session, agents, factory, help")
+		snapshot = flag.String("snapshot", "", "render one frame to stdout and exit: dashboard, session, agents, factory, kaizen, kaizen-flow, kaizen-board, help")
 		size     = flag.String("size", "140x40", "snapshot size WxH")
 		session  = flag.String("session", "", "session id prefix for --snapshot session")
 		row      = flag.Int("row", 0, "dashboard snapshot: cursor on table row N, 0 is the all row")
@@ -41,7 +41,7 @@ func main() {
 			os.Exit(2)
 		}
 		switch *snapshot {
-		case "dashboard", "session", "agents", "factory", "help":
+		case "dashboard", "session", "agents", "factory", "kaizen", "kaizen-flow", "kaizen-board", "help":
 		default:
 			fmt.Fprintln(os.Stderr, "isshoni-tui: unknown snapshot view", *snapshot)
 			os.Exit(2)

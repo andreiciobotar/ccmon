@@ -1,0 +1,40 @@
+ Isshoni 一緒に  1 Dashboard  2 Session  3 Agents  4 Factory [5 Kaizen]                                          24h [7d] 30d  all   ○ idle 
+ Kaizen   Pulse  Flow [Board]  ←→  · 20 landed of 24 tasks in 7d  · as of 11:00:00                                                          
+ issues    14 open · 2 accepted · 2 done · 2 rejected                                                                                       
+ decisions 6 open · 1 accepted · 0 done · 0 rejected                                                                                        
+                                                                                                                                            
+ open issues by topic  grouped by keyword ───────────────────────────────────────────────────────────────────────────────────────────────── 
+ brief       5   ██████████████████████████████                                                                                             
+ lead      fx-feature-flags    The spec listed the wrong test command for this repository.                                                  
+ explorer  fx-bulk-import      Unstated: whether to keep the old endpoint for one release.                                                  
+ lead      fx-old-experiment   The brief never mentioned the legacy export path, which broke.                                               
+   +2 more                                                                                                                                  
+                                                                                                                                            
+ permissions 2   ████████████░░░░░░░░░░░░░░░░░░                                                                                             
+ reviewer  fx-cache-warm       The sandbox refused to write the lockfile outside the worktree.                                              
+ lead      fx-cache-warm       Permission denied pushing to the remote from the worktree; asked the human to run it.                        
+                                                                                                                                            
+ rules       2   ████████████░░░░░░░░░░░░░░░░░░                                                                                             
+ coder     fx-audit-log        A skill instruction repeated the same checklist twice.                                                       
+ reviewer  fx-audit-log        The lead.md rule on commit size conflicts with the coding-taste skill.                                       
+                                                                                                                                            
+ time        2   ████████████░░░░░░░░░░░░░░░░░░                                                                                             
+ reviewer  fx-feature-flags    Waited 12 minutes for the explorer to finish a repo-wide search.                                             
+ lead      fx-feature-flags    The time limit hit during a long CI wait.                                                                    
+                                                                                                                                            
+ review      1   ██████░░░░░░░░░░░░░░░░░░░░░░░░                                                                                             
+ lead      fx-bulk-import      The reviewer verdict arrived without the file list, so the coder asked again.                                
+                                                                                                                                            
+ tools       1   ██████░░░░░░░░░░░░░░░░░░░░░░░░                                                                                             
+ lead      fx-dark-mode        sendmessage returned no confirmation, so the lead resent it.                                                 
+                                                                                                                                            
+ other       1   ██████░░░░░░░░░░░░░░░░░░░░░░░░                                                                                             
+ explorer  fx-quiet-refactor   The fixture data was missing a trailing newline.                                                             
+                                                                                                                                            
+ acted on  accepted, done or rejected ───────────────────────────────────────────────────────────────────────────────────────────────────── 
+ [rejected] issue    The hook for retros wrote an empty line once.                                                                          
+ [done]     issue    #125 Edit was not allowed on a generated file, no hint which one.                                                      
+ [accepted] decision put the flag behind an env var                                                                                         
+ [rejected] issue    Reviewer asked for tests the brief had ruled out.                                                                      
+ +12 more lines · ↓ to scroll                                                                                                               
+ ←→/hl kaizen page  ·  ↑↓/jk move  ·  r range  ·  tab next view  ·  ? help  ·  q quit                                                       

@@ -277,10 +277,14 @@ func TestViewSwitching(t *testing.T) {
 		t.Fatalf("tab -> %v", m.view)
 	}
 	send(m, "tab")
+	if m.view != viewKaizen {
+		t.Fatalf("tab -> %v", m.view)
+	}
+	send(m, "tab")
 	if m.view != viewDashboard {
 		t.Fatalf("tab wraps -> %v", m.view)
 	}
-	send(m, "shift+tab")
+	send(m, "shift+tab", "shift+tab")
 	if m.view != viewFactory {
 		t.Fatalf("shift+tab -> %v", m.view)
 	}
@@ -588,7 +592,7 @@ func checkFrame(t *testing.T, name string, m *model, noColor bool) {
 func TestRenderAllViewsAllSizes(t *testing.T) {
 	for _, sz := range sizes {
 		for _, nc := range []bool{false, true} {
-			for _, view := range []string{"dashboard", "session", "agents", "factory", "help", "detail", "filter", "follow"} {
+			for _, view := range []string{"dashboard", "session", "agents", "factory", "kaizen", "help", "detail", "filter", "follow"} {
 				m := fakeModel(nc, sz[0], sz[1])
 				switch view {
 				case "session":
@@ -597,6 +601,8 @@ func TestRenderAllViewsAllSizes(t *testing.T) {
 					m.view = viewAgents
 				case "factory":
 					setFactory(m, fakeFactoryRepos()...)
+				case "kaizen":
+					setKaizen(m, kaizenDoc(t), pagePulse)
 				case "help":
 					m.help = true
 				case "detail":
@@ -618,7 +624,7 @@ func TestRenderAllViewsAllSizes(t *testing.T) {
 
 func TestRenderEmptyAndStates(t *testing.T) {
 	for _, sz := range sizes {
-		for _, v := range []viewID{viewDashboard, viewSession, viewAgents, viewFactory} {
+		for _, v := range []viewID{viewDashboard, viewSession, viewAgents, viewFactory, viewKaizen} {
 			// empty data
 			m := New(Options{Static: true})
 			m.w, m.h = sz[0], sz[1]

@@ -8,6 +8,7 @@ import "charm.land/bubbles/v2/key"
 type keyMap struct {
 	Interrupt, Quit, Help                   key.Binding
 	Next, Prev, Dash, Sess, Agents, Factory key.Binding
+	Kaizen, PageLeft, PageRight             key.Binding
 	Down, Up, Top, Bottom, PageDown, PageUp key.Binding
 	Open, Back                              key.Binding
 	Range, Follow, Sort, Filter             key.Binding
@@ -22,10 +23,14 @@ var keys = keyMap{
 
 	Next:    key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "next view")),
 	Prev:    key.NewBinding(key.WithKeys("shift+tab"), key.WithHelp("shift+tab", "previous view")),
-	Dash:    key.NewBinding(key.WithKeys("1"), key.WithHelp("1 2 3 4", "dashboard · session · agents · factory")),
+	Dash:    key.NewBinding(key.WithKeys("1"), key.WithHelp("1 2 3 4 5", "dashboard · session · agents · factory · kaizen")),
 	Sess:    key.NewBinding(key.WithKeys("2")),
 	Agents:  key.NewBinding(key.WithKeys("3")),
 	Factory: key.NewBinding(key.WithKeys("4")),
+	Kaizen:  key.NewBinding(key.WithKeys("5")),
+
+	PageLeft:  key.NewBinding(key.WithKeys("h", "left"), key.WithHelp("←→/hl", "kaizen page")),
+	PageRight: key.NewBinding(key.WithKeys("l", "right")),
 
 	Down:     key.NewBinding(key.WithKeys("j", "down"), key.WithHelp("↑↓/jk", "move")),
 	Up:       key.NewBinding(key.WithKeys("k", "up")),
@@ -62,6 +67,8 @@ func (m *model) footerKeys() []key.Binding {
 		return []key.Binding{keys.CapSave, keys.CapCancel}
 	case m.view == viewFactory:
 		return []key.Binding{keys.Down, keys.CapEdit, keys.Range, keys.Next, keys.Help, keys.Quit}
+	case m.view == viewKaizen:
+		return []key.Binding{keys.PageLeft, keys.Down, keys.Range, keys.Next, keys.Help, keys.Quit}
 	case m.view == viewSession:
 		return []key.Binding{keys.Down, keys.Open, keys.Back, keys.Follow, keys.Next, keys.Help, keys.Quit}
 	case m.view == viewAgents:
@@ -74,7 +81,7 @@ func (m *model) footerKeys() []key.Binding {
 func helpGroups() [][]key.Binding {
 	return [][]key.Binding{
 		{keys.Down, keys.Top, keys.PageDown, keys.Open, keys.Back},
-		{keys.Next, keys.Prev, keys.Dash},
+		{keys.Next, keys.Prev, keys.Dash, keys.PageLeft},
 		{keys.Range, keys.Sort, keys.Filter, keys.Follow, keys.CapEdit},
 		{keys.Help, keys.Quit},
 	}

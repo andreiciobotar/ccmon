@@ -15,6 +15,7 @@ echo "$3 $4" >> "$STUBDIR/calls"
 [ -e "$STUBDIR/hang" ] && exec sleep 30
 case "$3" in
 session) printf '{"id":"%s","project":"p","tokens":{"total":10},"dispatches":[]}' "$4" ;;
+kaizen) [ -e "$STUBDIR/kaizen.json" ] && exec cat "$STUBDIR/kaizen.json"; echo "{}" ;;
 agents) echo '{"agents":[],"by_model":{},"sessions":0}' ;;
 *) [ -e "$STUBDIR/sessions.json" ] && exec cat "$STUBDIR/sessions.json"; echo '{"sessions":[],"malformed":0}' ;;
 esac

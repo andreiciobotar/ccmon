@@ -21,6 +21,7 @@ const (
 	viewSession
 	viewAgents
 	viewFactory
+	viewKaizen
 )
 
 type sortMode int
@@ -101,6 +102,7 @@ type model struct {
 	acursor    int
 	atop       int
 	fac        factoryState
+	kz         kaizenState
 
 	loading     bool
 	loadGen     int
@@ -160,7 +162,7 @@ func New(o Options) *model {
 		rowTok: map[string]*Counter{}, flash: map[string]time.Time{},
 	}
 	m.loadCtx, m.loadCancel = context.WithCancel(m.ctx)
-	for _, k := range []string{"tokens", "dispatches", "repeats", "loops", "warns", "share", "recheck"} {
+	for _, k := range append([]string{"tokens", "dispatches", "repeats", "loops", "warns", "share", "recheck"}, kaizenCounters...) {
 		m.counter[k] = &Counter{}
 	}
 	if o.Runner != nil {
@@ -669,6 +671,8 @@ func (m *model) animating() bool {
 		return len(m.nowRunning()) > 0
 	case viewFactory:
 		return m.fac.busy || m.factoryWorking()
+	case viewKaizen:
+		return m.kaizenMoving()
 	case viewSession:
 		if d, s := m.details[m.selID], m.sessions[m.selID]; d != nil && s != nil && m.isLive(s) {
 			for _, x := range d.Dispatches {
@@ -973,6 +977,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case factoryMsg:
 		cmds = append(cmds, m.applyFactory(msg))
 
+	case kaizenMsg:
+		m.applyKaizen(msg)
+
 	case detailMsg:
 		delete(m.inflight, msg.id)
 		exists := m.exists(msg.id)
@@ -1073,6 +1080,7 @@ func (m *model) step(dt time.Duration) {
 // settle jumps every animation to its end state (snapshots).
 func (m *model) settle() {
 	m.retarget(true)
+	m.kaizenRetarget(true)
 	m.flash = map[string]time.Time{}
 }
 
@@ -1109,6 +1117,16 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		return m.switchView(viewAgents)
 	case key.Matches(msg, keys.Factory):
 		return m.switchView(viewFactory)
+	case key.Matches(msg, keys.Kaizen):
+		return m.switchView(viewKaizen)
+	case key.Matches(msg, keys.PageLeft):
+		if m.view == viewKaizen {
+			m.kaizenPage(-1)
+		}
+	case key.Matches(msg, keys.PageRight):
+		if m.view == viewKaizen {
+			m.kaizenPage(1)
+		}
 	case key.Matches(msg, keys.Down):
 		m.move(1)
 	case key.Matches(msg, keys.Up):
@@ -1131,7 +1149,7 @@ func (m *model) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		}
 		m.rangeIdx = (m.rangeIdx + 1) % len(ranges)
 		m.setToast("range: "+ranges[m.rangeIdx].label, false)
-		return m.reload()
+		return tea.Batch(m.reload(), m.loadKaizen())
 	case key.Matches(msg, keys.Follow):
 		m.follow = !m.follow
 		if m.follow {
@@ -1191,15 +1209,19 @@ func (m *model) switchView(v viewID) tea.Cmd {
 	}
 	m.view = v
 	m.fixScroll()
-	if v == viewFactory {
+	switch v {
+	case viewFactory:
 		return m.refreshFactory(factoryFresh)
+	case viewKaizen:
+		m.kz.shownAt = m.now()
+		return m.loadKaizen()
 	}
 	return nil
 }
 
 // cycle is the next view in a direction; the session view is skipped without a selection.
 func (m *model) cycle(step int) viewID {
-	const n = int(viewFactory) + 1
+	const n = int(viewKaizen) + 1
 	v := viewID((int(m.view) + step + n) % n)
 	if v == viewSession && m.sessions[m.selID] == nil {
 		v = viewID((int(v) + step + n) % n)
@@ -1252,6 +1274,8 @@ func (m *model) listLen() int {
 		}
 	case viewFactory:
 		return m.factoryPositions()
+	case viewKaizen:
+		return m.kaizenPositions()
 	}
 	return 0
 }
@@ -1273,6 +1297,8 @@ func (m *model) move(delta int) {
 		cur = m.acursor
 	case viewFactory:
 		cur = m.fac.top
+	case viewKaizen:
+		cur = m.kz.top[m.kz.page]
 	}
 	m.moveTo(cur + delta)
 }
@@ -1296,6 +1322,8 @@ func (m *model) moveTo(i int) {
 		m.acursor = i
 	case viewFactory:
 		m.fac.top = i
+	case viewKaizen:
+		m.kz.top[m.kz.page] = i
 	}
 	m.fixScroll()
 }
@@ -1324,7 +1352,10 @@ func (m *model) fixScroll() {
 	m.dtop = keep(m.dcursor, m.dtop, m.sessRows())
 	m.atop = keep(m.acursor, m.atop, m.agentRows())
 	m.top = min(m.top, max(0, len(rows)-n))
-	if m.view == viewFactory {
+	switch m.view {
+	case viewFactory:
 		m.fac.top = min(m.fac.top, m.factoryPositions()-1)
+	case viewKaizen:
+		m.kz.top[m.kz.page] = min(m.kz.top[m.kz.page], m.kaizenPositions()-1)
 	}
 }

@@ -263,6 +263,37 @@ def cmd_agents(args):
     return 0
 
 
+def cmd_kaizen(args):
+    from . import kaizen  # kaizen imports this module's formatters
+
+    prices = price_file.load(args.prices)
+    cutoff = parse_since(args.since) if args.since else None
+    doc = kaizen.build(args.factory_dir, lambda: load_all(args, prices), prices, cutoff)
+    if args.json:
+        emit_json(doc)
+        return 0
+    s, cur = doc["summary"], prices.currency
+    if not doc["tasks"]:
+        print("no factory tasks in %s" % doc["factory_dir"])
+        return 0
+    med = lambda m, f: "-" if s[m]["median"] is None else f(s[m]["median"])  # noqa: E731
+    print("tasks %d, landed %d, in flight %d" % (s["tasks"], s["landed"], s["in_flight"]))
+    print("median over landed: cost %s, brief to PR %s, PR to merge %s, review rounds %s; first pass %d/%d" % (
+        med("cost", lambda v: money(v, cur)), med("brief_to_pr_s", lambda v: fmt_duration(v * 1000)),
+        med("pr_to_merge_s", lambda v: fmt_duration(v * 1000)), med("review_rounds", lambda v: "%g" % v),
+        s["first_pass"]["yes"], s["first_pass"]["of"]))
+    for r in doc["repos"]:
+        if r["prs"] != "ok":
+            print("pull requests unavailable for %s: %s" % (r["repo"], r["prs"]))
+    dur = lambda v: "-" if v is None else fmt_duration(v * 1000)  # noqa: E731
+    rows = [[t["slug"], t["version"] or "-", "landed" if t["landed"] else t["state"] or "-", dur(t["brief_to_pr_s"]),
+             dur(t["pr_to_merge_s"]), "-" if t["cost"] is None else money(t["cost"]["total"], cur, t["cost"]["unpriced_tokens"]),
+             "-" if t["review_rounds"] is None else t["review_rounds"], t["stops"]] for t in doc["tasks"]]
+    print()
+    print(table(["task", "version", "state", "build", "merge", "cost", "rounds", "stops"], rows, left=("task", "version", "state")))
+    return 0
+
+
 def emit_json(obj):
     json.dump(obj, sys.stdout, indent=2, default=str)
     sys.stdout.write("\n")
@@ -297,6 +328,9 @@ def build_parser():
     s.set_defaults(func=cmd_session)
     s = sub.add_parser("agents", parents=[_common(True), since, scope], help="per agent type aggregates")
     s.set_defaults(func=cmd_agents)
+    s = sub.add_parser("kaizen", parents=[_common(True), since], help="improvement measures of the factory")
+    s.add_argument("--factory-dir", default="~/.claude/factory", help="the factory's stores (default ~/.claude/factory)")
+    s.set_defaults(func=cmd_kaizen)
     return p
 
 

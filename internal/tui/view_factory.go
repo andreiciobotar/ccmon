@@ -24,11 +24,15 @@ const (
 // factoryBody is the factory view: the settings line, then one section per repository,
 // scrolled when it is taller than the window.
 func (m *model) factoryBody(p paint, w, h int) block {
-	lines := m.factoryLines(p, w, h)
-	top := max(0, min(m.fac.top, len(lines)-h))
+	return scrolled(p, m.factoryLines(p, w, h), m.fac.top, w, h)
+}
+
+// scrolled shows h of the lines from top, the last of them saying how many more there are.
+func scrolled(p paint, lines block, top, w, h int) block {
+	top = max(0, min(top, len(lines)-h))
 	out := slices.Clone(lines[top:min(len(lines), top+h)])
 	if more := len(lines) - top - h; more > 0 {
-		out[h-1] = fit(p.sp(1)+p.t(fmt.Sprintf("+%d more lines · ↓ to scroll", more+1), m.th.Faint), w, p)
+		out[h-1] = fit(p.sp(1)+p.t(fmt.Sprintf("+%d more lines · ↓ to scroll", more+1), p.th.Faint), w, p)
 	}
 	return out
 }
