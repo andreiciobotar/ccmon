@@ -1,0 +1,40 @@
+ Isshoni 一緒に  1 Dashboard  2 Session  3 Agents  4 Factory [5 Kaizen]                                          24h [7d] 30d  all   ○ idle 
+ Kaizen   Pulse [Flow] Board   ←→  · 20 landed of 24 tasks in 7d  · as of 11:00:00                                                          
+ where the money went  landed tasks ─────────────────────────────────────────────────────────────────────────────────────────────────────── 
+ ██████████████████████████████████████████▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒░░░░░░░░░░░░#### 
+ █ lead $38.53 31%   ▓ coder $48.44 38%   ▒ reviewer $24.96 20%   ░ explorer $10.36 8%   # other $3.78 3%                                   
+ rework 9% (subagent runs after the first review)                                                                                           
+                                                                                                                                            
+ where the time went  brief to merge, landed tasks ──────────────────────────────────────────────────────────────────────────────────────── 
+ ████████████████████████████████████████████████████████████████████████████████████████████████▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒ 
+ █ building 8h19m 69%   ▓ stopped 1h24m 12%   ▒ waiting for merge 2h16m 19%                                                                 
+                                                                                                                                            
+ tasks  newest first ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── 
+ fixture-alpha  18 tasks                                                                                                                    
+  SLUG                VER     STATE           BUILD   MERGE    COST  ROLES       REV  REWORK  STOPS                                         
+  fx-metrics-tab      v0.3.0  ▲ blocked      25m00s       -   $2.00  ███▓▓▓▓▒▒░    1      0%      0                                         
+  fx-websocket-hooks  v0.3.0  ◆ handed-over  25m00s       -   $1.40  ███▓▓▓▓▒▒░    1      0%      1                                         
+  fx-quiet-refactor   v0.3.0  ✓ landed       12m00s   2m00s   $2.31  ████▓▓▓▒▒░    1      0%      0                                         
+  fx-email-digest     v0.3.0  ✓ landed       13m40s   2m30s   $3.60  ███▓▓▓▓▒▒░    1      0%      0                                         
+  fx-feature-flags    v0.3.0  ✓ landed       14m40s   5m30s   $3.90  ███▓▓▓▓▒▒░    1      0%      0                                         
+  fx-session-ttl      v0.3.0  ✓ landed       16m00s   3m00s   $4.40  ███▓▓▓▓▒▒░    2      4%      1                                         
+  fx-bulk-import      v0.2.0  ✓ landed       21m40s   6m30s   $6.20  ███▓▓▓▓▒▒░    2      5%      0                                         
+  fx-health-checks    v0.2.0  ✓ landed       18m20s   3m30s   $5.50  ███▓▓▓▓▒▒░    1      0%      0                                         
+  fx-billing-page     v0.2.0  ✓ landed       30m00s   5m00s   $7.90  ███▓▓▓▓▒▒░    3     12%      0                                         
+  fx-pagination       v0.2.0  ✓ landed       20m00s   4m00s   $5.90  ████▓▓▓▒▒░    1      0%      0                                         
+  fx-webhooks         v0.2.0  ✓ landed       25m00s   8m00s   $7.40  ███▓▓▓▓▒▒░    3     10%      0                                         
+  fx-audit-log        v0.2.0  ✓ landed       28m20s   6m00s   $6.80  ███▓▓▓▓▒▒░    2      9%      1                                         
+  fx-schema-v2        v0.1.0  ✓ landed       36m40s   8m00s   $6.10  ███▓▓▓▓▒▒░    2     11%      1                                         
+  fx-old-experiment   v0.1.0  · dismissed         -       -   $9.90  ████▓▓▓▒▒░    2     10%      0                                         
+  fx-retry-queue      v0.1.0  ✓ landed       55m00s   5m00s  $11.20  ███▓▓▓▓▒▒░    3     16%      0                                         
+  fx-cache-warm       v0.1.0  ✓ landed       40m00s   7m00s   $8.90  ███▓▓▓▓▒▒░    2     12%      0                                         
+  fx-rate-limits      v0.1.0  ✓ landed       51m40s  11m00s  $10.80  ███▓▓▓▓▒▒░    4     18%      1                                         
+  fx-login-flow       v0.1.0  ✓ landed       48m20s  14m00s   $9.40  ████▓▓▓▒▒░    3     15%      1                                         
+                                                                                                                                            
+ fixture-beta  6 tasks                                                                                                                      
+  SLUG                VER     STATE           BUILD   MERGE    COST  ROLES       REV  REWORK  STOPS                                         
+  fx-theme-tokens     v0.3.0  ● working           -       -   $2.60  ███▓▓▓▓▒▒░    1      0%      0                                         
+  fx-profile-edit     v0.3.0  ✓ landed       13m10s   4m00s   $3.20  ███▓▓▓▓▒▒░    1      0%      0                                         
+  fx-api-docs         v0.2.0  ✓ landed       17m30s   4m30s   $5.80  ████▓▓▓▒▒░    1      0%      0                                         
+ +19 more lines · ↓ to scroll                                                                                                               
+ ←→/hl kaizen page  ·  ↑↓/jk move  ·  r range  ·  tab next view  ·  ? help  ·  q quit                                                       

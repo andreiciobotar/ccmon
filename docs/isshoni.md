@@ -6,6 +6,7 @@ bin/isshoni sessions [--since 7d]     # sessions grouped by repository and task,
 bin/isshoni session <id-prefix>       # totals by model/agent, warnings, dispatch timeline
 bin/isshoni agents [--since 7d]       # per agent type: tokens, p50/p90, repeats, WARN
 bin/isshoni agents --repo isshoni --task ci-workflow   # tokens by agent and model for one task
+bin/isshoni kaizen [--since 30d]      # the factory's improvement measures (see Kaizen measures)
 ```
 `sessions` and `agents` accept `--repo NAME` and `--task NAME` (exact match).
 Global options: `--json` (one JSON document on stdout), `--projects-dir`,
@@ -54,6 +55,74 @@ For a resumed agent (`SendMessage`), duration covers dispatch to first return wh
 tokens include the resumed work. `running` means no completion (hand-back or
 task-notification) was found in the transcript.
 
+## Kaizen measures
+```
+isshoni kaizen [--since 7d] [--factory-dir DIR] [--json]
+```
+Whether the factory is getting better, computed once. It reads the factory's stores
+read-only (`--factory-dir`, default `~/.claude/factory`; format in `docs/factory.md`,
+"Logs"), the transcripts and the price file; it never imports or runs `factory/bin/factory`.
+`--since` keeps the tasks that started at or after the cutoff (and the stops, slowed
+texts and feedback of that range) and limits the transcripts loaded. Without `--json` it
+prints the headline numbers and one line per task. A missing or empty directory exits 0 with
+empty lists (`store_found: false` when the directory is missing). Records are read with a
+default for every field and lines that are not JSON objects are skipped.
+
+A task is a `(repo, slug)` that appears in events, retros or `tasks.jsonl`; records without
+a `slug` or a `repo` are skipped, and worktrees the monitor sees that the factory never
+started are not tasks. **Landed** means the task's pull request is merged. Pull requests
+come from one `gh pr list --state all` per repository, run in the repository, matched on
+the head branch `worktree-<slug>` (the newest when several). When `gh` cannot be used
+(missing, not a GitHub repository, no such path, bad output) the repository's `prs` holds
+the reason, its tasks have no `pr`, and nothing there counts as landed.
+
+The document: `generated`, `factory_dir`, `store_found`, `prices`, `repos`
+(`repo`, `repo_path`, `prs`: `ok` or the reason), `versions` (each plugin version by its
+earliest record in any store), `tasks`, `summary`, `stops`, `slowed`, `rewards`, `outbox`.
+Times are UTC (`2026-11-14T00:01:02Z`), a task's durations whole seconds, medians floats
+that may be fractional, money in the price file's currency, and a missing value is `null`.
+
+Per task (listed by `started`, tasks without one first, then slug):
+
+| Field | Definition |
+|---|---|
+| `repo`, `repo_path`, `slug` | `repo` is the last component of the path |
+| `version` | of its `TaskStarted` event, else of its earliest record in any store |
+| `started` | `TaskStarted` time, else the start of its earliest transcript session |
+| `state` | its last declared state in `tasks.jsonl` |
+| `pr` | `{number, url, state, opened, merged}` |
+| `landed` | `pr.merged` is set |
+| `brief_to_pr_s`, `pr_to_merge_s` | `pr.opened - started` (null when negative); `pr.merged - pr.opened` |
+| `cost` | from its transcript sessions (same repository and worktree name): `{total, unpriced_tokens, by_role, rework}`; `by_role` has `lead` (the main session), `coder`, `reviewer`, `explorer` (also `Explore`) and `other` |
+| `cost.rework` | cost of coder and reviewer dispatches that started after the first reviewer dispatch returned. A lower bound: the lead's own rework is not separable |
+| `review_rounds` | reviewer dispatches that ran (not `no-run`); null without sessions |
+| `first_pass` | `review_rounds == 1`; zero reviews is not first-pass |
+| `stops`, `stopped_s` | its stops, and the sum of their `waited_s` |
+| `defects` | counts by `caught_by` (`tests`, `reviewer`, `lead`, `ci`, `human`, `other`) from its newest retro |
+
+`summary` covers landed tasks only, each figure over the tasks that have the value (`n`):
+medians of `cost`, `brief_to_pr_s`, `pr_to_merge_s`, `review_rounds`; `first_pass`
+(`yes` of `of`); `rework_share` (rework over cost); `by_role`; `time` (`building_s` is
+`brief_to_pr_s` minus `stopped_s`, never below 0, plus `stopped_s` and `merge_wait_s`).
+`tasks` counts all, `in_flight` those not landed and not `acknowledged` or `dismissed`, and
+`defects` sums every task's newest retro. `trend` is null below `trend_min` (10) landed
+tasks; else the median of each measure over the latest half (`latest_n`) against the rest.
+
+`stops`, oldest first: a lead's `QUESTION`, `BLOCKED` or `OVERTIME` message (`waited_s`
+runs to the next prompt from the human or the dispatcher in the same session, null while
+unanswered; `why` is null, the store does not hold the reason) and a denied permission
+(`DENIED`, `why` is `<tool>: <reason>`). `slowed` lists every `slowed` text of the retros,
+newest first. `rewards` fire only on real records over landed tasks in merge order: the
+last 3 or more all first-pass; a latest cost, or a latest brief-to-pull-request time, that
+is strictly the lowest of at least 5 tasks (a tie is not a record). `outbox` folds
+`feedback` as the factory does (the latest status line wins, with its `pr`), counts issues
+and decisions by status, and groups open issues by the first keyword topic that matches
+(`permissions`, `brief`, `rules`, `tools`, `review`, `time`, else `other`).
+
+Limits: no landed figure without `gh`; the reason text of a stop is not stored; the
+site manager's firings are not read; rework counts subagent runs only; costs are the list
+prices of `isshoni/prices.toml` (see Cost above).
+
 ## Dashboard (`isshoni-tui`)
 
 `make up` builds and runs it. It shows what `isshoni --json` reports, re-reading a
@@ -64,7 +133,7 @@ terminal of at least 60x16.
 ```
 bin/isshoni-tui [--range 24h|7d|30d|all] [--follow] [--no-color]
                 [--projects-dir DIR] [--agents-dir DIR] [--prices PATH]
-bin/isshoni-tui --snapshot dashboard|session|agents|factory|help [--size 140x40] [--session ID] [--row N]
+bin/isshoni-tui --snapshot dashboard|session|agents|factory|kaizen|kaizen-flow|kaizen-board|help [--size 140x40] [--session ID] [--row N]
 ```
 `--range` defaults to `7d`. `NO_COLOR` gives the plain rendering too. `--snapshot`
 prints one settled frame and exits, non-zero when the load fails; `--row N` puts the
@@ -73,13 +142,14 @@ VIEW=... SIZE=...` turns it into a PNG under `shots/` (needs Chrome).
 
 | Key | |
 |---|---|
-| `tab` `shift+tab`, `1` `2` `3` `4` | switch view: dashboard, session, agents, factory |
+| `tab` `shift+tab`, `1` `2` `3` `4` `5` | switch view: dashboard, session, agents, factory, kaizen |
 | `↑` `↓` `j` `k`, `g` `G`, `pgup` `pgdn` | move, first and last, page |
 | `enter`, `esc` | open a session row (nothing on a group row), back |
 | `r` | range: 24h, 7d, 30d, all (on the error screen: retry) |
 | `s` | sort: recent, cost, subagent share |
 | `/` | filter by `repo`, `repo/task`, project or session id |
 | `f` | follow the most recently active session |
+| `←` `→`, `h` `l` | kaizen view: previous and next page (Pulse, Flow, Board) |
 | `c` | factory view: edit the cap (digits or `↑` `↓`, `enter` saves, `esc` cancels) |
 | `?`, `q` | help, quit |
 
@@ -111,6 +181,22 @@ VIEW=... SIZE=...` turns it into a PNG under `shots/` (needs Chrome).
   or `stale`. It refreshes every 30 seconds while shown. `c` sets `worktree_cap` (1 to
   999) in `~/.claude/factory/settings.json`, leaving the other keys as they were; a file
   that is not a JSON object is never overwritten. See [factory.md](factory.md).
+- **Kaizen:** whether the factory is getting better, across all repositories, from what
+  `isshoni kaizen --json` reports (see [Kaizen measures](#kaizen-measures)). It loads when
+  the view is shown (unless a result under 30 seconds old is held) and when the range
+  changes; there is no periodic refresh. Three pages, switched with `←` `→`, each
+  scrolled with the move keys: **Pulse** (the landed count and the median cost, brief to
+  pull request, pull request to merge and first-pass rate, each with how the latest half
+  of the landed tasks compares with the earlier half from 10 landed tasks; the rewards;
+  a column chart per measure, one column per landed task in start order, with the
+  plugin versions marked under it; who caught the defects), **Flow** (where the money
+  and the time went, a table of every task, the stops, what slowed tasks) and **Board**
+  (the factory's feedback outbox: open issues grouped by topic, what was acted on, the
+  decisions). The columns of a chart use the colour of what they measure; review rounds
+  are green for a first pass and orange otherwise; a chart too narrow for every task
+  keeps the newest and says `last N/M`. The Pulse rewards line, when there are rewards,
+  shimmers for three seconds each time Pulse is shown or new numbers arrive; the tiles
+  count up and the columns grow while new numbers arrive (never in a snapshot).
 
 A session is live when its transcript changed in the last 30 seconds or so. Agents keep
 one colour and one order everywhere: main, coder, reviewer, explorer, then the rest.

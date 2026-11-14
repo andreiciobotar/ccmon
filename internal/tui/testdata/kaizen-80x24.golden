@@ -1,0 +1,24 @@
+ Isshoni 1 Dash 2 Sess 3 Agents 4 Factory [5 Kaizen]    24h [7d] 30d all ○ idle 
+ Kaizen  [Pulse] Flow  Board   ←→  · as of 11:00:00                             
+▌ LANDED         ▌ COST / TASK   ▌ BRIEF → PR    ▌ PR → MERGE    ▌ FIRST PASS   
+▌ 20             ▌ $6.20         ▌ 25m50s        ▌ 5m45s         ▌ 7/19         
+▌ 3 in flight    ▌ ↓ 44% vs 10   ▌ ↓ 61% vs 10   ▌ ↓ 47% vs 10   ▌ rework 9%    
+                                                                                
+ ✦ 4 landed first-pass in a row · fx-quiet-refactor   ✦ record low cost: $2.31 …
+                                                                                
+╭─ cost per task · last 15/19 ─────────╮ ╭─ brief → pull request · last 14/20 ─╮
+│ $10.10   █                           │ │ 46m40s █                            │
+│  $6.20 ··█·▃·▅···▂·▇···▁············ │ │        █         ▂                  │
+│        █ █ █ █ ▇ █ █ ▆ █ ▇ ▁       ★ │ │ 25m50s █·█·▅·▁·▇·█···▃············· │
+│        █ █ █ █ █ █ █ █ █ █ █ ▇ ▆ ▅ ▁ │ │        █ █ █ █ █ █ █ █ ▇ ▆ ▅ ▄ ▃ ▂  │
+│        █ █ █ █ █ █ █ █ █ █ █ █ █ █ █ │ │        █ █ █ █ █ █ █ █ █ █ █ █ █ █  │
+│        ────▲───────────────▲──────── │ │        ──▲───────────────▲───────── │
+│        v0… v0.2.0          v0.3.0    │ │        … v0.2.0          v0.3.0     │
+│ latest $2.31 · median $6.20          │ │ latest 12m00s · median 25m50s       │
+╰──────────────────────────────────────╯ ╰─────────────────────────────────────╯
+╭─ review rounds · last 17/19 ─────────╮ ╭─ pull request → merge · last 14/20 ─╮
+│ 3   █   █   █     █                  │ │ 12m00s █       ▁                    │
+│ 2 ▃·█·▃·█·▃·█···▃·█···▃···▃········· │ │        █   ▃   █                    │
+│   █ █ █ █ █ █   █ █   █   █          │ │  5m45s █·▄·█···█·▁···▆·····▂······· │
+ +12 more lines · ↓ to scroll                                                   
+ ←→/hl kaizen page  ·  ↑↓/jk move  ·  r range  ·  ? help  ·  q quit             

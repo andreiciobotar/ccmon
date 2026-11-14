@@ -14,7 +14,7 @@ import (
 const (
 	brand         = "Isshoni"
 	brandKanji    = "一緒に"
-	kanjiMinWidth = 120
+	kanjiMinWidth = 130
 )
 
 // View renders the current frame.
@@ -62,6 +62,8 @@ func (m *model) frame() []string {
 		body = m.agentsBody(p, w, bh)
 	case viewFactory:
 		body = m.factoryBody(p, w, bh)
+	case viewKaizen:
+		body = m.kaizenBody(p, w, bh)
 	default:
 		body = m.dashBody(p, w, bh)
 	}
@@ -82,23 +84,33 @@ func (m *model) header(p paint) string {
 	th := m.th
 	bar := p.on(th.Surface)
 	title := bar.gradient(" "+brand+" ", true)
+	if m.w < 90 {
+		title = bar.gradient(" "+brand, true) // five tabs, the range and the live count share 80 columns
+	}
 	if m.w >= kanjiMinWidth {
 		title += bar.t(brandKanji+" ", th.Muted)
 	}
+	compact := m.w < 90
 	tab := func(n int, label string, v viewID, short string) string {
 		txt := fmt.Sprintf("%d %s", n, label)
-		if m.w < 100 {
+		if m.w < 110 {
 			txt = fmt.Sprintf("%d %s", n, short)
 		}
 		if m.view == v {
 			if th.NoColor {
+				if compact {
+					return " [" + txt + "]" // the space a plain tab would have before it
+				}
 				return "[" + txt + "]"
 			}
 			return p.on(th.Raised).b(" "+txt+" ", th.Text)
 		}
+		if compact {
+			return bar.t(" "+txt, th.Muted) // five tabs, the range and the live count share 80 columns
+		}
 		return bar.t(" "+txt+" ", th.Muted)
 	}
-	tabs := tab(1, "Dashboard", viewDashboard, "Dash") + tab(2, "Session", viewSession, "Sess") + tab(3, "Agents", viewAgents, "Agents") + tab(4, "Factory", viewFactory, "Factory")
+	tabs := tab(1, "Dashboard", viewDashboard, "Dash") + tab(2, "Session", viewSession, "Sess") + tab(3, "Agents", viewAgents, "Agents") + tab(4, "Factory", viewFactory, "Factory") + tab(5, "Kaizen", viewKaizen, "Kaizen")
 
 	var chips []string
 	for i, r := range ranges {
@@ -109,10 +121,17 @@ func (m *model) header(p paint) string {
 				chips = append(chips, p.on(mix(th.Surface, th.Purple, 0.3)).b(" "+r.label+" ", th.Purple))
 			}
 		} else {
-			chips = append(chips, bar.t(" "+r.label+" ", th.Faint))
+			if compact {
+				chips = append(chips, bar.t(r.label, th.Faint))
+			} else {
+				chips = append(chips, bar.t(" "+r.label+" ", th.Faint))
+			}
 		}
 	}
 	rangeStr := strings.Join(chips, "")
+	if compact {
+		rangeStr = strings.Join(chips, bar.sp(1))
+	}
 
 	live := m.liveCount()
 	liveStr := bar.t("○ idle", th.Faint)
@@ -146,6 +165,9 @@ func (m *model) header(p paint) string {
 			}
 		}
 		right := strings.Join(parts, bar.sp(2)) + bar.sp(1)
+		if compact {
+			right = strings.Join(parts, bar.sp(1)) + bar.sp(1)
+		}
 		if width(left)+width(right)+1 <= m.w {
 			return left + bar.sp(m.w-width(left)-width(right)) + right
 		}
@@ -167,6 +189,8 @@ func (m *model) subheader(p paint) string {
 		left = p.t("Dashboard › ", th.Faint) + p.b(name, th.Text)
 	case m.view == viewFactory:
 		left = m.factorySubheader(p)
+	case m.view == viewKaizen:
+		left = m.kaizenSubheader(p)
 	case m.view == viewAgents:
 		n := 0
 		if m.agents != nil {

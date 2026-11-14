@@ -1,0 +1,1504 @@
+{
+ "generated": "2026-11-14T10:00:00+00:00",
+ "factory_dir": "/fixture/factory",
+ "store_found": true,
+ "prices": {
+  "currency": "USD",
+  "as_of": "2026-11-14",
+  "path": "/fixture/prices.toml"
+ },
+ "repos": [
+  {
+   "repo": "fixture-alpha",
+   "repo_path": "/fixture/alpha",
+   "prs": "ok"
+  },
+  {
+   "repo": "fixture-beta",
+   "repo_path": "/fixture/beta",
+   "prs": "ok"
+  }
+ ],
+ "versions": [
+  {
+   "version": "0.1.0",
+   "first_seen": "2026-10-20T09:00:00+00:00"
+  },
+  {
+   "version": "0.2.0",
+   "first_seen": "2026-10-29T09:12:00+00:00"
+  },
+  {
+   "version": "0.3.0",
+   "first_seen": "2026-11-07T02:24:00+00:00"
+  }
+ ],
+ "tasks": [
+  {
+   "repo": "fixture-alpha",
+   "repo_path": "/fixture/alpha",
+   "slug": "fx-login-flow",
+   "version": "0.1.0",
+   "started": "2026-10-20T09:00:00+00:00",
+   "state": "handed-over",
+   "pr": {
+    "number": 100,
+    "url": "https://github.com/fixture/fixture-alpha/pull/100",
+    "state": "MERGED",
+    "opened": "2026-10-20T09:48:20+00:00",
+    "merged": "2026-10-20T10:02:20+00:00"
+   },
+   "landed": true,
+   "brief_to_pr_s": 2900,
+   "pr_to_merge_s": 840,
+   "cost": {
+    "total": 9.4,
+    "unpriced_tokens": 0,
+    "by_role": {
+     "lead": 3.29,
+     "coder": 3.2,
+     "reviewer": 2.07,
+     "explorer": 0.56,
+     "other": 0.28
+    },
+    "rework": 1.41
+   },
+   "review_rounds": 3,
+   "first_pass": false,
+   "stops": 1,
+   "stopped_s": 1200,
+   "defects": {
+    "tests": 1,
+    "reviewer": 4,
+    "lead": 1,
+    "ci": 0,
+    "human": 0,
+    "other": 0
+   }
+  },
+  {
+   "repo": "fixture-alpha",
+   "repo_path": "/fixture/alpha",
+   "slug": "fx-rate-limits",
+   "version": "0.1.0",
+   "started": "2026-10-21T16:24:00+00:00",
+   "state": "handed-over",
+   "pr": {
+    "number": 101,
+    "url": "https://github.com/fixture/fixture-alpha/pull/101",
+    "state": "MERGED",
+    "opened": "2026-10-21T17:15:40+00:00",
+    "merged": "2026-10-21T17:26:40+00:00"
+   },
+   "landed": true,
+   "brief_to_pr_s": 3100,
+   "pr_to_merge_s": 660,
+   "cost": {
+    "total": 10.8,
+    "unpriced_tokens": 0,
+    "by_role": {
+     "lead": 3.35,
+     "coder": 4.1,
+     "reviewer": 2.16,
+     "explorer": 0.86,
+     "other": 0.32
+    },
+    "rework": 1.94
+   },
+   "review_rounds": 4,
+   "first_pass": false,
+   "stops": 1,
+   "stopped_s": 3300,
+   "defects": {
+    "tests": 0,
+    "reviewer": 5,
+    "lead": 2,
+    "ci": 0,
+    "human": 0,
+    "other": 0
+   }
+  },
+  {
+   "repo": "fixture-alpha",
+   "repo_path": "/fixture/alpha",
+   "slug": "fx-cache-warm",
+   "version": "0.1.0",
+   "started": "2026-10-22T16:48:00+00:00",
+   "state": "handed-over",
+   "pr": {
+    "number": 102,
+    "url": "https://github.com/fixture/fixture-alpha/pull/102",
+    "state": "MERGED",
+    "opened": "2026-10-22T17:28:00+00:00",
+    "merged": "2026-10-22T17:35:00+00:00"
+   },
+   "landed": true,
+   "brief_to_pr_s": 2400,
+   "pr_to_merge_s": 420,
+   "cost": {
+    "total": 8.9,
+    "unpriced_tokens": 0,
+    "by_role": {
+     "lead": 2.4,
+     "coder": 3.74,
+     "reviewer": 1.6,
+     "explorer": 0.89,
+     "other": 0.27
+    },
+    "rework": 1.07
+   },
+   "review_rounds": 2,
+   "first_pass": false,
+   "stops": 0,
+   "stopped_s": 0,
+   "defects": {
+    "tests": 1,
+    "reviewer": 3,
+    "lead": 1,
+    "ci": 0,
+    "human": 0,
+    "other": 0
+   }
+  },
+  {
+   "repo": "fixture-beta",
+   "repo_path": "/fixture/beta",
+   "slug": "fx-export-csv",
+   "version": "0.1.0",
+   "started": "2026-10-23T17:12:00+00:00",
+   "state": "handed-over",
+   "pr": {
+    "number": 103,
+    "url": "https://github.com/fixture/fixture-beta/pull/103",
+    "state": "MERGED",
+    "opened": "2026-10-23T17:57:00+00:00",
+    "merged": "2026-10-23T18:12:00+00:00"
+   },
+   "landed": true,
+   "brief_to_pr_s": 2700,
+   "pr_to_merge_s": 900,
+   "cost": null,
+   "review_rounds": null,
+   "first_pass": null,
+   "stops": 0,
+   "stopped_s": 0,
+   "defects": {
+    "tests": 0,
+    "reviewer": 2,
+    "lead": 1,
+    "ci": 0,
+    "human": 1,
+    "other": 0
+   }
+  },
+  {
+   "repo": "fixture-alpha",
+   "repo_path": "/fixture/alpha",
+   "slug": "fx-retry-queue",
+   "version": "0.1.0",
+   "started": "2026-10-25T00:36:00+00:00",
+   "state": "handed-over",
+   "pr": {
+    "number": 104,
+    "url": "https://github.com/fixture/fixture-alpha/pull/104",
+    "state": "MERGED",
+    "opened": "2026-10-25T01:31:00+00:00",
+    "merged": "2026-10-25T01:36:00+00:00"
+   },
+   "landed": true,
+   "brief_to_pr_s": 3300,
+   "pr_to_merge_s": 300,
+   "cost": {
+    "total": 11.2,
+    "unpriced_tokens": 0,
+    "by_role": {
+     "lead": 3.25,
+     "coder": 4.48,
+     "reviewer": 2.13,
+     "explorer": 1.01,
+     "other": 0.34
+    },
+    "rework": 1.79
+   },
+   "review_rounds": 3,
+   "first_pass": false,
+   "stops": 0,
+   "stopped_s": 0,
+   "defects": null
+  },
+  {
+   "repo": "fixture-alpha",
+   "repo_path": "/fixture/alpha",
+   "slug": "fx-old-experiment",
+   "version": "0.1.0",
+   "started": "2026-10-26T01:00:00+00:00",
+   "state": "dismissed",
+   "pr": null,
+   "brief_to_pr_s": null,
+   "landed": false,
+   "pr_to_merge_s": null,
+   "cost": {
+    "total": 9.9,
+    "unpriced_tokens": 0,
+    "by_role": {
+     "lead": 3.46,
+     "coder": 3.37,
+     "reviewer": 2.18,
+     "explorer": 0.59,
+     "other": 0.3
+    },
+    "rework": 0.99
+   },
+   "review_rounds": 2,
+   "first_pass": false,
+   "stops": 0,
+   "stopped_s": 0,
+   "defects": null
+  },
+  {
+   "repo": "fixture-alpha",
+   "repo_path": "/fixture/alpha",
+   "slug": "fx-schema-v2",
+   "version": "0.1.0",
+   "started": "2026-10-27T01:24:00+00:00",
+   "state": "handed-over",
+   "pr": {
+    "number": 106,
+    "url": "https://github.com/fixture/fixture-alpha/pull/106",
+    "state": "MERGED",
+    "opened": "2026-10-27T02:00:40+00:00",
+    "merged": "2026-10-27T02:08:40+00:00"
+   },
+   "landed": true,
+   "brief_to_pr_s": 2200,
+   "pr_to_merge_s": 480,
+   "cost": {
+    "total": 6.1,
+    "unpriced_tokens": 0,
+    "by_role": {
+     "lead": 1.89,
+     "coder": 2.32,
+     "reviewer": 1.22,
+     "explorer": 0.49,
+     "other": 0.18
+    },
+    "rework": 0.67
+   },
+   "review_rounds": 2,
+   "first_pass": false,
+   "stops": 1,
+   "stopped_s": 540,
+   "defects": {
+    "tests": 0,
+    "reviewer": 1,
+    "lead": 1,
+    "ci": 0,
+    "human": 0,
+    "other": 0
+   }
+  },
+  {
+   "repo": "fixture-beta",
+   "repo_path": "/fixture/beta",
+   "slug": "fx-search-index",
+   "version": "0.1.0",
+   "started": "2026-10-28T01:48:00+00:00",
+   "state": "handed-over",
+   "pr": {
+    "number": 107,
+    "url": "https://github.com/fixture/fixture-beta/pull/107",
+    "state": "MERGED",
+    "opened": "2026-10-28T02:34:40+00:00",
+    "merged": "2026-10-28T02:46:40+00:00"
+   },
+   "landed": true,
+   "brief_to_pr_s": 2800,
+   "pr_to_merge_s": 720,
+   "cost": {
+    "total": 10.1,
+    "unpriced_tokens": 0,
+    "by_role": {
+     "lead": 2.73,
+     "coder": 4.24,
+     "reviewer": 1.82,
+     "explorer": 1.01,
+     "other": 0.3
+    },
+    "rework": 1.41
+   },
+   "review_rounds": 3,
+   "first_pass": false,
+   "stops": 0,
+   "stopped_s": 0,
+   "defects": {
+    "tests": 0,
+    "reviewer": 2,
+    "lead": 0,
+    "ci": 0,
+    "human": 0,
+    "other": 0
+   }
+  },
+  {
+   "repo": "fixture-alpha",
+   "repo_path": "/fixture/alpha",
+   "slug": "fx-audit-log",
+   "version": "0.2.0",
+   "started": "2026-10-29T09:12:00+00:00",
+   "state": "handed-over",
+   "pr": {
+    "number": 108,
+    "url": "https://github.com/fixture/fixture-alpha/pull/108",
+    "state": "MERGED",
+    "opened": "2026-10-29T09:40:20+00:00",
+    "merged": "2026-10-29T09:46:20+00:00"
+   },
+   "landed": true,
+   "brief_to_pr_s": 1700,
+   "pr_to_merge_s": 360,
+   "cost": {
+    "total": 6.8,
+    "unpriced_tokens": 0,
+    "by_role": {
+     "lead": 2.24,
+     "coder": 2.45,
+     "reviewer": 1.43,
+     "explorer": 0.48,
+     "other": 0.2
+    },
+    "rework": 0.61
+   },
+   "review_rounds": 2,
+   "first_pass": false,
+   "stops": 1,
+   "stopped_s": 0,
+   "defects": {
+    "tests": 0,
+    "reviewer": 1,
+    "lead": 0,
+    "ci": 0,
+    "human": 0,
+    "other": 0
+   }
+  },
+  {
+   "repo": "fixture-alpha",
+   "repo_path": "/fixture/alpha",
+   "slug": "fx-webhooks",
+   "version": "0.2.0",
+   "started": "2026-10-30T09:36:00+00:00",
+   "state": "handed-over",
+   "pr": {
+    "number": 109,
+    "url": "https://github.com/fixture/fixture-alpha/pull/109",
+    "state": "MERGED",
+    "opened": "2026-10-30T10:01:00+00:00",
+    "merged": "2026-10-30T10:09:00+00:00"
+   },
+   "landed": true,
+   "brief_to_pr_s": 1500,
+   "pr_to_merge_s": 480,
+   "cost": {
+    "total": 7.4,
+    "unpriced_tokens": 0,
+    "by_role": {
+     "lead": 2.15,
+     "coder": 2.96,
+     "reviewer": 1.41,
+     "explorer": 0.67,
+     "other": 0.22
+    },
+    "rework": 0.74
+   },
+   "review_rounds": 3,
+   "first_pass": false,
+   "stops": 0,
+   "stopped_s": 0,
+   "defects": null
+  },
+  {
+   "repo": "fixture-alpha",
+   "repo_path": "/fixture/alpha",
+   "slug": "fx-pagination",
+   "version": "0.2.0",
+   "started": "2026-10-31T10:00:00+00:00",
+   "state": "handed-over",
+   "pr": {
+    "number": 110,
+    "url": "https://github.com/fixture/fixture-alpha/pull/110",
+    "state": "MERGED",
+    "opened": "2026-10-31T10:20:00+00:00",
+    "merged": "2026-10-31T10:24:00+00:00"
+   },
+   "landed": true,
+   "brief_to_pr_s": 1200,
+   "pr_to_merge_s": 240,
+   "cost": {
+    "total": 5.9,
+    "unpriced_tokens": 0,
+    "by_role": {
+     "lead": 2.06,
+     "coder": 2.01,
+     "reviewer": 1.3,
+     "explorer": 0.35,
+     "other": 0.18
+    },
+    "rework": 0.0
+   },
+   "review_rounds": 1,
+   "first_pass": true,
+   "stops": 0,
+   "stopped_s": 0,
+   "defects": {
+    "tests": 0,
+    "reviewer": 0,
+    "lead": 0,
+    "ci": 0,
+    "human": 0,
+    "other": 0
+   }
+  },
+  {
+   "repo": "fixture-beta",
+   "repo_path": "/fixture/beta",
+   "slug": "fx-dark-mode",
+   "version": "0.2.0",
+   "started": "2026-11-01T17:24:00+00:00",
+   "state": "handed-over",
+   "pr": {
+    "number": 111,
+    "url": "https://github.com/fixture/fixture-beta/pull/111",
+    "state": "MERGED",
+    "opened": "2026-11-01T17:50:40+00:00",
+    "merged": "2026-11-01T18:00:40+00:00"
+   },
+   "landed": true,
+   "brief_to_pr_s": 1600,
+   "pr_to_merge_s": 600,
+   "cost": {
+    "total": 6.6,
+    "unpriced_tokens": 0,
+    "by_role": {
+     "lead": 2.05,
+     "coder": 2.51,
+     "reviewer": 1.32,
+     "explorer": 0.53,
+     "other": 0.2
+    },
+    "rework": 0.4
+   },
+   "review_rounds": 2,
+   "first_pass": false,
+   "stops": 0,
+   "stopped_s": 0,
+   "defects": {
+    "tests": 1,
+    "reviewer": 4,
+    "lead": 1,
+    "ci": 0,
+    "human": 0,
+    "other": 0
+   }
+  },
+  {
+   "repo": "fixture-alpha",
+   "repo_path": "/fixture/alpha",
+   "slug": "fx-billing-page",
+   "version": "0.2.0",
+   "started": "2026-11-02T17:48:00+00:00",
+   "state": "handed-over",
+   "pr": {
+    "number": 112,
+    "url": "https://github.com/fixture/fixture-alpha/pull/112",
+    "state": "MERGED",
+    "opened": "2026-11-02T18:18:00+00:00",
+    "merged": "2026-11-02T18:23:00+00:00"
+   },
+   "landed": true,
+   "brief_to_pr_s": 1800,
+   "pr_to_merge_s": 300,
+   "cost": {
+    "total": 7.9,
+    "unpriced_tokens": 0,
+    "by_role": {
+     "lead": 2.13,
+     "coder": 3.32,
+     "reviewer": 1.42,
+     "explorer": 0.79,
+     "other": 0.24
+    },
+    "rework": 0.95
+   },
+   "review_rounds": 3,
+   "first_pass": false,
+   "stops": 0,
+   "stopped_s": 0,
+   "defects": {
+    "tests": 0,
+    "reviewer": 5,
+    "lead": 2,
+    "ci": 0,
+    "human": 0,
+    "other": 0
+   }
+  },
+  {
+   "repo": "fixture-alpha",
+   "repo_path": "/fixture/alpha",
+   "slug": "fx-health-checks",
+   "version": "0.2.0",
+   "started": "2026-11-03T18:12:00+00:00",
+   "state": "handed-over",
+   "pr": {
+    "number": 113,
+    "url": "https://github.com/fixture/fixture-alpha/pull/113",
+    "state": "MERGED",
+    "opened": "2026-11-03T18:30:20+00:00",
+    "merged": "2026-11-03T18:33:50+00:00"
+   },
+   "landed": true,
+   "brief_to_pr_s": 1100,
+   "pr_to_merge_s": 210,
+   "cost": {
+    "total": 5.5,
+    "unpriced_tokens": 0,
+    "by_role": {
+     "lead": 1.82,
+     "coder": 1.98,
+     "reviewer": 1.16,
+     "explorer": 0.39,
+     "other": 0.16
+    },
+    "rework": 0.0
+   },
+   "review_rounds": 1,
+   "first_pass": true,
+   "stops": 0,
+   "stopped_s": 0,
+   "defects": {
+    "tests": 1,
+    "reviewer": 3,
+    "lead": 1,
+    "ci": 0,
+    "human": 0,
+    "other": 0
+   }
+  },
+  {
+   "repo": "fixture-alpha",
+   "repo_path": "/fixture/alpha",
+   "slug": "fx-bulk-import",
+   "version": "0.2.0",
+   "started": "2026-11-04T18:36:00+00:00",
+   "state": "handed-over",
+   "pr": {
+    "number": 114,
+    "url": "https://github.com/fixture/fixture-alpha/pull/114",
+    "state": "MERGED",
+    "opened": "2026-11-04T18:57:40+00:00",
+    "merged": "2026-11-04T19:04:10+00:00"
+   },
+   "landed": true,
+   "brief_to_pr_s": 1300,
+   "pr_to_merge_s": 390,
+   "cost": {
+    "total": 6.2,
+    "unpriced_tokens": 0,
+    "by_role": {
+     "lead": 1.8,
+     "coder": 2.48,
+     "reviewer": 1.18,
+     "explorer": 0.56,
+     "other": 0.19
+    },
+    "rework": 0.31
+   },
+   "review_rounds": 2,
+   "first_pass": false,
+   "stops": 0,
+   "stopped_s": 0,
+   "defects": null
+  },
+  {
+   "repo": "fixture-beta",
+   "repo_path": "/fixture/beta",
+   "slug": "fx-api-docs",
+   "version": "0.2.0",
+   "started": "2026-11-06T02:00:00+00:00",
+   "state": "handed-over",
+   "pr": {
+    "number": 115,
+    "url": "https://github.com/fixture/fixture-beta/pull/115",
+    "state": "MERGED",
+    "opened": "2026-11-06T02:17:30+00:00",
+    "merged": "2026-11-06T02:22:00+00:00"
+   },
+   "landed": true,
+   "brief_to_pr_s": 1050,
+   "pr_to_merge_s": 270,
+   "cost": {
+    "total": 5.8,
+    "unpriced_tokens": 0,
+    "by_role": {
+     "lead": 2.03,
+     "coder": 1.97,
+     "reviewer": 1.28,
+     "explorer": 0.35,
+     "other": 0.17
+    },
+    "rework": 0.0
+   },
+   "review_rounds": 1,
+   "first_pass": true,
+   "stops": 0,
+   "stopped_s": 0,
+   "defects": {
+    "tests": 0,
+    "reviewer": 3,
+    "lead": 0,
+    "ci": 0,
+    "human": 0,
+    "other": 0
+   }
+  },
+  {
+   "repo": "fixture-alpha",
+   "repo_path": "/fixture/alpha",
+   "slug": "fx-session-ttl",
+   "version": "0.3.0",
+   "started": "2026-11-07T02:24:00+00:00",
+   "state": "handed-over",
+   "pr": {
+    "number": 116,
+    "url": "https://github.com/fixture/fixture-alpha/pull/116",
+    "state": "MERGED",
+    "opened": "2026-11-07T02:40:00+00:00",
+    "merged": "2026-11-07T02:43:00+00:00"
+   },
+   "landed": true,
+   "brief_to_pr_s": 960,
+   "pr_to_merge_s": 180,
+   "cost": {
+    "total": 4.4,
+    "unpriced_tokens": 0,
+    "by_role": {
+     "lead": 1.36,
+     "coder": 1.67,
+     "reviewer": 0.88,
+     "explorer": 0.35,
+     "other": 0.13
+    },
+    "rework": 0.18
+   },
+   "review_rounds": 2,
+   "first_pass": false,
+   "stops": 1,
+   "stopped_s": 0,
+   "defects": {
+    "tests": 1,
+    "reviewer": 2,
+    "lead": 1,
+    "ci": 0,
+    "human": 0,
+    "other": 0
+   }
+  },
+  {
+   "repo": "fixture-alpha",
+   "repo_path": "/fixture/alpha",
+   "slug": "fx-feature-flags",
+   "version": "0.3.0",
+   "started": "2026-11-08T02:48:00+00:00",
+   "state": "handed-over",
+   "pr": {
+    "number": 117,
+    "url": "https://github.com/fixture/fixture-alpha/pull/117",
+    "state": "MERGED",
+    "opened": "2026-11-08T03:02:40+00:00",
+    "merged": "2026-11-08T03:08:10+00:00"
+   },
+   "landed": true,
+   "brief_to_pr_s": 880,
+   "pr_to_merge_s": 330,
+   "cost": {
+    "total": 3.9,
+    "unpriced_tokens": 0,
+    "by_role": {
+     "lead": 1.05,
+     "coder": 1.64,
+     "reviewer": 0.7,
+     "explorer": 0.39,
+     "other": 0.12
+    },
+    "rework": 0.0
+   },
+   "review_rounds": 1,
+   "first_pass": true,
+   "stops": 0,
+   "stopped_s": 0,
+   "defects": {
+    "tests": 0,
+    "reviewer": 1,
+    "lead": 1,
+    "ci": 0,
+    "human": 0,
+    "other": 0
+   }
+  },
+  {
+   "repo": "fixture-alpha",
+   "repo_path": "/fixture/alpha",
+   "slug": "fx-email-digest",
+   "version": "0.3.0",
+   "started": "2026-11-09T10:12:00+00:00",
+   "state": "handed-over",
+   "pr": {
+    "number": 118,
+    "url": "https://github.com/fixture/fixture-alpha/pull/118",
+    "state": "MERGED",
+    "opened": "2026-11-09T10:25:40+00:00",
+    "merged": "2026-11-09T10:28:10+00:00"
+   },
+   "landed": true,
+   "brief_to_pr_s": 820,
+   "pr_to_merge_s": 150,
+   "cost": {
+    "total": 3.6,
+    "unpriced_tokens": 0,
+    "by_role": {
+     "lead": 1.19,
+     "coder": 1.3,
+     "reviewer": 0.76,
+     "explorer": 0.25,
+     "other": 0.11
+    },
+    "rework": 0.0
+   },
+   "review_rounds": 1,
+   "first_pass": true,
+   "stops": 0,
+   "stopped_s": 0,
+   "defects": {
+    "tests": 0,
+    "reviewer": 2,
+    "lead": 0,
+    "ci": 0,
+    "human": 0,
+    "other": 0
+   }
+  },
+  {
+   "repo": "fixture-beta",
+   "repo_path": "/fixture/beta",
+   "slug": "fx-profile-edit",
+   "version": "0.3.0",
+   "started": "2026-11-10T10:36:00+00:00",
+   "state": "handed-over",
+   "pr": {
+    "number": 119,
+    "url": "https://github.com/fixture/fixture-beta/pull/119",
+    "state": "MERGED",
+    "opened": "2026-11-10T10:49:10+00:00",
+    "merged": "2026-11-10T10:53:10+00:00"
+   },
+   "landed": true,
+   "brief_to_pr_s": 790,
+   "pr_to_merge_s": 240,
+   "cost": {
+    "total": 3.2,
+    "unpriced_tokens": 0,
+    "by_role": {
+     "lead": 0.93,
+     "coder": 1.28,
+     "reviewer": 0.61,
+     "explorer": 0.29,
+     "other": 0.1
+    },
+    "rework": 0.0
+   },
+   "review_rounds": 1,
+   "first_pass": true,
+   "stops": 0,
+   "stopped_s": 0,
+   "defects": null
+  },
+  {
+   "repo": "fixture-alpha",
+   "repo_path": "/fixture/alpha",
+   "slug": "fx-quiet-refactor",
+   "version": "0.3.0",
+   "started": "2026-11-11T11:00:00+00:00",
+   "state": "handed-over",
+   "pr": {
+    "number": 120,
+    "url": "https://github.com/fixture/fixture-alpha/pull/120",
+    "state": "MERGED",
+    "opened": "2026-11-11T11:12:00+00:00",
+    "merged": "2026-11-11T11:14:00+00:00"
+   },
+   "landed": true,
+   "brief_to_pr_s": 720,
+   "pr_to_merge_s": 120,
+   "cost": {
+    "total": 2.31,
+    "unpriced_tokens": 0,
+    "by_role": {
+     "lead": 0.81,
+     "coder": 0.79,
+     "reviewer": 0.51,
+     "explorer": 0.14,
+     "other": 0.07
+    },
+    "rework": 0.0
+   },
+   "review_rounds": 1,
+   "first_pass": true,
+   "stops": 0,
+   "stopped_s": 0,
+   "defects": {
+    "tests": 0,
+    "reviewer": 1,
+    "lead": 1,
+    "ci": 0,
+    "human": 0,
+    "other": 0
+   }
+  },
+  {
+   "repo": "fixture-alpha",
+   "repo_path": "/fixture/alpha",
+   "slug": "fx-websocket-hooks",
+   "version": "0.3.0",
+   "started": "2026-11-12T11:24:00+00:00",
+   "state": "handed-over",
+   "pr": {
+    "number": 121,
+    "url": "https://github.com/fixture/fixture-alpha/pull/121",
+    "state": "OPEN",
+    "opened": "2026-11-12T11:49:00+00:00",
+    "merged": null
+   },
+   "brief_to_pr_s": 1500,
+   "landed": false,
+   "pr_to_merge_s": null,
+   "cost": {
+    "total": 1.4,
+    "unpriced_tokens": 0,
+    "by_role": {
+     "lead": 0.43,
+     "coder": 0.53,
+     "reviewer": 0.28,
+     "explorer": 0.11,
+     "other": 0.04
+    },
+    "rework": 0.0
+   },
+   "review_rounds": 1,
+   "first_pass": true,
+   "stops": 1,
+   "stopped_s": 0,
+   "defects": null
+  },
+  {
+   "repo": "fixture-alpha",
+   "repo_path": "/fixture/alpha",
+   "slug": "fx-metrics-tab",
+   "version": "0.3.0",
+   "started": "2026-11-13T18:48:00+00:00",
+   "state": "blocked",
+   "pr": {
+    "number": 122,
+    "url": "https://github.com/fixture/fixture-alpha/pull/122",
+    "state": "OPEN",
+    "opened": "2026-11-13T19:13:00+00:00",
+    "merged": null
+   },
+   "brief_to_pr_s": 1500,
+   "landed": false,
+   "pr_to_merge_s": null,
+   "cost": {
+    "total": 2.0,
+    "unpriced_tokens": 0,
+    "by_role": {
+     "lead": 0.54,
+     "coder": 0.84,
+     "reviewer": 0.36,
+     "explorer": 0.2,
+     "other": 0.06
+    },
+    "rework": 0.0
+   },
+   "review_rounds": 1,
+   "first_pass": true,
+   "stops": 0,
+   "stopped_s": 0,
+   "defects": null
+  },
+  {
+   "repo": "fixture-beta",
+   "repo_path": "/fixture/beta",
+   "slug": "fx-theme-tokens",
+   "version": "0.3.0",
+   "started": "2026-11-14T19:12:00+00:00",
+   "state": "working",
+   "pr": null,
+   "brief_to_pr_s": null,
+   "landed": false,
+   "pr_to_merge_s": null,
+   "cost": {
+    "total": 2.6,
+    "unpriced_tokens": 0,
+    "by_role": {
+     "lead": 0.86,
+     "coder": 0.94,
+     "reviewer": 0.55,
+     "explorer": 0.18,
+     "other": 0.08
+    },
+    "rework": 0.0
+   },
+   "review_rounds": 1,
+   "first_pass": true,
+   "stops": 0,
+   "stopped_s": 0,
+   "defects": null
+  }
+ ],
+ "summary": {
+  "tasks": 24,
+  "landed": 20,
+  "in_flight": 3,
+  "cost": {
+   "median": 6.2,
+   "n": 19
+  },
+  "brief_to_pr_s": {
+   "median": 1550.0,
+   "n": 20
+  },
+  "pr_to_merge_s": {
+   "median": 345.0,
+   "n": 20
+  },
+  "review_rounds": {
+   "median": 2.0,
+   "n": 19
+  },
+  "first_pass": {
+   "yes": 7,
+   "of": 19
+  },
+  "rework_share": 0.0911,
+  "by_role": {
+   "lead": 38.53,
+   "coder": 48.44,
+   "reviewer": 24.96,
+   "explorer": 10.36,
+   "other": 3.78
+  },
+  "time": {
+   "building_s": 29980,
+   "stopped_s": 5040,
+   "merge_wait_s": 8190
+  },
+  "defects": {
+   "tests": 5,
+   "reviewer": 39,
+   "lead": 13,
+   "ci": 0,
+   "human": 1,
+   "other": 0
+  },
+  "trend_min": 10,
+  "trend": {
+   "latest_n": 10,
+   "earlier_n": 10,
+   "cost": {
+    "latest": 4.95,
+    "earlier": 8.9
+   },
+   "brief_to_pr_s": {
+    "latest": 1005.0,
+    "earlier": 2550.0
+   },
+   "pr_to_merge_s": {
+    "latest": 255.0,
+    "earlier": 480.0
+   },
+   "review_rounds": {
+    "latest": 1.0,
+    "earlier": 3.0
+   }
+  }
+ },
+ "stops": [
+  {
+   "ts": "2026-11-02T10:12:00+00:00",
+   "repo": "fixture-alpha",
+   "slug": "fx-login-flow",
+   "kind": "QUESTION",
+   "waited_s": 1200,
+   "why": null
+  },
+  {
+   "ts": "2026-11-04T14:03:00+00:00",
+   "repo": "fixture-alpha",
+   "slug": "fx-rate-limits",
+   "kind": "BLOCKED",
+   "waited_s": 3300,
+   "why": null
+  },
+  {
+   "ts": "2026-11-06T09:40:00+00:00",
+   "repo": "fixture-alpha",
+   "slug": "fx-schema-v2",
+   "kind": "OVERTIME",
+   "waited_s": 540,
+   "why": null
+  },
+  {
+   "ts": "2026-11-08T16:25:00+00:00",
+   "repo": "fixture-alpha",
+   "slug": "fx-audit-log",
+   "kind": "DENIED",
+   "waited_s": null,
+   "why": "Bash: git push --force is not allowed in auto mode"
+  },
+  {
+   "ts": "2026-11-11T11:05:00+00:00",
+   "repo": "fixture-alpha",
+   "slug": "fx-session-ttl",
+   "kind": "DENIED",
+   "waited_s": null,
+   "why": "Edit: path is outside the worktree"
+  },
+  {
+   "ts": "2026-11-13T15:50:00+00:00",
+   "repo": "fixture-alpha",
+   "slug": "fx-websocket-hooks",
+   "kind": "QUESTION",
+   "waited_s": null,
+   "why": null
+  }
+ ],
+ "slowed": [
+  {
+   "ts": "2026-11-13T18:00:00+00:00",
+   "repo": "fixture-alpha",
+   "slug": "fx-quiet-refactor",
+   "text": "The brief named a module that was renamed last week, so the lead searched for it before starting."
+  },
+  {
+   "ts": "2026-11-13T18:00:00+00:00",
+   "repo": "fixture-alpha",
+   "slug": "fx-quiet-refactor",
+   "text": "Waited for CI twice on a flaky integration test."
+  },
+  {
+   "ts": "2026-11-10T09:00:00+00:00",
+   "repo": "fixture-beta",
+   "slug": "fx-profile-edit",
+   "text": "Unclear whether the reviewer should check accessibility; asked in two places."
+  },
+  {
+   "ts": "2026-11-07T20:00:00+00:00",
+   "repo": "fixture-alpha",
+   "slug": "fx-email-digest",
+   "text": "The coder re-read the same five files three times because the spec listed none of them."
+  },
+  {
+   "ts": "2026-11-05T12:00:00+00:00",
+   "repo": "fixture-alpha",
+   "slug": "fx-feature-flags",
+   "text": "A rule in the lead role file contradicted the brief on commit granularity."
+  },
+  {
+   "ts": "2026-11-02T08:00:00+00:00",
+   "repo": "fixture-beta",
+   "slug": "fx-api-docs",
+   "text": "gh was not authenticated in the new worktree; the pull request step failed once."
+  }
+ ],
+ "rewards": [
+  {
+   "kind": "first_pass_streak",
+   "slug": "fx-quiet-refactor",
+   "text": "4 landed first-pass in a row"
+  },
+  {
+   "kind": "record_low_cost",
+   "slug": "fx-quiet-refactor",
+   "text": "record low cost: $2.31"
+  }
+ ],
+ "outbox": {
+  "issues": {
+   "open": 14,
+   "accepted": 2,
+   "rejected": 2,
+   "done": 2
+  },
+  "decisions": {
+   "open": 6,
+   "accepted": 1,
+   "rejected": 0,
+   "done": 0
+  },
+  "topics": [
+   {
+    "topic": "brief",
+    "open": 5
+   },
+   {
+    "topic": "permissions",
+    "open": 2
+   },
+   {
+    "topic": "rules",
+    "open": 2
+   },
+   {
+    "topic": "time",
+    "open": 2
+   },
+   {
+    "topic": "review",
+    "open": 1
+   },
+   {
+    "topic": "tools",
+    "open": 1
+   },
+   {
+    "topic": "other",
+    "open": 1
+   }
+  ],
+  "entries": [
+   {
+    "id": "fb-027",
+    "ts": "2026-11-15T12:00:00+00:00",
+    "repo": "fixture-alpha",
+    "slug": "fx-health-checks",
+    "role": "reviewer",
+    "kind": "decision",
+    "status": "open",
+    "topic": null,
+    "text": "DECISION: left the deprecated CLI flag in place",
+    "pr": null
+   },
+   {
+    "id": "fb-026",
+    "ts": "2026-11-13T12:00:00+00:00",
+    "repo": "fixture-beta",
+    "slug": "fx-dark-mode",
+    "role": "coder",
+    "kind": "decision",
+    "status": "open",
+    "topic": null,
+    "text": "DECISION: renamed the column instead of adding a view",
+    "pr": null
+   },
+   {
+    "id": "fb-025",
+    "ts": "2026-11-11T12:00:00+00:00",
+    "repo": "fixture-alpha",
+    "slug": "fx-webhooks",
+    "role": "lead",
+    "kind": "decision",
+    "status": "open",
+    "topic": null,
+    "text": "DECISION: used the existing retry helper rather than a new one",
+    "pr": null
+   },
+   {
+    "id": "fb-020",
+    "ts": "2026-11-10T12:00:00+00:00",
+    "repo": "fixture-alpha",
+    "slug": "fx-feature-flags",
+    "role": "lead",
+    "kind": "issue",
+    "status": "open",
+    "topic": "brief",
+    "text": "The spec listed the wrong test command for this repository.",
+    "pr": null
+   },
+   {
+    "id": "fb-019",
+    "ts": "2026-11-10T11:00:00+00:00",
+    "repo": "fixture-alpha",
+    "slug": "fx-bulk-import",
+    "role": "explorer",
+    "kind": "issue",
+    "status": "open",
+    "topic": "brief",
+    "text": "Unstated: whether to keep the old endpoint for one release.",
+    "pr": null
+   },
+   {
+    "id": "fb-024",
+    "ts": "2026-11-09T12:00:00+00:00",
+    "repo": "fixture-beta",
+    "slug": "fx-search-index",
+    "role": "lead",
+    "kind": "decision",
+    "status": "open",
+    "topic": null,
+    "text": "DECISION: skipped the integration test, covered by unit tests",
+    "pr": null
+   },
+   {
+    "id": "fb-018",
+    "ts": "2026-11-09T10:00:00+00:00",
+    "repo": "fixture-beta",
+    "slug": "fx-dark-mode",
+    "role": "reviewer",
+    "kind": "issue",
+    "status": "rejected",
+    "topic": "tools",
+    "text": "The hook for retros wrote an empty line once.",
+    "pr": null
+   },
+   {
+    "id": "fb-017",
+    "ts": "2026-11-09T09:00:00+00:00",
+    "repo": "fixture-alpha",
+    "slug": "fx-audit-log",
+    "role": "coder",
+    "kind": "issue",
+    "status": "open",
+    "topic": "rules",
+    "text": "A skill instruction repeated the same checklist twice.",
+    "pr": null
+   },
+   {
+    "id": "fb-016",
+    "ts": "2026-11-08T16:00:00+00:00",
+    "repo": "fixture-alpha",
+    "slug": "fx-old-experiment",
+    "role": "lead",
+    "kind": "issue",
+    "status": "open",
+    "topic": "brief",
+    "text": "The brief never mentioned the legacy export path, which broke.",
+    "pr": null
+   },
+   {
+    "id": "fb-015",
+    "ts": "2026-11-08T15:00:00+00:00",
+    "repo": "fixture-alpha",
+    "slug": "fx-cache-warm",
+    "role": "lead",
+    "kind": "issue",
+    "status": "done",
+    "topic": "permissions",
+    "text": "Edit was not allowed on a generated file, no hint which one.",
+    "pr": "https://github.com/fixture/fixture-beta/pull/125"
+   },
+   {
+    "id": "fb-014",
+    "ts": "2026-11-07T14:00:00+00:00",
+    "repo": "fixture-alpha",
+    "slug": "fx-quiet-refactor",
+    "role": "explorer",
+    "kind": "issue",
+    "status": "open",
+    "topic": "other",
+    "text": "The fixture data was missing a trailing newline.",
+    "pr": null
+   },
+   {
+    "id": "fb-013",
+    "ts": "2026-11-07T13:00:00+00:00",
+    "repo": "fixture-alpha",
+    "slug": "fx-feature-flags",
+    "role": "reviewer",
+    "kind": "issue",
+    "status": "open",
+    "topic": "time",
+    "text": "Waited 12 minutes for the explorer to finish a repo-wide search.",
+    "pr": null
+   },
+   {
+    "id": "fb-023",
+    "ts": "2026-11-07T12:00:00+00:00",
+    "repo": "fixture-alpha",
+    "slug": "fx-old-experiment",
+    "role": "explorer",
+    "kind": "decision",
+    "status": "accepted",
+    "topic": null,
+    "text": "DECISION: put the flag behind an env var",
+    "pr": null
+   },
+   {
+    "id": "fb-012",
+    "ts": "2026-11-06T12:00:00+00:00",
+    "repo": "fixture-alpha",
+    "slug": "fx-bulk-import",
+    "role": "coder",
+    "kind": "issue",
+    "status": "rejected",
+    "topic": "review",
+    "text": "Reviewer asked for tests the brief had ruled out.",
+    "pr": null
+   },
+   {
+    "id": "fb-011",
+    "ts": "2026-11-06T11:00:00+00:00",
+    "repo": "fixture-beta",
+    "slug": "fx-dark-mode",
+    "role": "lead",
+    "kind": "issue",
+    "status": "open",
+    "topic": "tools",
+    "text": "sendmessage returned no confirmation, so the lead resent it.",
+    "pr": null
+   },
+   {
+    "id": "fb-022",
+    "ts": "2026-11-05T12:00:00+00:00",
+    "repo": "fixture-beta",
+    "slug": "fx-export-csv",
+    "role": "reviewer",
+    "kind": "decision",
+    "status": "open",
+    "topic": null,
+    "text": "DECISION: chose 50 as the page size",
+    "pr": null
+   },
+   {
+    "id": "fb-010",
+    "ts": "2026-11-05T10:00:00+00:00",
+    "repo": "fixture-alpha",
+    "slug": "fx-audit-log",
+    "role": "lead",
+    "kind": "issue",
+    "status": "done",
+    "topic": "rules",
+    "text": "CLAUDE.md says to run make test but the role file says go test.",
+    "pr": "https://github.com/fixture/fixture-alpha/pull/129"
+   },
+   {
+    "id": "fb-009",
+    "ts": "2026-11-05T09:00:00+00:00",
+    "repo": "fixture-alpha",
+    "slug": "fx-old-experiment",
+    "role": "explorer",
+    "kind": "issue",
+    "status": "open",
+    "topic": "brief",
+    "text": "Spec was ambiguous about the pagination default; guessed 50.",
+    "pr": null
+   },
+   {
+    "id": "fb-008",
+    "ts": "2026-11-04T16:00:00+00:00",
+    "repo": "fixture-alpha",
+    "slug": "fx-cache-warm",
+    "role": "reviewer",
+    "kind": "issue",
+    "status": "open",
+    "topic": "permissions",
+    "text": "The sandbox refused to write the lockfile outside the worktree.",
+    "pr": null
+   },
+   {
+    "id": "fb-007",
+    "ts": "2026-11-04T15:00:00+00:00",
+    "repo": "fixture-alpha",
+    "slug": "fx-quiet-refactor",
+    "role": "coder",
+    "kind": "issue",
+    "status": "accepted",
+    "topic": "other",
+    "text": "Nothing was wrong, just noting the retro template is long.",
+    "pr": null
+   },
+   {
+    "id": "fb-006",
+    "ts": "2026-11-03T14:00:00+00:00",
+    "repo": "fixture-alpha",
+    "slug": "fx-feature-flags",
+    "role": "lead",
+    "kind": "issue",
+    "status": "open",
+    "topic": "time",
+    "text": "The time limit hit during a long CI wait.",
+    "pr": null
+   },
+   {
+    "id": "fb-005",
+    "ts": "2026-11-03T13:00:00+00:00",
+    "repo": "fixture-alpha",
+    "slug": "fx-bulk-import",
+    "role": "lead",
+    "kind": "issue",
+    "status": "open",
+    "topic": "review",
+    "text": "The reviewer verdict arrived without the file list, so the coder asked again.",
+    "pr": null
+   },
+   {
+    "id": "fb-021",
+    "ts": "2026-11-03T12:00:00+00:00",
+    "repo": "fixture-alpha",
+    "slug": "fx-rate-limits",
+    "role": "coder",
+    "kind": "decision",
+    "status": "open",
+    "topic": null,
+    "text": "DECISION: kept the old endpoint for one release",
+    "pr": null
+   },
+   {
+    "id": "fb-004",
+    "ts": "2026-11-02T12:00:00+00:00",
+    "repo": "fixture-beta",
+    "slug": "fx-dark-mode",
+    "role": "explorer",
+    "kind": "issue",
+    "status": "accepted",
+    "topic": "tools",
+    "text": "The git worktree add command failed when the branch already existed.",
+    "pr": "https://github.com/fixture/fixture-alpha/pull/131"
+   },
+   {
+    "id": "fb-003",
+    "ts": "2026-11-02T11:00:00+00:00",
+    "repo": "fixture-alpha",
+    "slug": "fx-audit-log",
+    "role": "reviewer",
+    "kind": "issue",
+    "status": "open",
+    "topic": "rules",
+    "text": "The lead.md rule on commit size conflicts with the coding-taste skill.",
+    "pr": null
+   },
+   {
+    "id": "fb-002",
+    "ts": "2026-11-01T10:00:00+00:00",
+    "repo": "fixture-alpha",
+    "slug": "fx-old-experiment",
+    "role": "coder",
+    "kind": "issue",
+    "status": "open",
+    "topic": "brief",
+    "text": "The brief did not say which environment the migration targets.",
+    "pr": null
+   },
+   {
+    "id": "fb-001",
+    "ts": "2026-11-01T09:00:00+00:00",
+    "repo": "fixture-alpha",
+    "slug": "fx-cache-warm",
+    "role": "lead",
+    "kind": "issue",
+    "status": "open",
+    "topic": "permissions",
+    "text": "Permission denied pushing to the remote from the worktree; asked the human to run it.",
+    "pr": null
+   }
+  ]
+ }
+}
