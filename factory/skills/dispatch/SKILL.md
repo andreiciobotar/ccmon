@@ -20,13 +20,15 @@ You do not plan a task, write its code or review it. Your judgment goes into the
 1. Get the brief from the human. Ask only what a lead could not find out itself: the goal, the constraint that is not in the repo, what done means.
 2. Propose a slug: lowercase words joined by single hyphens, 3 to 40 characters, naming the outcome (`tui-now-running`, not `fix-stuff`). Split along obvious lines only; say so when you split.
 3. A lead sees only what is on the remote default branch. If the task needs work that is not there, either it is unpushed (say so and stop) or it lives in another open task: then stack on it with `--base <that slug>`. Keep stacks to three deep at most.
-4. Run `factory new <slug> --brief-file <file> [--base <slug>]`. Write the brief to a scratch file first; it should carry the human's words, not your rewrite of them. The cap counts tasks not yet handed over (in motion or blocked), not tasks waiting for review: a slot opens when a lead has declared its hand-over and its turn has ended. If the repo is at its cap, show the tasks in motion and ask which to finish or stop; do not raise the cap yourself.
+4. Run `factory new <slug> --brief-file <file> [--base <slug>]`. Write the brief to a scratch file first; it should carry the human's words, not your rewrite of them. Add what the lead cannot find out: the expected size (small, medium, large); the source and cutoff of every count; refusal texts quoted, not summarised; for each running task this one touches or consumes, whether to wait, stack or expect a rebase; the merge order when it moves or deletes files others edit. First check that the files and commands the brief names exist on the remote default branch, and for visual work render the current view and look at it. The cap counts tasks not yet handed over (in motion or blocked), not tasks waiting for review: a slot opens when a lead has declared its hand-over and its turn has ended. If the repo is at its cap, show the tasks in motion and ask which to finish or stop; do not raise the cap yourself.
 5. Tell the human the slug and that `claude attach <slug>` opens the lead directly.
 
 ## Relay
 Leads message you with a first line starting `QUESTION:`, `BLOCKED:`, `OVERTIME:`, `SPLIT:` or `DONE:` and their slug.
 - Show every `QUESTION`, `BLOCKED`, `OVERTIME` and `SPLIT` to the human in the lead's own words, with the slug. Never answer for the human, and never drop or soften one.
-- Send the human's answer to the lead with `SendMessage` to the slug, in the human's words, adding only context the lead lacks.
+- Send the human's answer to the lead with `SendMessage` to the slug, in the human's words, adding only context the lead lacks. Any message to a working lead says whether it changes scope.
+- A lead runs on the rules it started with. When a merge changes `roles/lead.md`, the agent files or `bin/factory`, tell every lead in motion what changed.
+- Between a lead's `DONE` and the merge, message it only when you need something from it: a woken lead holds a slot and the merge.
 - When the human asks something about a task you cannot answer from `factory status`, ask the lead and relay the reply.
 - On `SPLIT`, show the proposed tasks; start them when the human agrees. The lead may still be working on a part it kept.
 - On `DONE`, report the deliverable (the pull request, or the file or link), the verdict, what the lead left unverified and the task's decisions (`factory feedback --kind decision`).
