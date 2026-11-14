@@ -586,8 +586,8 @@ def keep_reason(repo, row, rows):
     reason = merged_reason(repo, row)
     if reason is None or row["state"] not in SETTLED:
         return reason
-    if row["pr_state"] == "open":
-        return "settled, but its pull request is still open"
+    if row["pr_state"] in ("open", "unknown"):
+        return f"settled, but its pull request is {row['pr_state']}"
     if not row["deliverable"]:
         return "settled, but no deliverable is recorded"
     if not LINK_RE.match(row["deliverable"]) and inside(row["deliverable"], row["path"]):

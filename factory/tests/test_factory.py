@@ -898,7 +898,8 @@ class CleanTests(unittest.TestCase):
         cases = {
             "merely handed over": (dict(state="handed-over"), "no merged pull request \\(none\\)"),
             "working": (dict(state="working"), "no merged pull request \\(none\\)"),
-            "pull request open": (dict(pr=self.pr("OPEN")), "settled, but its pull request is still open"),
+            "pull request open": (dict(pr=self.pr("OPEN")), "settled, but its pull request is open"),
+            "pull request unknown": (dict(extra={("gh",): (1, "", "no gh")}), "settled, but its pull request is unknown"),
             "no deliverable": (dict(deliverable=None), "no deliverable is recorded"),
             "deliverable is the worktree": (dict(deliverable=f"{WT}/x"), "deliverable is inside the worktree"),
             "deliverable inside the worktree": (dict(deliverable=f"{WT}/x/out/video.mp4"),
@@ -1149,8 +1150,13 @@ print(os.environ["FAKE_PR"])
         self.assertIn("inside the worktree", p.stderr)
         outside = self.home / "out.mp4"
         outside.write_text("x")
-        p = self.factory("state", "handed-over", str(outside), cwd=task_dir)
-        self.assertEqual((p.returncode, p.stderr), (0, ""))
+        (self.home / "rel.mp4").write_text("x")
+        rel = os.path.relpath(self.home / "rel.mp4", task_dir)
+        for given, stored in ((str(outside), outside), ("~/out.mp4", outside), (rel, self.home / "rel.mp4")):
+            p = self.factory("state", "handed-over", given, cwd=task_dir)
+            self.assertEqual((p.returncode, p.stderr), (0, ""))
+            last = json.loads((self.home / ".claude/factory/tasks.jsonl").read_text().splitlines()[-1])
+            self.assertEqual(last["deliverable"], os.path.realpath(stored))
 
     def test_default_dispatcher_name_comes_from_the_main_checkout_inside_a_worktree(self):
         self.git("worktree", "add", "-q", "-b", "worktree-first", ".claude/worktrees/first")

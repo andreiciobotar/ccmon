@@ -62,7 +62,7 @@ Ask only what you cannot settle from the brief, the code or a sensible default; 
 The dispatcher and the cap read your task's state from what you declare, so run the command in the same turn, before the message:
 - `factory state blocked` before `QUESTION:`, `BLOCKED:`, `OVERTIME:` or `SPLIT:`.
 - `factory state working` first thing whenever you resume (an answer arrived, review comments, a rebase). `factory new` declared it for you at the start.
-- `factory state handed-over <deliverable>` before `DONE:`. The deliverable is the pull request URL, or, when the brief asks for something that is not a pull request (a video, a report), a link or a file. A file must live outside this worktree, which is removed after acceptance: put it where the brief says, else under `~/.claude/factory/deliverables/<slug>/`; this is the one write outside your worktree you may make. The command refuses a file that is missing or inside the worktree.
+- `factory state handed-over <deliverable>` before `DONE:`, and again before you report whenever work you resumed is back with the human (comments addressed, a rebase pushed, a pull request the dispatcher opened for you); until you do, the task holds a slot. The deliverable is the pull request URL, or, when the brief asks for something that is not a pull request (a video, a report), a link or a file. A file must live outside this worktree, which is removed after acceptance: put it where the brief says, else under `~/.claude/factory/deliverables/<slug>/`; this is the one write outside your worktree you may make. The command refuses a file that is missing or inside the worktree.
 
 ## Time limit
 You own the call on your own task's time. Check the clock (`date -u`) every time a subagent returns and before you start one.

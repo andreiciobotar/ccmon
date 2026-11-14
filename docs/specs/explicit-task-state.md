@@ -18,7 +18,7 @@ A task's declared state is the `state` of the last record with its `repo` and `s
 |---|---|---|
 | `working` | `factory new` at start; the lead whenever it resumes | being built |
 | `blocked` | the lead before `QUESTION:`, `BLOCKED:`, `OVERTIME:`, `SPLIT:` | waiting on the human |
-| `handed-over` | the lead before `DONE:` | the deliverable is with the human |
+| `handed-over` | the lead before `DONE:`, and again before it reports after any later turn (comments addressed, a rebase pushed) | the deliverable is with the human |
 | `acknowledged`, `dismissed` | the dispatcher, on the human's word | the human accepted, or dropped, handed-over work |
 
 `factory new` writes `working` after the lead has started (a failed write is ignored, like `TaskStarted`), so a reused slug starts clean. Known limit: a worktree made by hand under a slug that was used before inherits that slug's last state.
@@ -56,23 +56,23 @@ The cap counts `motion` and `blocked`. `new`'s refusal lists them, marking the b
 ## `clean`
 Still an allow-list. The checks that apply to every task are unchanged and come first (branch, clean tree, no unfinished session, no nested worktree, nothing stacked on it). Then a task is removed when either:
 1. its pull request is merged into the default branch and the local head equals the merged head (as today, whatever is declared); or
-2. its declared state is `acknowledged` or `dismissed`, and all hold: its pull request is not open (close or merge it first); a deliverable is recorded and is a link, or a file path that is not the worktree or inside it; and its head commit is on some remote-tracking branch (`git branch -r --contains HEAD` in the worktree prints at least one line; an error means keep). The last check is added to the brief's rule: an acknowledged video must not take unpushed commits with it. A task dropped with unpushed commits is removed by hand (`claude rm`).
+2. its declared state is `acknowledged` or `dismissed`, and all hold: its pull request state is known and not open (close or merge it first; with `gh` unavailable nothing is removed); a deliverable is recorded and is a link, or a file path that is not the worktree or inside it; and its head commit is on some remote-tracking branch (`git branch -r --contains HEAD` in the worktree prints at least one line; an error means keep). The last check is added to the brief's rule: an acknowledged video must not take unpushed commits with it. A task dropped with unpushed commits is removed by hand (`claude rm`).
 
 When rule 2 does not hold for a settled task, the kept reason names the failed check; otherwise the reason is rule 1's, as today. Removal steps are unchanged (`claude rm <id>`, else `git worktree remove` + `git branch -d`; never forced, so `git branch -d` may refuse a dismissed branch that is not merged, which is reported as a failure).
 
 ## Role rules
-- `factory/roles/lead.md`: a short section "Declaring your state" (which command before which message; where a file deliverable goes: the place the brief names, else `~/.claude/factory/deliverables/<slug>/`, never the worktree), and the slot paragraph rewritten. Edits stay in those two places; `lead-rules-update` is editing other sections.
+- `factory/roles/lead.md`: a short section "Declaring your state" (which command before which message; where a file deliverable goes: the place the brief names, else `~/.claude/factory/deliverables/<slug>/`, never the worktree), and the slot paragraph rewritten. A lead that resumed (declared `working`) must declare the hand-over again when its turn's work is back with the human, or the task stays in `motion`; when the dispatcher opens the pull request for a lead that was denied the push, it sends the lead the URL so that the lead declares it. Edits stay in those two places; `lead-rules-update` is editing other sections.
 - `factory/skills/dispatch/SKILL.md`: phases and the `STATE` column; on every report repeat the `waiting on the human` lines; `factory ack` on the human's word only; a `blocked` task is waiting on the human's answer.
 - `docs/specs/factory.md`, `README.md`: match.
 
 ## Tests
 - `phase`: every row of the table on both sides, and every undeclared case from PR #7 unchanged.
 - Store: last record wins; another repo's or slug's records ignored; garbage lines skipped; unknown state means undeclared; missing file.
-- `state`: each state written with the repo root and slug; outside a task worktree refused; from a subdirectory accepted; `handed-over` without a deliverable and `working` with one refused; link stored as given; file resolved to an absolute path; missing file and a file inside the worktree refused.
+- `state`: each state written with the repo root and slug; outside a task worktree refused; from a subdirectory accepted; `handed-over` without a deliverable and `working` with one refused; link stored as given; an absolute, a `~` and a relative file path resolved to the real absolute path; missing file and a file inside the worktree refused.
 - `ack`: refused for an unknown slug, an undeclared task, `working`, `blocked`; accepted after `handed-over`, copying the deliverable; `working` after it voids it.
 - `new`: writes `working`; at the cap, a `blocked` task counts and is marked, a handed-over task with no pull request does not count, a handed-over task with a working session counts.
 - `status`: `state`, `deliverable`, phases and the five counts in JSON; the `STATE` column, the count line and the `waiting on the human` lines in the table output.
-- `clean`: rule 2 on both sides of each check (state merely `handed-over`, pull request open, deliverable inside the worktree, head on no remote, `git branch -r` failing, dirty tree, unfinished session); rule 1 unchanged for declared and undeclared tasks.
+- `clean`: rule 2 on both sides of each check (state merely `handed-over`, pull request open or unknown, deliverable inside the worktree, head on no remote, `git branch -r` failing, dirty tree, unfinished session); rule 1 unchanged for declared and undeclared tasks.
 - End to end in the temporary repo with real `git`: `state` from inside a real worktree, then `status --json` shows it.
 
 ## Live check
