@@ -40,6 +40,8 @@ jobs:
         with:
           python-version: "3.11"
       - run: make install
+      - name: what the first Claude Code session would have created
+        run: mkdir -p ~/.claude/projects
       - run: make snapshot
       - name: make up (three seconds in a pseudo-terminal, then q)
         run: (sleep 3; printf q) | script -qec "make up" /dev/null | tail -c 400

@@ -1500,8 +1500,8 @@ def cmd_watch(args):
     else:
         run_site_manager(p, send)
     if orphaned and "dispatcher-missing" not in {s["criterion"] for s in skipped}:
+        print(f"no dispatcher session for {repo.root}: schedule removed", flush=True)  # launchd kills us in remove
         schedule_remove(repo, scheduler())
-        print(f"no dispatcher session for {repo.root}: schedule removed")
     return 0
 
 
@@ -1589,14 +1589,17 @@ def job_label(root):
 
 
 def job_path():
-    """The directories the watch needs: git, gh, claude, this Python, and the system's."""
-    dirs = []
+    """The directories the watch needs and no others: those of git, gh, claude and this Python in the order
+    the caller's PATH has them (so the job finds the same copies), then the system's."""
+    need = []
     for tool in ("git", "gh", "claude"):
         found = shutil.which(tool)
         if not found:
             raise Fail(f"schedule: {tool} is not on PATH")
-        dirs.append(os.path.dirname(found))
-    return ":".join(dict.fromkeys([*dirs, os.path.dirname(sys.executable), "/usr/bin", "/bin", "/usr/sbin", "/sbin"]))
+        need.append(os.path.dirname(found))
+    need.append(os.path.dirname(sys.executable))
+    ordered = [d for d in os.environ.get("PATH", "").split(os.pathsep) if d in need]
+    return ":".join(dict.fromkeys([*ordered, *need, "/usr/bin", "/bin", "/usr/sbin", "/sbin"]))
 
 
 class Launchd:

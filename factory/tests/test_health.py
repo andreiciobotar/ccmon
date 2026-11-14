@@ -59,6 +59,7 @@ class Home(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.home = Path(self.tmp.name)
         patcher = mock.patch.dict(os.environ, {"HOME": self.tmp.name, "XDG_CONFIG_HOME": "",
+                                                "PATH": "/usr/bin:/opt/bin:/home/u/.local/bin:/bin",
                                                 "CLAUDE_CODE_SESSION_ID": "sid-d"})
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -950,9 +951,10 @@ class JobTests(unittest.TestCase):
     def test_the_path_holds_only_what_the_job_needs(self):
         found = {"git": "/usr/bin/git", "gh": "/opt/bin/gh", "claude": "/home/u/.local/bin/claude"}
         with mock.patch.object(factory.shutil, "which", found.get), \
-                mock.patch.object(factory.sys, "executable", "/py/bin/python3"):
-            self.assertEqual(factory.job_path(),
-                             "/usr/bin:/opt/bin:/home/u/.local/bin:/py/bin:/bin:/usr/sbin:/sbin")
+                mock.patch.object(factory.sys, "executable", "/py/bin/python3"), \
+                mock.patch.dict(os.environ, {"PATH": "/home/u/.local/bin:/junk:/opt/bin:/usr/bin"}):
+            self.assertEqual(factory.job_path(),  # the caller's order, so the job finds the same copies
+                             "/home/u/.local/bin:/opt/bin:/usr/bin:/py/bin:/bin:/usr/sbin:/sbin")
             for tool in found:
                 with mock.patch.object(factory.shutil, "which", {**found, tool: None}.get):
                     with self.assertRaises(factory.Fail) as raised:
