@@ -257,7 +257,7 @@ def totals(sessions):
             by_agent.setdefault(a, Usage()).add(u)
         for m, u in usage_by_model(s).items():
             by_model.setdefault(m, Usage()).add(u)
-    main_total = by_agent["main"].total if "main" in by_agent else 0
+    main_total = by_agent["main"].total
     sub_total = sum(u.total for k, u in by_agent.items() if k != "main")
     total = main_total + sub_total
     cands = sum(s.recheck_candidates for s in sessions)

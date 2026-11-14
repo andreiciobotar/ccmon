@@ -42,7 +42,7 @@ class AttributionTests(unittest.TestCase):
             "a1000004": ("alpha", ALPHA, "y", ["x", "y"]),         # switched: last one wins, both listed
             "a1000005": ("alpha", ALPHA, "inwt", ["inwt"]),        # originalCwd is the worktree path
             "a1000006": ("alpha", ALPHA, None, []),                # only an agent-<hex> worktree
-            "a1000007": ("alpha", ALPHA, "cwdonly", []),           # no worktree-state, cwd inside a worktree
+            "a1000007": ("alpha", ALPHA, "cwdonly", ["cwdonly"]),         # no worktree-state, cwd inside a worktree
             "b1000001": ("beta", "/r/beta", None, []),
             "c1000001": ("-no-cwd", None, None, []),               # no cwd: project directory name
         })
@@ -54,6 +54,8 @@ class AttributionTests(unittest.TestCase):
         self.assertEqual(att([("/h/wt", "hooked", "/r/a")], None), ("/r/a", "hooked", ["hooked"]))
         self.assertEqual(att([("/r/a/.claude/worktrees/x", "x", "/r/a"), ("/r/a/.claude/worktrees/agent-9", "agent-9", "/r/a")],
                              "/r/a"), ("/r/a", "x", ["x"]))
+        self.assertEqual(att([("/h/wt", "hooked", "/r/a/")], None), ("/r/a", "hooked", ["hooked"]))
+        self.assertEqual(att([], "/"), ("/", None, []))
         self.assertEqual(att([], None), (None, None, []))
 
     def test_project_keeps_its_meaning(self):
@@ -148,8 +150,10 @@ class CliTests(unittest.TestCase):
         rc, out, _ = run("sessions", "--json", "--projects-dir", PROJECTS, "--agents-dir", AGENTS)
         s = json.loads(out)["sessions"][0]
         self.assertEqual((s["project"], s["project_dir"], s["cwd"]), ("cwd", "-fixture-proj", "/fixture/cwd"))
-        self.assertEqual(s["tokens"]["total"], s["by_agent"]["main"]["total"] + sum(
-            v["total"] for k, v in s["by_agent"].items() if k != "main"))
+        self.assertEqual(s["tokens"], {"total": 670, "main": 300, "subagents": 370,
+                                       "main_pct": 44.8, "subagent_pct": 55.2})
+        self.assertEqual({m: u["total"] for m, u in s["by_model"].items()},
+                         {"claude-fable-5-2": 300, "claude-haiku-5-5": 301, "claude-opus-5-5": 36, "claude-sonnet-5-5": 33})
         for k in ("id", "path", "start", "end", "tokens", "by_model", "by_agent", "dispatch_count", "repeats",
                   "review_loops", "review_loop_events", "recheck", "warn_count", "warnings", "malformed"):
             self.assertIn(k, s)

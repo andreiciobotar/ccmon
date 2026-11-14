@@ -168,8 +168,8 @@ def _locate(path, name=None, origin=None):
         task = rest.split("/")[0]
         return repo, (None if not task or _AGENT_WT.fullmatch(task) else task)
     if name:  # worktree made by a hook, outside .claude/worktrees
-        return (origin if isinstance(origin, str) and origin else path), name
-    return path.rstrip("/"), None
+        path = origin if isinstance(origin, str) and origin else path
+    return path.rstrip("/") or path, name
 
 
 def attribute(states, cwd):
@@ -184,11 +184,10 @@ def attribute(states, cwd):
             continue
         entered.append((path, name, origin))
     located = [_locate(*e) for e in entered]
-    worktrees = [t for _, t in located if t]
     if not located and cwd:
         located = [_locate(cwd)]
     repo, task = located[-1] if located else (None, None)
-    return repo, task, worktrees
+    return repo, task, [t for _, t in located if t]
 
 
 class _Scan:

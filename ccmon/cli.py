@@ -242,7 +242,7 @@ def build_parser():
     scope = argparse.ArgumentParser(add_help=False)
     scope.add_argument("--repo", help="only this repository (name)")
     scope.add_argument("--task", help="only this task (worktree name)")
-    s = sub.add_parser("sessions", parents=[_common(True), since, scope], help="one row per session")
+    s = sub.add_parser("sessions", parents=[_common(True), since, scope], help="sessions grouped by repository and task")
     s.set_defaults(func=cmd_sessions)
     s = sub.add_parser("session", parents=[_common(True)], help="one session in detail")
     s.add_argument("id", help="session id or unique prefix")

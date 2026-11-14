@@ -19,7 +19,7 @@ A session belongs to exactly one repository and at most one task.
 4. With no anchor (no `cwd` anywhere), the repository path is null and the repository name is the project directory name, as `project` already does.
 5. The repository name is the basename of the repository path. Groups are keyed by path; two repositories with the same basename are separate groups with the same name.
 
-A session that switched worktrees is therefore counted whole under the last task it entered (where its work ended up, and where Claude Code files it). Its tokens are not split between tasks. The switch stays visible: `worktrees` lists every task name it entered, in order.
+A session that switched worktrees is therefore counted whole under the last task it entered (where its work ended up, and where Claude Code files it). Its tokens are not split between tasks. The switch stays visible: `worktrees` lists every task name it entered, in order (a task that comes only from the first `cwd` is listed too, so a non-null `task` is always its last element).
 
 Known limits, to state in the README: a session started in a subdirectory of a repository, outside any worktree, shows that subdirectory as its repository; review loops are detected inside one session, so a task's count is the sum over its sessions.
 
