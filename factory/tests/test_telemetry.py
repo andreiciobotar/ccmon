@@ -38,8 +38,7 @@ class StoreCase(unittest.TestCase):
             self.addCleanup(p.stop)
 
     def lines(self, name="events"):
-        path = self.store / f"{name}.jsonl"
-        return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+        return [json.loads(line) for path in sorted(self.store.glob(f"{name}*.jsonl")) for line in path.read_text().splitlines()]
 
     def transcript(self, text, name="t.jsonl"):
         path = self.tmp / name
@@ -416,6 +415,222 @@ class TaskEventTests(StoreCase):
         self.assertEqual((code, out.strip()), (0, "started demo-task (session 96dc4869)"))
         code, out, err, _ = self.clean()
         self.assertEqual((code, out.strip(), err), (0, "removed x", ""))
+
+
+class LogCase(StoreCase):
+    NOW = "2026-11-14T10:00:00Z"
+
+    def put(self, name, *records, mtime=None):
+        self.store.mkdir(parents=True, exist_ok=True)
+        path = self.store / f"{name}.jsonl"
+        path.write_text("".join(json.dumps(r) + "\n" for r in records))
+        if mtime:
+            os.utime(path, (mtime, mtime))
+        return path
+
+    def names(self):
+        return sorted(p.name for p in self.store.glob("*.jsonl"))
+
+    def clock(self):
+        return mock.patch.object(factory, "now", return_value=self.NOW)
+
+
+class LogFileTests(LogCase):
+    def test_log_writes_to_the_records_month(self):
+        factory.log("events", {"ts": "2026-03-01T00:00:00Z", "n": 1})
+        self.assertEqual(self.names(), ["events-2026-03.jsonl"])
+
+    def test_other_names_stay_unsuffixed(self):
+        factory.append("tasks", {"ts": "2026-03-01T00:00:00Z"})
+        self.assertEqual(self.names(), ["tasks.jsonl"])
+
+    def test_log_files_order_and_stray_names(self):
+        self.put("events-2026-10", {})
+        self.put("events-2026-02", {})
+        self.put("events", {}, mtime=time.mktime((2025, 6, 15, 12, 0, 0, 0, 0, -1)))
+        for stray in ("events-2026-11.jsonl.bak", "events-old.jsonl", "events-2026-1.jsonl", "retros-2026-01.jsonl"):
+            (self.store / stray).write_text("{}\n")
+        self.assertEqual([(m, p.name) for m, p in factory.log_files("events")],
+                         [("2025-06", "events.jsonl"), ("2026-02", "events-2026-02.jsonl"), ("2026-10", "events-2026-10.jsonl")])
+        self.assertEqual(factory.log_files("tasks"), [])
+
+    def test_read_log_bounds_are_half_open(self):
+        ts = ["2026-10-31T23:59:59Z", "2026-11-14T09:30:00Z", "2026-11-14T09:30:01Z", "2026-11-30T00:00:00Z", "2026-12-01T00:00:00Z"]
+        for t in ts:
+            factory.log("events", {"ts": t})
+
+        def got(**kw):
+            return [r["ts"] for r in factory.read_log("events", **kw)]
+
+        self.assertEqual(got(), ts)
+        self.assertEqual(got(since="2026-11"), ts[1:])
+        self.assertEqual(got(until="2026-12"), ts[:4])
+        self.assertEqual(got(since="2026-11", until="2026-12"), ts[1:4])
+        self.assertEqual(got(since="2026-11-14", until="2026-11-15"), ts[1:3])
+        self.assertEqual(got(since="2026-11-14T09:30:00Z", until="2026-11-14T09:30:01Z"), ts[1:2])
+        self.assertEqual(got(since="2026-11-14T09:30:01Z"), ts[2:])
+
+    def test_months_outside_the_range_are_not_opened(self):
+        self.store.mkdir(parents=True)
+        for month in ("2026-01", "2026-12"):
+            (self.store / f"events-{month}.jsonl").write_bytes(b"\xff\xfe garbage\n")
+        factory.log("events", {"ts": "2026-06-01T00:00:00Z"})
+        self.assertEqual(len(list(factory.read_log("events", since="2026-02", until="2026-11"))), 1)
+
+    def test_unsuffixed_file_is_always_read_and_filtered(self):
+        self.put("events", {"ts": "2026-01-01T00:00:00Z", "n": 1}, {"ts": "2026-06-01T00:00:00Z", "n": 2}, {"n": 3})
+        factory.log("events", {"ts": "2026-06-02T00:00:00Z", "n": 4})
+        self.assertEqual([r["n"] for r in factory.read_log("events", since="2026-06")], [2, 4])
+        self.assertEqual([r["n"] for r in factory.read_log("events")], [1, 2, 3, 4])
+
+    def test_bad_lines_and_vanished_files_are_skipped(self):
+        path = self.put("events-2026-05", {"ts": "2026-05-01T00:00:00Z", "n": 1})
+        with open(path, "a") as f:
+            f.write("garbage\n[1]\n\n42\n")
+        ghost = self.store / "events-2026-06.jsonl"
+        files = factory.log_files("events") + [("2026-06", ghost)]
+        with mock.patch.object(factory, "log_files", return_value=files):
+            self.assertEqual([r["n"] for r in factory.read_log("events")], [1])
+
+    def test_feedback_folds_across_files(self):
+        self.put("feedback", {"id": "aa", "ts": "2026-05-01T00:00:00Z", "text": "t", "status": "open", "slug": "s", "role": "lead"})
+        factory.log("feedback", {"id": "aa", "ts": "2026-11-01T00:00:00Z", "status": "accepted"})
+        self.assertEqual([(e["id"], e["status"]) for e in factory.read_feedback()], [("aa", "accepted")])
+        self.assertEqual(self.run_main(["feedback", "set", "a", "done", "--pr", "u"])[0], 0)
+        (e,) = factory.read_feedback()
+        self.assertEqual((e["status"], e["pr"]), ("done", "u"))
+
+
+class PruneTests(LogCase):
+    def old(self, months=13):
+        n = 2026 * 12 + 10 - months
+        return f"events-{n // 12:04d}-{n % 12 + 1:02d}"
+
+    def entry(self, fid, ts, status="open"):
+        """An entry line, then a status line unless it stays open."""
+        lines = [{"id": fid, "ts": ts, "text": fid, "status": "open", "slug": None, "role": "lead"}]
+        return lines + ([{"id": fid, "ts": ts, "status": status}] if status != "open" else [])
+
+    def test_events_older_than_twelve_months_go(self):
+        for name in (self.old(14), self.old(13), self.old(12), "events-2026-11"):
+            self.put(name, {})
+        old_legacy = self.put("events", {}, mtime=time.mktime((2024, 1, 1, 12, 0, 0, 0, 0, -1)))
+        with self.clock():
+            factory.prune("events")
+        self.assertEqual(self.names(), ["events-2025-11.jsonl", "events-2026-11.jsonl"])
+        self.assertFalse(old_legacy.exists())
+
+    def test_fresh_unsuffixed_events_file_stays(self):
+        self.put("events", {})
+        with self.clock():
+            factory.prune("events")
+        self.assertEqual(self.names(), ["events.jsonl"])
+
+    def test_retros_are_never_pruned(self):
+        self.put("retros-2020-01", {})
+        with self.clock():
+            factory.prune("retros")
+        self.assertEqual(self.names(), ["retros-2020-01.jsonl"])
+
+    def prune_feedback(self, **files):
+        for name, records in files.items():
+            self.put(name.replace("_", "-"), *records)
+        with self.clock():
+            factory.prune("feedback")
+        return self.names()
+
+    def test_old_closed_feedback_goes(self):
+        self.assertEqual(self.prune_feedback(feedback_2025_01=self.entry("a", "2025-01-01T00:00:00Z", "done")
+                                                               + self.entry("b", "2025-01-01T00:00:00Z", "rejected"),
+                                             feedback_2026_11=self.entry("c", "2026-11-01T00:00:00Z")),
+                         ["feedback-2026-11.jsonl"])
+
+    def test_open_or_accepted_feedback_stays(self):
+        for status in ("open", "accepted"):
+            with self.subTest(status):
+                shutil.rmtree(self.store, ignore_errors=True)
+                self.assertEqual(self.prune_feedback(feedback_2025_01=self.entry("a", "2025-01-01T00:00:00Z", status)),
+                                 ["feedback-2025-01.jsonl"])
+
+    def test_pruning_goes_oldest_first(self):
+        self.assertEqual(self.prune_feedback(feedback_2025_01=self.entry("a", "2025-01-01T00:00:00Z"),
+                                             feedback_2025_02=self.entry("b", "2025-02-01T00:00:00Z", "done")),
+                         ["feedback-2025-01.jsonl", "feedback-2025-02.jsonl"])
+
+    def test_a_file_whose_removal_would_reopen_an_entry_stays(self):
+        self.assertEqual(self.prune_feedback(feedback_2025_01=self.entry("a", "2025-01-01T00:00:00Z", "done"),
+                                             feedback_2025_02=self.entry("a", "2025-02-01T00:00:00Z")),
+                         ["feedback-2025-01.jsonl", "feedback-2025-02.jsonl"])
+
+    def test_the_first_write_of_a_month_prunes(self):
+        self.put(self.old(), {})
+        with self.clock():
+            factory.log("events", {"ts": self.NOW, "n": 1})
+            self.assertEqual(self.names(), ["events-2026-11.jsonl"])
+            self.put(self.old(), {})
+            factory.log("events", {"ts": self.NOW, "n": 2})
+        self.assertEqual(len(self.names()), 2)
+
+    def test_a_failing_prune_does_not_fail_the_write(self):
+        self.put(self.old(), {})
+        with self.clock(), mock.patch.object(Path, "unlink", side_effect=PermissionError):
+            factory.log("events", {"ts": self.NOW, "n": 1})
+        self.assertEqual(len(self.lines()), 2)
+
+
+WORKER = """
+import importlib.machinery, importlib.util, sys
+from pathlib import Path
+loader = importlib.machinery.SourceFileLoader("factory_bin", sys.argv[1])
+f = importlib.util.module_from_spec(importlib.util.spec_from_loader("factory_bin", loader))
+loader.exec_module(f)
+f.STORE = Path(sys.argv[2])
+f.now = lambda: "2026-11-14T10:00:00Z"
+if sys.argv[3] == "prune":
+    while not Path(sys.argv[4]).exists():
+        f.prune("events")
+else:
+    pid = int(sys.argv[3])
+    for seq in range(300):
+        f.log("events", {"ts": f.now(), "p": pid, "seq": seq, "pad": "x" * (100 + (seq * 997 + pid * 131) % 16000)})
+"""
+
+
+class ConcurrencyTests(LogCase):
+    def test_parallel_writers_with_a_pruner(self):
+        for month in ("2024-01", "2025-01", "2025-06"):
+            self.put(f"events-{month}", {"ts": f"{month}-01T00:00:00Z"})
+        done = self.tmp / "done"
+        cmd = [sys.executable, "-c", WORKER, str(BIN), str(self.store)]
+        pruner = subprocess.Popen(cmd + ["prune", str(done)])
+        writers = [subprocess.Popen(cmd + [str(p)]) for p in range(8)]
+        self.assertEqual([w.wait(timeout=60) for w in writers], [0] * 8)
+        done.write_text("")
+        self.assertEqual(pruner.wait(timeout=60), 0)
+        raw = (self.store / "events-2026-11.jsonl").read_text().splitlines()
+        self.assertEqual(len(raw), 2400)
+        self.assertEqual(sorted((r["p"], r["seq"]) for r in map(json.loads, raw)), [(p, s) for p in range(8) for s in range(300)])
+        self.assertEqual(self.names(), ["events-2026-11.jsonl"])
+
+
+class LogCommandTests(LogCase):
+    def test_prints_records_in_range(self):
+        for t in ("2026-10-31T00:00:00Z", "2026-11-14T00:00:00Z", "2026-12-01T00:00:00Z"):
+            factory.log("events", {"ts": t})
+        code, out, _ = self.run_main(["log", "events", "--since", "2026-11", "--until", "2026-12"])
+        self.assertEqual((code, [json.loads(line)["ts"] for line in out.splitlines()]), (0, ["2026-11-14T00:00:00Z"]))
+        self.assertEqual(len(self.run_main(["log", "events"])[1].splitlines()), 3)
+
+    def test_bad_bound_exits_2(self):
+        for bound in ("2026", "2026-1", "yesterday", "2026-11-14 09:00", ""):
+            with self.subTest(bound):
+                code, out, err = self.run_main(["log", "events", "--since", bound])
+                self.assertEqual((code, out), (2, ""))
+                self.assertEqual(len(err.splitlines()), 1)
+
+    def test_empty_store_prints_nothing(self):
+        for name in factory.LOGS:
+            self.assertEqual(self.run_main(["log", name]), (0, "", ""))
 
 
 class HooksJsonTests(unittest.TestCase):
