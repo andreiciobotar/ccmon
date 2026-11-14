@@ -80,8 +80,9 @@ def written():
     return [r for _, path in factory.log_files("tasks") for r in factory.read_file(path)]
 
 
-def invoke(argv, answers, settings=None, env=None, tasks=(), cwd=None):
-    """`tasks` seeds tasks.jsonl (records, or raw lines); the records written are returned as `fake.tasks`."""
+def invoke(argv, answers, settings=None, env=None, tasks=(), cwd=None, events=None):
+    """`tasks` seeds tasks.jsonl (records, or raw lines); the records written are returned as `fake.tasks`.
+    `events` seeds the events log (records, each in the file of its ts's month); without it there is none."""
     fake = FakeRun(answers)
     out, err = io.StringIO(), io.StringIO()
     environ = {"HOME": "", "CLAUDE_CODE_SESSION_ID": "sid-d", **(env or {})}
@@ -92,6 +93,10 @@ def invoke(argv, answers, settings=None, env=None, tasks=(), cwd=None):
             (store / "settings.json").write_text(settings)
         (store / "tasks.jsonl").write_text("".join((t if isinstance(t, str) else json.dumps(t)) + "\n" for t in tasks))
         seeded = written()
+        for e in events or ():
+            month = e["ts"][:7] if isinstance(e.get("ts"), str) and e["ts"] else "2026-03"
+            with open(store / f"events-{month}.jsonl", "a") as f:
+                f.write(json.dumps(e) + "\n")
         with mock.patch.object(factory, "run", fake), redirect_stdout(out), redirect_stderr(err), \
                 mock.patch.object(os, "getcwd", return_value=cwd or ROOT):
             code = factory.main(argv)
@@ -693,6 +698,53 @@ class StatusTests(unittest.TestCase):
         answers = repo_answers([task_entry("handed")], (), git_task_answers("x", time.time()))
         _, out, _, _ = invoke(["status"], answers, tasks=[task_rec("handed", "handed-over")])
         self.assertEqual(out.splitlines()[-1], "waiting on the human: handed -")
+
+    def test_waited_counts_from_the_declared_record_and_is_null_without_one(self):
+        def at(ago):
+            return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - ago))
+        tasks = [{**task_rec("handed", "handed-over"), "ts": at(600)}, {**task_rec("asking", "blocked"), "ts": at(90)},
+                 {**task_rec("odd", "handed-over"), "ts": "yesterday"}, {**task_rec("future", "blocked"), "ts": at(-500)}]
+        answers = repo_answers([task_entry(s) for s in ("moving", "handed", "asking", "odd", "future")], (),
+                               git_task_answers("x", time.time()))
+        _, out, _, _ = invoke(["status", "--json"], answers, tasks=tasks)
+        waited = {r["slug"]: r["waited"] for r in json.loads(out)["rows"]}
+        self.assertIsNone(waited["moving"])
+        self.assertIsNone(waited["odd"])
+        self.assertAlmostEqual(waited["handed"], 600, delta=5)
+        self.assertAlmostEqual(waited["asking"], 90, delta=5)
+        self.assertEqual(waited["future"], 0)
+
+    def test_a_blocked_task_carries_the_last_stop_its_lead_sent_after_declaring(self):
+        decl = "2026-03-02T10:00:00Z"
+        tasks = [{**task_rec(s, "blocked"), "ts": decl} for s in ("asking", "silent", "stale", "other", "bare")]
+        tasks.append({**task_rec("handed", "handed-over"), "ts": decl})
+
+        def stop(slug, ts, kind="QUESTION", **kw):
+            return {"ts": ts, "event": "SendMessage", "repo": ROOT, "slug": slug, "kind": kind, **kw}
+        events = [stop("asking", "2026-03-02T10:00:00Z", summary="old reason"),
+                  stop("asking", "2026-03-02T10:05:00Z", "BLOCKED", summary="which database?"),
+                  stop("stale", "2026-03-02T09:59:59Z", summary="before the declaration"),
+                  stop("stale", "2026-02-27T12:00:00Z", summary="a month file before the declaration"),
+                  stop("other", "2026-03-02T10:05:00Z", summary="wrong repo") | {"repo": "/elsewhere"},
+                  stop("handed", "2026-03-02T10:05:00Z", summary="not blocked"),
+                  stop("bare", "2026-03-02T10:06:00Z", "OVERTIME", summary={"not": "text"}),
+                  stop(["asking"], "2026-03-02T10:07:00Z", summary="slug is not a string"),
+                  stop("asking", 20260302, summary="ts is not a string"),
+                  {k: v for k, v in stop("asking", "", summary="no ts").items() if k != "ts"},
+                  stop("silent", "2026-03-02T10:06:00Z", "DONE", summary="not a stop")]
+        answers = repo_answers([task_entry(s) for s in ("moving", "asking", "silent", "stale", "other", "bare", "handed")],
+                               (), git_task_answers("x", time.time()))
+        _, out, _, _ = invoke(["status", "--json"], answers, tasks=tasks, events=events)
+        got = {r["slug"]: (r["stop_kind"], r["stop_summary"]) for r in json.loads(out)["rows"]}
+        self.assertEqual(got, {"asking": ("BLOCKED", "which database?"), "bare": ("OVERTIME", None),
+                               "silent": (None, None), "stale": (None, None), "other": (None, None),
+                               "handed": (None, None), "moving": (None, None)})
+
+    def test_no_events_log_gives_null_stop_fields(self):
+        answers = repo_answers([task_entry("asking")], (), git_task_answers("x", time.time()))
+        _, out, _, _ = invoke(["status", "--json"], answers, tasks=[task_rec("asking", "blocked")])
+        (row,) = json.loads(out)["rows"]
+        self.assertEqual((row["phase"], row["stop_kind"], row["stop_summary"]), ("blocked", None, None))
 
     def test_sessions_unlistable_counts_as_in_motion(self):
         doc, _ = self.status([task_entry("alpha")], pr=[{"state": "OPEN"}])

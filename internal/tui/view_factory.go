@@ -14,15 +14,16 @@ import (
 )
 
 const (
-	meterCells = 20 // beyond this many slots the meter is a bar
-	baseMax    = 24
-	prMax      = 24
-	slugLeast  = 16
-	nameLeast  = 12 // cells the repository name keeps before the meter shrinks
+	meterCells  = 20 // beyond this many slots the meter is a bar
+	baseMax     = 24
+	prMax       = 24
+	slugLeast   = 16
+	nameLeast   = 12 // cells the repository name keeps before the meter shrinks
+	bandDoLeast = 30 // cells the band's do cell needs to stay on its row
 )
 
-// factoryBody is the factory view: the settings line, then one section per repository,
-// scrolled when it is taller than the window.
+// factoryBody is the factory view: what waits on the human, the settings line, then one
+// section per repository, scrolled when it is taller than the window.
 func (m *model) factoryBody(p paint, w, h int) block {
 	return scrolled(p, m.factoryLines(p, w, h), m.fac.top, w, h)
 }
@@ -58,6 +59,7 @@ func (m *model) factoryLines(p paint, w, h int) block {
 		}
 		return append(lines, p.center(msg, w, h-len(lines))...)
 	}
+	lines = append(m.needsYou(p, w), lines...)
 	var all []data.FactoryTask
 	for _, r := range f.repos {
 		if r.st != nil {
@@ -83,6 +85,109 @@ func (m *model) factoryLines(p paint, w, h int) block {
 		}
 	}
 	return lines
+}
+
+// ---- what waits on the human ------------------------------------------------------
+
+// waitItem is a task that waits on the human: in review, or blocked.
+type waitItem struct {
+	repo string
+	task data.FactoryTask
+}
+
+// waiting lists the waiting tasks of every repository, the longest waiting first (an
+// unknown wait last), then by repository and slug.
+func (m *model) waiting() []waitItem {
+	var items []waitItem
+	for _, r := range m.fac.repos {
+		if r.st == nil {
+			continue
+		}
+		for _, t := range r.st.Rows {
+			if t.Phase == "review" || t.Phase == "blocked" {
+				items = append(items, waitItem{r.name, t})
+			}
+		}
+	}
+	waited := func(it waitItem) int64 {
+		if it.task.Waited == nil {
+			return -1
+		}
+		return *it.task.Waited
+	}
+	slices.SortFunc(items, func(a, b waitItem) int {
+		return cmp.Or(cmp.Compare(waited(b), waited(a)), cmp.Compare(a.repo, b.repo), cmp.Compare(a.task.Slug, b.task.Slug))
+	})
+	return items
+}
+
+// todo says what the human is asked to do with a waiting task, and what to look at;
+// do is empty when there is nothing to show.
+func (it waitItem) todo() (what, do string) {
+	t := it.task
+	if t.Phase == "review" {
+		switch {
+		case t.PRURL != "":
+			return "review PR", "#" + t.PRURL[strings.LastIndex(t.PRURL, "/")+1:] + " " + t.PRURL
+		case strings.Contains(t.Deliverable, "://"):
+			return "see deliverable", t.Deliverable
+		case t.Deliverable != "":
+			return "see deliverable", data.ShortPath(t.Deliverable)
+		}
+		return "review", ""
+	}
+	what = map[string]string{"QUESTION": "answer question", "BLOCKED": "unblock", "OVERTIME": "decide: overtime"}[t.StopKind]
+	return cmp.Or(what, "blocked"), strings.Join(strings.Fields(t.StopSummary), " ")
+}
+
+// needsYou is the band at the top of the view: a title and a row per waiting task, then a
+// blank line; one faint line when nothing waits. A row's do cell takes the rest of the
+// line, or its own line when that leaves it under bandDoLeast cells.
+func (m *model) needsYou(p paint, w int) block {
+	th := m.th
+	items := m.waiting()
+	if len(items) == 0 {
+		quiet := "✓ nothing waits on you"
+		if slices.ContainsFunc(m.fac.repos, func(r factoryRepo) bool { return r.st == nil }) {
+			quiet = "nothing waits on you in the repositories that answered"
+		}
+		return block{fit(p.sp(1)+p.t(quiet, th.Faint), w, p)}
+	}
+	lines := block{fit(p.sp(1)+p.b(fmt.Sprintf("▲ Needs you  %d", len(items)), th.Orange), w, p)}
+	repoW, slugW, whatW, waitW := 0, 0, 0, 1
+	whats, dos, waits := make([]string, len(items)), make([]string, len(items)), make([]string, len(items))
+	for i, it := range items {
+		whats[i], dos[i] = it.todo()
+		waits[i] = "-"
+		if it.task.Waited != nil {
+			waits[i] = FmtDuration(time.Duration(*it.task.Waited) * time.Second)
+		}
+		repoW, slugW = max(repoW, min(nameLeast, width(it.repo))), max(slugW, width(it.task.Slug))
+		whatW, waitW = max(whatW, width(whats[i])), max(waitW, width(waits[i]))
+	}
+	slugCol := 1 + 2 + repoW + 2 // where the slug starts
+	slugW = max(1, min(slugW, w-slugCol-2-whatW-2-waitW))
+	doCol := slugCol + slugW + 2 + whatW + 2 + waitW + 2
+	for i, it := range items {
+		glyph, _, col := m.phaseLook(it.task, false)
+		do, doFg := dos[i], th.Text
+		switch {
+		case do != "":
+		case it.task.Phase == "blocked":
+			do, doFg = "no reason recorded: ask its lead", th.Faint
+		default:
+			do, doFg = "-", th.Faint
+		}
+		row := p.sp(1) + p.t(glyph, col) + p.sp(1) + p.t(cell(it.repo, repoW, false), th.Muted) + p.sp(2) +
+			p.t(cell(it.task.Slug, slugW, false), th.Text) + p.sp(2) + p.t(cell(whats[i], whatW, false), col) + p.sp(2) +
+			p.t(cell(waits[i], waitW, true), th.Muted)
+		if w-doCol-1 >= bandDoLeast {
+			lines = append(lines, fit(row+p.sp(2)+p.t(trunc(do, w-doCol-1), doFg), w, p))
+			continue
+		}
+		lines = append(lines, fit(row, w, p), fit(p.sp(slugCol)+p.t(trunc(do, max(1, w-slugCol-1)), doFg), w, p))
+	}
+	return append(lines, p.sp(w))
 }
 
 // ---- subheader and settings line ------------------------------------------------
