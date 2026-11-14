@@ -243,3 +243,35 @@ func TestCallAfterWaitDoesNotStart(t *testing.T) {
 		t.Fatal("no process may start after Wait")
 	}
 }
+
+func TestSessionsGroupingFields(t *testing.T) {
+	r := fixtureRunner(t)
+	r.ProjectsDir = filepath.Join(r.Root, "tests", "fixtures", "grouping")
+	res, err := r.Sessions(context.Background(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]*Session{}
+	for i := range res.Sessions {
+		got[res.Sessions[i].ID[:8]] = &res.Sessions[i]
+	}
+	for id, want := range map[string][3]string{
+		"a1000001": {"alpha", "/r/alpha", ""},
+		"a1000002": {"alpha", "/r/alpha", "ci"},
+		"c1000001": {"-no-cwd", "", ""}, // a null repo_path decodes to the empty string
+	} {
+		s := got[id]
+		if s == nil {
+			t.Fatalf("missing session %s", id)
+		}
+		if s.Repo != want[0] || s.RepoPath != want[1] || s.Task != want[2] {
+			t.Errorf("%s: repo %q path %q task %q, want %q", id, s.Repo, s.RepoPath, s.Task, want)
+		}
+	}
+	if l := got["a1000002"].Label(); l != "alpha/ci" {
+		t.Errorf("label %q", l)
+	}
+	if l := got["a1000001"].Label(); l != "alpha" {
+		t.Errorf("label %q", l)
+	}
+}

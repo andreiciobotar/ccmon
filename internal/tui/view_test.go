@@ -230,10 +230,10 @@ var update = flag.Bool("update", false, "rewrite the golden files")
 
 var goldenNow = time.Date(2100, 1, 1, 0, 0, 0, 0, time.UTC)
 
-// fixtureCopy copies tests/fixtures/projects to a temp dir with a fixed mtime on every file.
-func fixtureCopy(t *testing.T) string {
+// fixtureCopy copies tests/fixtures/<name> to a temp dir with a fixed mtime on every file.
+func fixtureCopy(t *testing.T, name string) string {
 	t.Helper()
-	src, dst := "../../tests/fixtures/projects", t.TempDir()
+	src, dst := "../../tests/fixtures/"+name, t.TempDir()
 	mtime := time.Date(2026, 1, 1, 10, 30, 0, 0, time.UTC)
 	err := filepath.WalkDir(src, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -273,36 +273,44 @@ func fixtureSnapshot(t *testing.T, projects, view, session string, w, h int) (st
 }
 
 func TestGoldenSnapshots(t *testing.T) {
-	projects := fixtureCopy(t)
-	for _, sz := range [][2]int{{140, 40}, {80, 24}} {
-		for _, view := range []string{"dashboard", "session", "agents", "help"} {
-			name := fmt.Sprintf("%s-%dx%d", view, sz[0], sz[1])
-			t.Run(name, func(t *testing.T) {
-				got, err := fixtureSnapshot(t, projects, view, "", sz[0], sz[1])
-				if err != nil {
-					t.Fatal(err)
-				}
-				path := filepath.Join("testdata", name+".golden")
-				if *update {
-					if err := os.WriteFile(path, []byte(got+"\n"), 0o644); err != nil {
+	for _, fx := range []struct {
+		root, prefix string
+		views        []string
+	}{
+		{"projects", "", []string{"dashboard", "session", "agents", "help"}},
+		{"grouping", "grouping-", []string{"dashboard"}},
+	} {
+		projects := fixtureCopy(t, fx.root)
+		for _, sz := range [][2]int{{140, 40}, {80, 24}} {
+			for _, view := range fx.views {
+				name := fmt.Sprintf("%s%s-%dx%d", fx.prefix, view, sz[0], sz[1])
+				t.Run(name, func(t *testing.T) {
+					got, err := fixtureSnapshot(t, projects, view, "", sz[0], sz[1])
+					if err != nil {
 						t.Fatal(err)
 					}
-					return
-				}
-				want, err := os.ReadFile(path)
-				if err != nil {
-					t.Fatalf("%v (run go test ./internal/tui -update)", err)
-				}
-				if got+"\n" != string(want) {
-					t.Fatalf("%s changed; run go test ./internal/tui -update and review the diff\n--- got ---\n%s", name, got)
-				}
-			})
+					path := filepath.Join("testdata", name+".golden")
+					if *update {
+						if err := os.WriteFile(path, []byte(got+"\n"), 0o644); err != nil {
+							t.Fatal(err)
+						}
+						return
+					}
+					want, err := os.ReadFile(path)
+					if err != nil {
+						t.Fatalf("%v (run go test ./internal/tui -update)", err)
+					}
+					if got+"\n" != string(want) {
+						t.Fatalf("%s changed; run go test ./internal/tui -update and review the diff\n--- got ---\n%s", name, got)
+					}
+				})
+			}
 		}
 	}
 }
 
 func TestSnapshotFailures(t *testing.T) {
-	projects := fixtureCopy(t)
+	projects := fixtureCopy(t, "projects")
 	// the python CLI resolves the prefix: two matches is an error, not a pick
 	b, _ := os.ReadFile(filepath.Join(projects, "-fixture-proj", "fixture-0001.jsonl"))
 	if err := os.WriteFile(filepath.Join(projects, "-fixture-proj", "fixture-0002.jsonl"), b, 0o644); err != nil {

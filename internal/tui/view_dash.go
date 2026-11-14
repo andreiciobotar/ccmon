@@ -43,7 +43,7 @@ func (m *model) dashLayout() dashLayout {
 		l.nowH = 0
 	}
 	// the table and side column take what their content needs, up to what is left
-	need := max(len(m.visible())+3, 7)
+	need := max(len(m.rows())+3, 7)
 	if l.sideW > 0 {
 		t := m.totals()
 		need = max(need, len(t.byAgent)+2+len(t.byModel)+3)
@@ -52,7 +52,7 @@ func (m *model) dashLayout() dashLayout {
 	return l
 }
 
-// dashRows is how many session rows fit in the table.
+// dashRows is how many display rows fit in the table.
 func (m *model) dashRows() int { return max(1, m.dashLayout().topH-3) }
 
 func (m *model) dashBody(p paint, w, h int) block {
@@ -130,7 +130,7 @@ func (m *model) nowRunningBox(p paint, w, h int) block {
 		x := it.d
 		line := in.t(spin(m.spinFrame()), th.Blue) + in.sp(1) + in.b(cell(x.AgentType, agentW, false), th.AgentColor(x.AgentType)) + in.sp(1)
 		if projW > 0 {
-			line += in.t(cell(it.s.Project, projW, false), th.Purple) + in.sp(1)
+			line += in.t(cell(it.s.Label(), projW, false), th.Purple) + in.sp(1)
 		}
 		line += in.t(cell(firstLine(x.Description), max(descW, 0), false), th.Text) + in.sp(1)
 		line += in.t(cell(FmtDuration(m.now().Sub(*x.Start)), durW, true), th.Text) + in.sp(1)
@@ -261,28 +261,29 @@ func avgDisp(n, sessions int) string {
 
 func (m *model) sessionsTable(p paint, w, h int) block {
 	th := m.th
-	vis := m.visible()
-	title := fmt.Sprintf("Sessions %d", len(vis))
+	rows := m.rows()
+	n := len(m.visible())
+	title := fmt.Sprintf("Sessions %d", n)
 	in := p.on(th.Surface)
 	iw := w - 4 // borders + one pad each side
-	if len(vis) == 0 {
+	if n == 0 {
 		return m.emptyTable(p, w, h, title)
 	}
 	cols := m.tableCols(iw)
 	var lines []string
 	lines = append(lines, in.t(cols.header(m.timeLabel()), th.Faint))
-	rows := h - 3
-	cur := m.cursor(vis)
-	for i := m.top; i < len(vis) && i < m.top+rows; i++ {
-		lines = append(lines, m.sessionRow(vis[i], i == cur, cols, iw, in))
+	room := h - 3
+	cur, _ := m.cursorRow(rows)
+	for i := m.top; i < len(rows) && i < m.top+room; i++ {
+		lines = append(lines, m.treeLine(rows[i], i == cur, cols, iw, in))
 	}
 	// pad rows so the scroll indicator always sits at the bottom
 	for len(lines) < h-2 {
 		lines = append(lines, "")
 	}
 	box := p.boxed(title, lines, w, h, th.Purple)
-	if len(vis) > rows {
-		box = m.scrollMark(p, box, m.top, rows, len(vis))
+	if len(rows) > room {
+		box = m.scrollMark(p, box, m.top, room, len(rows))
 	}
 	return box
 }
@@ -331,42 +332,39 @@ func (m *model) emptyTable(p paint, w, h int, title string) block {
 }
 
 type tableCols struct {
-	project, start, id, tok, split, dis int
-	sig                                 int
-	showID, showStart                   bool
+	name, start, tok, split, dis int
+	sig                          int
+	showStart                    bool
 }
 
 func (m *model) tableCols(iw int) tableCols {
 	var c tableCols
 	c.tok, c.split, c.dis = 7, 8, 4
 	c.showStart = iw >= 60
-	c.showID = iw >= 96
-	c.start, c.id = 11, 8
+	c.start = 11
 	fixed := 2 + 1 + c.tok + 1 + c.split + 1 + c.dis // marker+dot, gaps
 	if c.showStart {
 		fixed += c.start + 1
 	}
-	if c.showID {
-		fixed += c.id + 1
-	}
 	rest := iw - fixed - 1
-	c.sig = 0
-	if rest >= 24 {
-		c.sig = min(28, rest-12)
+	// the name column fits the longest indent+name over all rows (not the scroll window), 14..30 cells:
+	// room for a four-cell indent and an 8-character id
+	want := 14
+	for _, r := range m.rows() {
+		want = max(want, 2*r.depth+width(r.name))
 	}
-	c.project = rest - c.sig
-	if c.sig > 0 {
-		c.project--
+	c.name = min(want, 30)
+	if sig := rest - c.name - 1; sig >= 10 {
+		c.sig = min(28, sig)
+		c.name = rest - c.sig - 1 // the name column takes what signals leave
+	} else {
+		c.name = max(rest, 14)
 	}
-	c.project = max(8, min(c.project, 30))
 	return c
 }
 
 func (c tableCols) header(timeLabel string) string {
-	s := "   " + cell("PROJECT", c.project, false) + " "
-	if c.showID {
-		s += cell("SESSION", c.id, false) + " "
-	}
+	s := "   " + cell("REPO / TASK", c.name, false) + " "
 	if c.showStart {
 		s += cell(timeLabel, c.start, false) + " "
 	}
@@ -385,26 +383,40 @@ func (m *model) timeLabel() string {
 	return "STARTED"
 }
 
-func (m *model) rowTime(s *data.Session) time.Time {
-	if m.sortBy == sortRecent {
-		return m.activity(s)
+// rowTime is the latest activity of a row's sessions when sorted by recent, else their earliest start.
+func (m *model) rowTime(group []*data.Session) time.Time {
+	var out time.Time
+	for _, s := range group {
+		t := m.activity(s)
+		if m.sortBy != sortRecent {
+			t = time.Time{}
+			if s.Start != nil {
+				t = *s.Start
+			}
+		}
+		if t.IsZero() {
+			continue
+		}
+		if out.IsZero() || (m.sortBy == sortRecent) == t.After(out) {
+			out = t
+		}
 	}
-	if s.Start != nil {
-		return *s.Start
-	}
-	return time.Time{}
+	return out
 }
 
-func (m *model) sessionRow(s *data.Session, selected bool, c tableCols, iw int, base paint) string {
+// treeLine renders one repository, task or session row. Only session rows select, flash and show a live dot.
+func (m *model) treeLine(r treeRow, selected bool, c tableCols, iw int, base paint) string {
 	th := m.th
 	bg := th.Surface
 	if selected {
 		bg = th.Raised
 	}
-	if until, ok := m.flash[s.ID]; ok {
-		k := float64(until.Sub(m.now())) / float64(flashFor)
-		if k > 0 {
-			bg = mix(bg, th.Purple, 0.28*k)
+	if r.s != nil {
+		if until, ok := m.flash[r.s.ID]; ok {
+			k := float64(until.Sub(m.now())) / float64(flashFor)
+			if k > 0 {
+				bg = mix(bg, th.Purple, 0.28*k)
+			}
 		}
 	}
 	q := base.on(bg)
@@ -415,57 +427,67 @@ func (m *model) sessionRow(s *data.Session, selected bool, c tableCols, iw int, 
 			marker = ">"
 		}
 	}
-	dot := q.t("·", th.Faint)
-	if m.isLive(s) {
-		dot = q.dot(th.Green, m.pulse())
+	dot := q.sp(1)
+	if r.s != nil {
+		dot = q.t("·", th.Faint)
+		if m.isLive(r.s) {
+			dot = q.dot(th.Green, m.pulse())
+		}
 	}
-	proj := cell(s.Project, c.project, false)
-	name := q.t(proj, th.Text)
-	if selected {
-		name = q.b(proj, th.Text)
+	label := cell(strings.Repeat("  ", r.depth)+r.name, c.name, false)
+	var name string
+	switch {
+	case r.s != nil && selected:
+		name = q.b(label, th.Text)
+	case r.s != nil:
+		name = q.t(label, th.Faint)
+	case r.task:
+		name = q.t(label, th.Purple)
+	default:
+		name = q.b(label, th.Text)
 	}
 	line := marker + dot + q.sp(1) + name + q.sp(1)
-	if c.showID {
-		line += q.t(cell(short8(s.ID), c.id, false), th.Faint) + q.sp(1)
-	}
 	if c.showStart {
 		st := "-"
-		if t := m.rowTime(s); !t.IsZero() {
+		if t := m.rowTime(r.group); !t.IsZero() {
 			st = t.Local().Format("01-02 15:04")
 		}
 		line += q.t(cell(st, c.start, false), th.Muted) + q.sp(1)
 	}
-	tok := float64(s.Tokens.Total)
-	if rc := m.rowTok[s.ID]; rc != nil {
-		tok = rc.Value()
+	t := sumTotals(r.group)
+	tok := float64(t.tokens)
+	if r.s != nil {
+		if rc := m.rowTok[r.s.ID]; rc != nil {
+			tok = rc.Value()
+		}
 	}
 	line += q.t(cell(Human(tok), c.tok, true), th.Text) + q.sp(1)
-	line += q.stack(c.split, []seg{{float64(s.Tokens.Main), th.Yellow}, {float64(s.Tokens.Subagents), th.Purple}}) + q.sp(1)
-	line += q.t(cell(fmt.Sprintf("%d", s.DispatchCount), c.dis, true), th.Muted)
+	line += q.stack(c.split, []seg{{float64(t.main), th.Yellow}, {float64(t.sub), th.Purple}}) + q.sp(1)
+	line += q.t(cell(fmt.Sprintf("%d", t.dispatches), c.dis, true), th.Muted)
 	if c.sig > 0 {
-		line += q.sp(1) + m.signalPills(q, s, c.sig)
+		line += q.sp(1) + m.signalPills(q, t, c.sig)
 	}
 	return fit(line, iw+1, q)
 }
 
-// signalPills lists the non-zero signals of a session as pills within w cells.
-func (m *model) signalPills(q paint, s *data.Session, w int) string {
+// signalPills lists the non-zero signals of a row's totals as pills within w cells.
+func (m *model) signalPills(q paint, t totals, w int) string {
 	th := m.th
 	var pls []pill
-	if s.WarnCount > 0 {
-		pls = append(pls, pill{fmt.Sprintf("WARN %d", s.WarnCount), th.Red})
+	if t.warns > 0 {
+		pls = append(pls, pill{fmt.Sprintf("WARN %d", t.warns), th.Red})
 	}
-	if s.Repeats > 0 {
-		pls = append(pls, pill{fmt.Sprintf("repeat %d", s.Repeats), th.Yellow})
+	if t.repeats > 0 {
+		pls = append(pls, pill{fmt.Sprintf("repeat %d", t.repeats), th.Yellow})
 	}
-	if s.ReviewLoops > 0 {
-		pls = append(pls, pill{fmt.Sprintf("loop %d", s.ReviewLoops), th.Yellow})
+	if t.loops > 0 {
+		pls = append(pls, pill{fmt.Sprintf("loop %d", t.loops), th.Yellow})
 	}
-	if s.Recheck.Rate != nil && *s.Recheck.Rate > 0 {
-		pls = append(pls, pill{fmt.Sprintf("recheck %.0f%%", *s.Recheck.Rate*100), th.Orange})
+	if t.rechecked > 0 {
+		pls = append(pls, pill{fmt.Sprintf("recheck %.0f%%", 100*float64(t.rechecked)/float64(t.candidates)), th.Orange})
 	}
-	if s.Malformed > 0 {
-		pls = append(pls, pill{fmt.Sprintf("bad %d", s.Malformed), th.Faint})
+	if t.malformed > 0 {
+		pls = append(pls, pill{fmt.Sprintf("bad %d", t.malformed), th.Faint})
 	}
 	if len(pls) == 0 {
 		return q.t("·", th.Faint)

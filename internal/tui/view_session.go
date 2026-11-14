@@ -130,9 +130,9 @@ func (m *model) sessionHeader(p paint, s *data.Session, w int) block {
 	if s.Start != nil && s.End != nil {
 		span = spanText(*s.Start, *s.End)
 	}
-	l1 := p.sp(1) + dot + p.sp(1) + p.b(s.ID, th.Text) + p.t("  "+s.Project, th.Purple) + p.t("  "+span, th.Muted)
+	l1 := p.sp(1) + dot + p.sp(1) + p.b(s.ID, th.Text) + p.t("  "+s.Label(), th.Purple) + p.t("  "+span, th.Muted)
 	if width(l1) > w {
-		l1 = p.sp(1) + dot + p.sp(1) + p.b(short8(s.ID), th.Text) + p.t("  "+s.Project, th.Purple) + p.t("  "+span, th.Muted)
+		l1 = p.sp(1) + dot + p.sp(1) + p.b(short8(s.ID), th.Text) + p.t("  "+s.Label(), th.Purple) + p.t("  "+span, th.Muted)
 	}
 
 	tok := float64(s.Tokens.Total)

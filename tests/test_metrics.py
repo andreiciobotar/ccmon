@@ -76,7 +76,7 @@ class MetricsTests(unittest.TestCase):
         self.assertIn("rechecked", by_desc(s, "Find config loader").flags)
         self.assertIn("rechecked", by_desc(s, "Helper lookup").flags)  # hand-back explorer, later Read
         self.assertEqual((s.recheck_candidates, s.rechecked), (3, 2))
-        self.assertAlmostEqual(metrics.recheck_rate(s), 2 / 3)
+        self.assertAlmostEqual(metrics.totals([s])["recheck"]["rate"], 2 / 3)
 
     def test_recheck_path_boundary(self):
         s = load()

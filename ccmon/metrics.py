@@ -222,12 +222,6 @@ def _pct(n, d):
     return round(100.0 * n / d, 1) if d else 0.0
 
 
-def recheck_rate(session):
-    if not session.recheck_candidates:
-        return None
-    return session.rechecked / session.recheck_candidates
-
-
 def dispatch_dict(d):
     return {
         "tool_use_id": d.tool_use_id,
@@ -255,34 +249,73 @@ def dispatch_dict(d):
     }
 
 
-def session_summary(session, detail=False):
-    by_agent = usage_by_agent(session)
-    by_model = usage_by_model(session)
+def totals(sessions):
+    """The numbers a session, a task and a repository share, computed once for a list of sessions."""
+    by_agent, by_model = {}, {}
+    for s in sessions:
+        for a, u in usage_by_agent(s).items():
+            by_agent.setdefault(a, Usage()).add(u)
+        for m, u in usage_by_model(s).items():
+            by_model.setdefault(m, Usage()).add(u)
     main_total = by_agent["main"].total
     sub_total = sum(u.total for k, u in by_agent.items() if k != "main")
     total = main_total + sub_total
-    rr = recheck_rate(session)
+    cands = sum(s.recheck_candidates for s in sessions)
+    rechecked = sum(s.rechecked for s in sessions)
+    starts = [s.first_ts for s in sessions if s.first_ts]
+    ends = [s.last_ts for s in sessions if s.last_ts]
+    return {
+        "start": min(starts).isoformat() if starts else None,
+        "end": max(ends).isoformat() if ends else None,
+        "tokens": {"total": total, "main": main_total, "subagents": sub_total,
+                   "main_pct": _pct(main_total, total), "subagent_pct": _pct(sub_total, total)},
+        "by_model": {m: u.to_dict() for m, u in sorted(by_model.items())},
+        "by_agent": {a: u.to_dict() for a, u in sorted(by_agent.items())},
+        "dispatch_count": sum(len(s.dispatches) for s in sessions),
+        "repeats": sum(1 for s in sessions for d in s.dispatches if "repeat" in d.flags),
+        "review_loops": sum(s.review_loops for s in sessions),
+        "recheck": {"explorer_with_citations": cands, "rechecked": rechecked,
+                    "rate": rechecked / cands if cands else None},
+        "warn_count": sum(len(s.warnings) for s in sessions),
+        "malformed": sum(s.malformed for s in sessions),
+    }
+
+
+def _group(sessions):
+    sessions = sorted(sessions, key=lambda s: s.first_ts or EPOCH)
+    return {"sessions": [s.id for s in sessions], "session_count": len(sessions), **totals(sessions)}
+
+
+def group_repos(sessions):
+    """Repositories (by name, then path), each with its tasks (by name); sessions without a task count only in the repository."""
+    repos = {}
+    for s in sessions:
+        repos.setdefault((s.repo, s.repo_path), []).append(s)
+    out = []
+    for (name, path), rs in sorted(repos.items(), key=lambda kv: (kv[0][0], kv[0][1] or "")):
+        tasks = {}
+        for s in rs:
+            if s.task:
+                tasks.setdefault(s.task, []).append(s)
+        out.append({"repo": name, "repo_path": path, **_group(rs),
+                    "tasks": [{"task": t, **_group(ts)} for t, ts in sorted(tasks.items())]})
+    return out
+
+
+def session_summary(session, detail=False):
     out = {
         "id": session.id,
         "project": session.project,
         "project_dir": session.project_dir,
         "cwd": session.cwd,
+        "repo": session.repo,
+        "repo_path": session.repo_path,
+        "task": session.task,
+        "worktrees": list(session.worktrees),
         "path": session.path,
-        "start": session.first_ts.isoformat() if session.first_ts else None,
-        "end": session.last_ts.isoformat() if session.last_ts else None,
-        "tokens": {"total": total, "main": main_total, "subagents": sub_total,
-                   "main_pct": _pct(main_total, total), "subagent_pct": _pct(sub_total, total)},
-        "by_model": {m: u.to_dict() for m, u in sorted(by_model.items())},
-        "by_agent": {a: u.to_dict() for a, u in sorted(by_agent.items())},
-        "dispatch_count": len(session.dispatches),
-        "repeats": sum(1 for d in session.dispatches if "repeat" in d.flags),
-        "review_loops": session.review_loops,
+        **totals([session]),
         "review_loop_events": list(session.review_loop_events),
-        "recheck": {"explorer_with_citations": session.recheck_candidates,
-                    "rechecked": session.rechecked, "rate": rr},
-        "warn_count": len(session.warnings),
         "warnings": list(session.warnings),
-        "malformed": session.malformed,
     }
     if detail:
         out["dispatches"] = [dispatch_dict(d) for d in session.dispatches]
