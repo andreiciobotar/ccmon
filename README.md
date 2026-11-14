@@ -69,12 +69,15 @@ Describe a task, then ask for progress whenever you like: the dispatcher answers
 
 It needs `git`, an authenticated [`gh`](https://cli.github.com) and Python 3.11+. By default leads run unattended on Fable in `auto` permission mode, and five tasks may be in motion per repository. Every session event, lead retrospective and decision a lead took without asking is logged under `~/.claude/factory/` (events for 12 months); `factory feedback` lists the decisions and what agents reported about the factory itself.
 
+Optionally a site manager watches the factory for you: `factory schedule install` (macOS, run in the repository's main checkout; `factory schedule remove` undoes it) checks every 30 minutes for stuck, blocked or over-limit tasks, red CI and the like without running a model, and only when something new turns up starts a short Sonnet run that tells the dispatcher or drops it as noise with a reason.
+
 <!-- screenshot: factory status with several tasks -->
 
 ## More
 
 - [docs/specs/factory.md](docs/specs/factory.md): the factory's rules, commands, states and settings
 - [docs/specs/factory-events.md](docs/specs/factory-events.md): the log formats
+- [docs/specs/site-manager.md](docs/specs/site-manager.md): the site manager: criteria, the watch tick, the schedule, the firing log
 - [docs/specs/tui.md](docs/specs/tui.md) and [docs/specs/task-grouping.md](docs/specs/task-grouping.md): the dashboard and how sessions map to tasks
 - `make test` runs everything
 

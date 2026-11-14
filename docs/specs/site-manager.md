@@ -37,7 +37,7 @@ Each criterion is one small function in `factory/bin/factory` that takes the gat
 
 Not shipped: cost far above the median landed task, and the lead doing most of the work itself. Both need cost per task, which `cost-in-money` is building; a second token count here would be a second owner. They become two lines in `criteria.json` and two functions when it lands.
 
-A criterion whose inputs cannot be read (sessions not listable, `gh` failing, no event log) is not evaluated: it fires nothing and is reported as `not evaluated: <name>: <why>`. A criterion that reads a task's phase is also not evaluated when the phases cannot be trusted: an unfinished session has no working directory (`unplaced_block`), or some task's pull request state is `unknown`; `collect` then falls back to `motion`, and acting on that would clear open firings and raise false ones. `gh` output of an unexpected shape (not the list or object asked for) counts as `gh` failing. In `ci-red-handover`, a pull request for which `gh pr checks` prints no JSON (it has no checks) is skipped, not a failure of the criterion.
+A criterion whose inputs cannot be read (sessions not listable, `gh` failing, no event log) is not evaluated: it fires nothing and is reported as `not evaluated: <name>: <why>`. A criterion that reads a task's phase is also not evaluated when the phases cannot be trusted: an unfinished session has no working directory (`unplaced_block`), or the pull request state of a task on a branch is `unknown`; `collect` then falls back to `motion`, and acting on that would clear open firings and raise false ones. `gh` output of an unexpected shape (not the list or object asked for) counts as `gh` failing. In `ci-red-handover`, a pull request for which `gh pr checks` says `no checks reported` is skipped; any other failure of that call leaves the criterion not evaluated.
 
 A firing is `{"criterion", "escalate", "slug" (null for repo-wide ones), "subject", "detail", "what"}`. `subject` identifies the thing within the criterion (the slug, `<slug>/<role>`, the workflow name, or `-`); `detail` is one line of evidence (numbers, URL, session id).
 
@@ -81,7 +81,7 @@ Run inside the repo; one job per repo, label `com.claude.factory.watch.<main che
 The tests never run `launchctl`: `run` is faked and `HOME` is a temporary directory.
 
 ## The log: `~/.claude/factory/firings.jsonl`
-Append-only, written with `append()`. Every record has `ts` and `repo` (the main checkout's real path). Kinds:
+Append-only, one file, written with `append()`. Every record has `ts` and `repo` (the main checkout's real path). Kinds:
 - fired: `id`, `criterion`, `escalate`, `slug`, `subject`, `detail`. `id` is the first 12 hex digits of SHA-256 over repo, criterion, subject and ts joined by NUL.
 - decision: `id`, `decision` (`escalated`|`suppressed`), `reason`, `by` (`site-manager`|`watch`).
 - outcome: `id`, `outcome` (`acted`|`ignored`).
@@ -110,6 +110,8 @@ Rules in the role file: `always` firings are passed on unjudged; for a `judgment
 
 ## Shared code touched
 - `run(argv, cwd=None, timeout=None)`: a timeout returns `(124, "", "timed out")`.
+- Events are read through `read_log` (the month files of `event-log-bounds`), filtered to this repo and ordered by `ts`. `firings.jsonl` is written with `append()` to the one unsuffixed file, like `tasks.jsonl`: it is small and is never pruned, because it is the record the precision and recall are computed from.
+- Sessions are matched to tasks with `sessions_in(sessions, root, path)` and judged finished with `finished()`, as `collect` does.
 - Everything else is new functions and new subcommands; `collect`, `sessions_in`, `session_block`, `keep_reason`, the event writers and `read_feedback` are not edited (other open tasks edit them).
 - `plugin.json` version is not bumped here: PR #8 and the base are changing it; the dispatcher sets it when they land.
 

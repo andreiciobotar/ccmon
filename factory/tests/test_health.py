@@ -357,6 +357,52 @@ class CriteriaTests(Home):
         self.assertEqual(([f["id"] for f in folded], misses), (["a1"], []))
 
 
+    def test_a_failing_pr_checks_call_is_not_evaluated(self):
+        repo = SimpleNamespace(root=ROOT, default="main")
+        gh = lambda *a: factory.gh_json(repo, *a)  # noqa: E731
+        reviewing = row("x", phase="review", pr_url="https://pr/1")
+        with mock.patch.object(factory, "run", FakeRun({("gh", "pr", "checks"): (1, "", "API rate limit exceeded")})):
+            with self.assertRaises(factory.NotEvaluated):
+                check("ci-red-handover", pic(gh=gh, rows=[reviewing]))
+
+    def test_an_exited_dispatcher_does_not_count(self):
+        exited = {"sessionId": "sid-d", "name": "dispatcher-repo", "cwd": ROOT, "kind": "background", "state": "done"}
+        self.assertEqual(len(check("dispatcher-missing", pic(sessions=[exited], rows=[row("x")]))), 1)
+
+    def test_events_are_read_from_the_month_files_too(self):
+        (self.store / "events.jsonl").write_text(json.dumps(ev("x", "TaskStarted", ts=iso(NOW - 9 * HOUR))) + "\n")
+        (self.store / "events-2027-01.jsonl").write_text("".join(
+            json.dumps(e) + "\n" for e in [ev("x", "SubagentStart", role="reviewer", ts=iso(NOW - HOUR)),
+                                           ev("x", "SubagentStart", role="reviewer", ts=iso(NOW - 2 * HOUR)),
+                                           ev("y", "SubagentStart", role="reviewer", ts=iso(NOW)) | {"repo": "/other"}]))
+        events = factory.repo_log("events", ROOT)
+        self.assertEqual([e["event"] for e in events], ["TaskStarted", "SubagentStart", "SubagentStart"])
+        self.assertEqual([e["ts"] for e in events], sorted(e["ts"] for e in events))
+        self.assertEqual(check("review-loops", pic(events=events, rows=[row("x")]), 2),
+                         [("x", "x", "2 reviewer dispatches since it started")])
+        self.assertIsNone(factory.repo_log("nothing", ROOT))
+
+    def test_the_tail_of_a_long_transcript_drops_the_cut_line_and_odd_lines(self):
+        entry = lambda i: json.dumps({"timestamp": f"T{i}", "message": {"role": "user", "content": f"m{i}"}})  # noqa: E731
+        path = self.transcript("{sid}.jsonl", NOW)
+        lines = [entry(i) + " " * 200 for i in range(400)]
+        lines[-3] = json.dumps({"timestamp": "TU", "message": {"role": "user", "content": "a\u2028b"}},
+                               ensure_ascii=False)
+        lines[-2] = "[" * 5000
+        path.write_text("\n".join(lines) + "\n")
+        tail = factory.transcript_tail(path)
+        self.assertEqual(len(tail), 15)
+        self.assertEqual(tail[-1], "T399 user: m399")
+        self.assertEqual(tail[-2], "TU user: a\u2028b")
+        self.assertTrue(all(t.startswith("T") for t in tail))
+        size = path.stat().st_size
+        self.assertGreater(size, 65536)
+        with open(path, "rb") as f:
+            f.seek(size - 65536)
+            cut = f.read().split(b"\n")[0]
+        self.assertNotEqual(cut, b"")
+
+
 class RunTests(unittest.TestCase):
     def test_a_timeout_returns_124(self):
         self.assertEqual(factory.run(["sleep", "5"], timeout=0.1), (124, "", "timed out"))
@@ -722,6 +768,18 @@ class WatchTests(Harness):
         code, _, err = self.tick(answers={("claude", "-p"): (127, "", "no such file")})
         self.assertEqual(code, 1)
         self.assertIn("no such file", err)
+
+
+class RepoWideTests(Harness):
+    CRITERIA = ["ci-red-default"]
+
+    def test_a_repo_wide_firing_carries_no_task(self):
+        red = json.dumps([{"workflowName": "ci", "status": "completed", "conclusion": "failure", "url": "u"}])
+        self.tick(answers={("gh", "run", "list"): (0, red, "")})
+        [sent] = json.loads(self.claude_runs()[0][-1].partition("\n\n")[2])
+        self.assertEqual((sent["criterion"], sent["slug"]), ("ci-red-default", None))
+        self.assertNotIn("task", sent)
+        self.assertNotIn("transcript_tail", sent)
 
 
 class FiringTests(Harness):

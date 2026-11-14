@@ -924,21 +924,11 @@ def epoch(text):
         return None
 
 
-def read_log(name, root):
-    """The records of <store>/<name>.jsonl that belong to the repo at `root`; None when the file cannot be read."""
-    try:
-        lines = (STORE.expanduser() / f"{name}.jsonl").read_text().splitlines()
-    except OSError:
+def repo_log(name, root):
+    """The records of a log that belong to the repo at `root`, oldest first; None when there is no such log."""
+    if not log_files(name):
         return None
-    records = []
-    for line in lines:
-        try:
-            r = json.loads(line)
-        except ValueError:
-            continue
-        if isinstance(r, dict) and r.get("repo") == root:
-            records.append(r)
-    return records
+    return sorted((r for r in read_log(name) if r.get("repo") == root), key=lambda r: str(r.get("ts")))
 
 
 def pinned_models():
@@ -978,7 +968,7 @@ def gather(repo, dispatcher):
     limit = load_settings()["task_time_limit_hours"]
     return {"now": time.time(), "repo": repo, "dispatcher": dispatcher, "sessions": sessions,
             "rows": None if sessions is None else collect(repo, sessions, limit),
-            "declared": read_tasks(repo.root), "events": read_log("events", repo.root), "models": pinned_models(),
+            "declared": read_tasks(repo.root), "events": repo_log("events", repo.root), "models": pinned_models(),
             "gh": lambda *args: gh_json(repo, *args)}
 
 
@@ -1005,8 +995,8 @@ def events(p):
     return p["events"]
 
 
-def task_session(sessions, path):
-    mine = sessions_in(sessions, path)
+def task_session(p, path):
+    mine = sessions_in(p["sessions"], p["repo"].root, path)
     return next((s for s in mine if s.get("kind") == "background"), mine[0] if mine else None)
 
 
@@ -1060,15 +1050,14 @@ def c_ci_red_default(p, _):
 def c_dispatcher_missing(p, _):
     if not any(r["phase"] in ("motion", "blocked", "review") for r in phased(p)):
         return []
-    n = sum(s.get("name") == p["dispatcher"] and (s.get("kind"), s.get("status"), s.get("state")) !=
-            ("background", "idle", "done") for s in p["sessions"])
+    n = sum(s.get("name") == p["dispatcher"] and not finished(s) for s in p["sessions"])
     return [(None, "-", f"{n} unfinished sessions named {p['dispatcher']}")] if n != 1 else []
 
 
 def c_quiet(p, threshold):
     found = []
     for r in phased(p):
-        s = task_session(p["sessions"], r["path"])
+        s = task_session(p, r["path"])
         if r["phase"] == "motion" and s and (s.get("status") == "busy" or s.get("state") == "working"):
             t = last_activity(p, r, s)
             if t and p["now"] - t > threshold * 60:
@@ -1079,9 +1068,9 @@ def c_quiet(p, threshold):
 def c_ended_undeclared(p, threshold):
     found = []
     for r in phased(p):
-        mine = sessions_in(p["sessions"], r["path"])
+        mine = sessions_in(p["sessions"], p["repo"].root, r["path"])
         if r["phase"] == "motion" and not session_block(mine):
-            t = last_activity(p, r, task_session(p["sessions"], r["path"]))
+            t = last_activity(p, r, task_session(p, r["path"]))
             if t and p["now"] - t > threshold * 60:
                 found.append((r["slug"], r["slug"], f"lead stopped undeclared, active {age(t, p['now'])} ago"))
     return found
@@ -1138,7 +1127,9 @@ def c_ci_red_handover(p, _):
         if r["phase"] == "review" and r["pr_url"]:
             try:
                 checks = p["gh"](list, "pr", "checks", r["pr_url"], "--json", "name,bucket")
-            except NoJson:
+            except NoJson as e:
+                if "no checks reported" not in str(e):
+                    raise
                 continue
             failed = [c.get("name") for c in checks if c.get("bucket") == "fail"]
             if failed:
@@ -1253,7 +1244,7 @@ def fire(repo, f):
 
 
 def find_firing(root, prefix):
-    found = [f for f in fold(read_log("firings", root) or [])[0] if f["id"].startswith(prefix)]
+    found = [f for f in fold(repo_log("firings", root) or [])[0] if f["id"].startswith(prefix)]
     if len(found) != 1:
         raise Fail(f"no firing matches {prefix!r}" if not found else f"{prefix!r} matches {len(found)} firings")
     return found[0]
@@ -1284,7 +1275,7 @@ def transcript_tail(path, count=15):
             f.seek(0, 2)
             start = max(0, f.tell() - 65536)
             f.seek(start)
-            lines = f.read().decode(errors="replace").splitlines()
+            lines = f.read().decode(errors="replace").split("\n")
     except OSError:
         return None
     entries = []
@@ -1292,7 +1283,7 @@ def transcript_tail(path, count=15):
         try:
             entry = json.loads(line)
             message = entry.get("message")
-        except (ValueError, AttributeError):
+        except (ValueError, AttributeError, RecursionError):
             continue
         if isinstance(message, dict) and isinstance(message.get("role"), str) and "content" in message:
             content = message["content"]
@@ -1312,7 +1303,7 @@ def firing_for_run(p, f):
                        "last_commit": age(row["last_commit"], n), "dirty": row["dirty"], "ahead": row["ahead"],
                        "behind": row["behind"], "pr_state": row["pr_state"], "pr_url": row["pr_url"],
                        "overtime": row["overtime"]}
-        session = task_session(p["sessions"], row["path"])
+        session = task_session(p, row["path"])
         sid = session.get("sessionId") if session else None
         main = next((t for t in transcripts(session) if t.name == f"{sid}.jsonl"), None)
         tail = transcript_tail(main) if main else None
@@ -1360,7 +1351,7 @@ def notify(repo, f):
 
 
 def report(repo, sent):
-    folded = {f["id"]: f for f in fold(read_log("firings", repo.root) or [])[0]}
+    folded = {f["id"]: f for f in fold(repo_log("firings", repo.root) or [])[0]}
     for f in sent:
         print(f"{f['id']}  {f['criterion']}  {f['subject']}  {folded[f['id']]['decision'] or 'undecided'}")
 
@@ -1391,7 +1382,7 @@ def cmd_watch(args):
         print(f"not evaluated: {s['criterion']}: {s['why']}")
     evaluated = {c["name"] for c in criteria} - {s["criterion"] for s in skipped}
     opened = {(f["criterion"], f["subject"]): f
-              for f in fold(read_log("firings", repo.root) or [])[0] if not f["cleared"]}
+              for f in fold(repo_log("firings", repo.root) or [])[0] if not f["cleared"]}
     for key, f in opened.items():
         if key[0] in evaluated and not any((c["criterion"], c["subject"]) == key for c in current):
             log_firing(repo, id=f["id"], cleared=True)
@@ -1472,7 +1463,7 @@ def summarize(firings, misses):
 
 
 def cmd_firings(args):
-    firings, misses = fold(read_log("firings", Repo().root) or [])
+    firings, misses = fold(repo_log("firings", Repo().root) or [])
     s = summarize(firings, misses)
     if args.json:
         print(json.dumps({"firings": firings, "misses": misses, "summary": s}, indent=2))
