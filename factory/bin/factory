@@ -114,12 +114,14 @@ def parse_worktrees(porcelain):
     entries, cur = [], None
     for line in porcelain.splitlines():
         if line.startswith("worktree "):
-            cur = {"path": os.path.realpath(line[9:]), "branch": None, "prunable": False}
+            cur = {"path": os.path.realpath(line[9:]), "branch": None, "prunable": False, "locked": None}
             entries.append(cur)
         elif cur is not None and line.startswith("branch "):
             cur["branch"] = line[7:].removeprefix("refs/heads/")
         elif cur is not None and line.startswith("prunable"):
             cur["prunable"] = True
+        elif cur is not None and line.split(" ", 1)[0] == "locked":
+            cur["locked"] = line[7:]
     return entries
 
 
@@ -163,21 +165,35 @@ def list_sessions():
     return data
 
 
+def finished(s):
+    """A background session that has ended its turn (`idle`) or whose process has exited (no status, no pid)."""
+    return s.get("kind") == "background" and s.get("state") == "done" and (
+        s.get("status") == "idle" or ("status" not in s and "pid" not in s))
+
+
 def unplaced_block(sessions):
     """Why `clean` must stop: an unfinished session has no cwd, so it could be using any task."""
     for s in sessions:
         cwd = s.get("cwd")
-        finished = (s.get("kind"), s.get("status"), s.get("state")) == ("background", "idle", "done")
-        if not (isinstance(cwd, str) and cwd) and not finished:
+        if not (isinstance(cwd, str) and cwd) and not finished(s):
             return f"session {s.get('id') or s.get('sessionId')} has no working directory and is not finished"
     return None
 
 
-def sessions_in(sessions, path):
-    """Sessions that belong to the worktree at `path`: their cwd is it or inside it."""
-    cwds = [(s, s.get("cwd")) for s in sessions]
-    return [s for s, cwd in cwds if isinstance(cwd, str) and cwd
-            and (os.path.realpath(cwd) + os.sep).startswith(path + os.sep)]
+def sessions_in(sessions, root, path):
+    """Sessions that belong to the task worktree at `path`: their cwd is it or inside it, or they are its
+    exited lead, which `claude agents` lists without a pid, under the task's name, at the main checkout."""
+    slug = os.path.basename(path)
+    mine = []
+    for s in sessions:
+        cwd = s.get("cwd")
+        if not (isinstance(cwd, str) and cwd):
+            continue
+        cwd = os.path.realpath(cwd)
+        exited_lead = s.get("kind") == "background" and "pid" not in s and s.get("name") == slug and cwd == root
+        if exited_lead or (cwd + os.sep).startswith(path + os.sep):
+            mine.append(s)
+    return mine
 
 
 def pull_request(repo, branch):
@@ -204,9 +220,11 @@ def session_block(mine):
     if any(s.get("kind") != "background" for s in mine):
         return "an interactive session is open in it"
     for s in mine:
-        status, state = s.get("status", "missing"), s.get("state", "missing")
-        if (status, state) != ("idle", "done"):
-            return f"background session {s.get('id')} is not finished (status {status}, state {state})"
+        if not finished(s):
+            return (f"background session {s.get('id')} is not finished "
+                    f"(status {s.get('status', 'missing')}, state {s.get('state', 'missing')})")
+    if sum("pid" not in s for s in mine) > 1:
+        return "more than one exited session could be its lead; cannot tell which owns the worktree"
     return None
 
 
@@ -234,8 +252,8 @@ def collect(repo, sessions, limit_hours):
     for wt in repo.tasks:
         path, branch = wt["path"], wt["branch"]
         slug = os.path.basename(path)
-        row = {"slug": slug, "branch": branch, "path": path}
-        mine = sessions_in(sessions, path) if sessions is not None else []
+        row = {"slug": slug, "branch": branch, "path": path, "locked": wt["locked"]}
+        mine = sessions_in(sessions, repo.root, path) if sessions is not None else []
         session = next((s for s in mine if s.get("kind") == "background"), mine[0] if mine else None)
         row["session_id"] = session.get("id") if session else None
         row["session"] = "unknown" if sessions is None else (
@@ -468,7 +486,7 @@ def cmd_new(args):
                    f"the human must run /rename {dispatcher}")
     if any(s is not caller and s.get("name") == dispatcher for s in sessions):
         raise Fail(f"another session is also named {dispatcher!r}; rename or stop it")
-    if any(s.get("name") == args.slug for s in sessions) or sessions_in(sessions, path):
+    if any(s.get("name") == args.slug for s in sessions) or sessions_in(sessions, repo.root, path):
         raise Fail(f"a session named {args.slug} or inside {path} already exists")
     cap = settings["worktree_cap"]
     if len(repo.tasks) >= cap:
@@ -477,7 +495,7 @@ def cmd_new(args):
         for t in repo.tasks:
             name = os.path.basename(t["path"])
             where = phase(pull_request(repo, t["branch"])[0] if t["branch"] else "unknown",
-                          None if unplaced_block(sessions) else sessions_in(sessions, t["path"]),
+                          None if unplaced_block(sessions) else sessions_in(sessions, repo.root, t["path"]),
                           declared.get(name, {}).get("state"))
             if where in ("motion", "blocked"):
                 held.append(name + (" (blocked)" if where == "blocked" else ""))
@@ -587,8 +605,17 @@ def keep_reason(repo, row, rows):
     if stacked:
         return f"{', '.join(stacked)} is stacked on it"
     reason = merged_reason(repo, row)
-    if reason is None or row["state"] not in SETTLED:
-        return reason
+    if reason and row["state"] in SETTLED:
+        reason = settled_reason(repo, row)
+    if reason is None and row["locked"] is not None and not row["session_id"]:
+        why = f" ({row['locked']})" if row["locked"] else ""
+        return (f"its worktree is locked{why} and no session is left to remove it through; "
+                f"if nothing uses it, run: git worktree unlock {row['path']}")
+    return reason
+
+
+def settled_reason(repo, row):
+    """Why rule 2 (settled by the human, deliverable safe, head pushed) does not hold, or None."""
     if row["pr_state"] in ("open", "unknown"):
         return f"settled, but its pull request is {row['pr_state']}"
     if not row["deliverable"]:
@@ -637,7 +664,7 @@ def cmd_clean(args):
             sessions = list_sessions()
             if sessions is None:
                 raise Fail(f"cannot list sessions again before removing {row['slug']}; nothing further removed")
-            reason = unplaced_block(sessions) or session_block(sessions_in(sessions, row["path"]))
+            reason = unplaced_block(sessions) or session_block(sessions_in(sessions, repo.root, row["path"]))
             if reason:
                 print(f"kept {row['slug']}: {reason}")
                 continue
