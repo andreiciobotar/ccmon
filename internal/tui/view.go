@@ -124,6 +124,7 @@ func (m *model) header(p paint) string {
 		{rangeStr, liveStr, state},
 		{rangeStr, liveStr},
 		{rangeStr},
+		{chips[m.rangeIdx]},
 	}
 	left := title + tabs
 	for _, c := range cands {

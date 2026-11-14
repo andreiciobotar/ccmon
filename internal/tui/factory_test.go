@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"image/color"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,10 +25,15 @@ func fstatus(limit int, rows ...data.FactoryTask) *data.FactoryStatus {
 		switch r.Phase {
 		case "motion":
 			st.InMotion++
+		case "blocked":
+			st.InMotion++
+			st.Blocked++
 		case "review":
 			st.InReview++
 		case "merged":
 			st.Merged++
+		case "settled":
+			st.Settled++
 		}
 	}
 	return st
@@ -44,17 +50,21 @@ func manyTasks(n int) []data.FactoryTask {
 	return rows
 }
 
-// alpha has every phase, an overtime and a stale task, a stacked one, and a closed pull request.
+// alpha has all five phases, an overtime and a stale task, a stacked one, a closed pull
+// request, and deliverables without a pull request (a link and a file).
 func alpha() factoryRepo {
 	quiet, login, stacked := ftask("quiet-refactor", "motion"), ftask("login-flow", "motion"), ftask("stacked-on-login", "motion")
 	quiet.Session, quiet.Elapsed = "working", ptr(int64(252))
 	login.Session, login.Elapsed, login.Overtime = "working", ptr(int64(8100)), true
 	stacked.Base, stacked.Elapsed, stacked.PRState = "worktree-login-flow", ptr(int64(95)), "unknown"
-	limits, docs, old := ftask("api-rate-limits", "review"), ftask("rate-limit-docs", "review"), ftask("old-experiment", "merged")
+	limits, docs, old := ftask("api-rate-limits", "review"), ftask("rate-limit-docs", "motion"), ftask("old-experiment", "merged")
+	ask, notes := ftask("needs-an-answer", "blocked"), ftask("release-notes", "settled")
+	ask.Session, ask.Elapsed, ask.Deliverable = "done", ptr(int64(640)), "https://example.com/design/doc"
+	notes.Session, notes.Elapsed, notes.Deliverable = "done", ptr(int64(3000)), "/r/alpha/docs/release-notes.md"
 	limits.PRState, limits.PRURL, limits.Elapsed = "open", "https://github.com/o/alpha/pull/42", ptr(int64(5400))
 	docs.PRState, docs.PRURL, docs.Stale = "closed", "https://github.com/o/alpha/pull/40", true
 	old.PRState, old.PRURL, old.Elapsed = "merged", "https://github.com/o/alpha/pull/31", ptr(int64(61))
-	return factoryRepo{name: "alpha", path: "/r/alpha", st: fstatus(5, stacked, old, docs, quiet, limits, login)}
+	return factoryRepo{name: "alpha", path: "/r/alpha", st: fstatus(5, stacked, old, docs, quiet, limits, login, ask, notes)}
 }
 
 func fakeFactoryRepos() []factoryRepo {
@@ -87,7 +97,7 @@ func factoryModel(noColor bool, w, h int, repos ...factoryRepo) *model {
 // ---- rendering --------------------------------------------------------------------
 
 func TestFactoryRenderVariants(t *testing.T) {
-	unknown := ftask("waiting-on-human", "blocked")
+	unknown := ftask("waiting-on-human", "frozen")
 	unknown.Session = "unknown"
 	variants := map[string]func(m *model){
 		"several": func(m *model) {
@@ -102,6 +112,12 @@ func TestFactoryRenderVariants(t *testing.T) {
 		"unknown": func(m *model) {
 			setFactory(m, factoryRepo{name: "odd", path: "/r/odd", st: fstatus(5, unknown, ftask("a", "motion"))})
 		},
+		"blocked meter": func(m *model) {
+			setFactory(m, factoryRepo{name: "held", path: "/r/held", st: fstatus(40, append(manyTasks(12), ftask("q1", "blocked"), ftask("q2", "blocked"), ftask("s", "settled"))...)})
+		},
+		"narrow meter": func(m *model) {
+			setFactory(m, factoryRepo{name: "mid-size-nam", path: "/r/mid", st: fstatus(17, manyTasks(4)...)})
+		},
 		"editing": func(m *model) { setFactory(m, fakeFactoryRepos()...); m.fac.editing, m.fac.field = true, "12" },
 		"edit err": func(m *model) {
 			setFactory(m, fakeFactoryRepos()...)
@@ -109,7 +125,7 @@ func TestFactoryRenderVariants(t *testing.T) {
 		},
 		"cap error": func(m *model) {
 			setFactory(m, fakeFactoryRepos()...)
-			m.fac.capErr = "/h/.claude/factory/settings.json is not a JSON object"
+			m.fac.capErr = "~/.claude/factory/settings.json is not a JSON object"
 		},
 		"empty":   func(m *model) { setFactory(m) },
 		"waiting": func(m *model) { m.view = viewFactory },
@@ -149,34 +165,50 @@ func TestFactoryMeter(t *testing.T) {
 	if out := plain(m); !strings.Contains(out, "in motion ██████████░░░░░░░░░░ 10/40") && !strings.Contains(out, "in motion █████░░░░░░░░░░░░░░░ 10/40") {
 		t.Errorf("a cap above %d is a %d-cell bar:\n%s", meterCells, meterCells, out)
 	}
-	m = factoryModel(false, 140, 40, factoryRepo{name: "r", path: "/r", st: fstatus(5, manyTasks(3)...)})
-	mid := m.th.on(m.th.Bg).t("●●●", m.th.Green)
-	m.fac.repos[0].st = fstatus(5, manyTasks(5)...)
-	full := m.th.on(m.th.Bg).t("●●●●●", m.th.Yellow)
-	m.fac.repos = append(m.fac.repos, factoryRepo{name: "s", path: "/s", st: fstatus(2, manyTasks(3)...)})
-	over := m.th.on(m.th.Bg).t("●●●", m.th.Red)
-	out := m.Render()
-	if !strings.Contains(out, full) || !strings.Contains(out, over) || strings.Contains(out, mid) {
-		t.Errorf("filled cells: yellow at the cap, red above it")
+	blocked := fstatus(5, append(manyTasks(2), ftask("q", "blocked"))...)
+	if out := plain(factoryModel(true, 140, 40, factoryRepo{name: "r", path: "/r", st: blocked})); !strings.Contains(out, "in motion ▲●●○○ 3/5") {
+		t.Errorf("a blocked task holds a slot with its own glyph:\n%s", out)
+	}
+	for _, c := range []struct {
+		limit, n int
+		col      func(th *Theme) color.Color
+	}{
+		{5, 3, func(th *Theme) color.Color { return th.Green }},
+		{5, 5, func(th *Theme) color.Color { return th.Yellow }},
+		{2, 3, func(th *Theme) color.Color { return th.Red }},
+	} {
+		m := factoryModel(false, 140, 40, factoryRepo{name: "r", path: "/r", st: fstatus(c.limit, manyTasks(c.n)...)})
+		if want := m.th.on(m.th.Bg).t(strings.Repeat("●", c.n), c.col(m.th)); !strings.Contains(m.Render(), want) {
+			t.Errorf("cap %d, %d in motion: filled cells are not painted as expected", c.limit, c.n)
+		}
+	}
+	m = factoryModel(false, 140, 40, factoryRepo{name: "r", path: "/r", st: blocked})
+	if want := m.th.on(m.th.Bg).t("▲", m.th.Orange); !strings.Contains(m.Render(), want) {
+		t.Error("the blocked cell is orange")
+	}
+	nm := factoryModel(true, 60, 20, factoryRepo{name: "mid-size-nam", path: "/r/mid", st: fstatus(17, manyTasks(4)...)})
+	if out := plain(nm); !strings.Contains(out, " mid-size-nam ") || strings.Contains(out, "●●●●○") {
+		t.Errorf("at 60 columns a long meter gives way to a bar and the name stays whole:\n%s", out)
 	}
 }
 
 func TestFactoryTableColumnsAndPhaseLabels(t *testing.T) {
 	out := plain(factoryModel(true, 140, 40, alpha()))
 	for _, want := range []string{"SLUG", "PHASE", "ELAPSED", "PR", "BASE", "FLAGS", "in motion", "waiting for review", "merged, not cleaned",
-		"#42", "#40 closed", "#31", "↳ login-flow", "[overtime]", "[stale]", "4m12s", "2h15m", "1h30m", "origin/main"} {
-		if want == "origin/main" {
-			continue // the prefix is dropped
-		}
+		"#42", "#40 closed", "#31", "↳ login-flow", "[overtime]", "[stale]", "4m12s", "2h15m", "1h30m",
+		"blocked, needs you", "settled, not cleaned", "▲ blocked", "example.com/design/doc", "release-notes.md"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("140 columns lack %q:\n%s", want, out)
 		}
+	}
+	if strings.Contains(out, "/r/alpha/docs") || strings.Contains(out, "https://example") {
+		t.Errorf("a deliverable shows a link without its scheme and a file as its base name:\n%s", out)
 	}
 	if strings.Contains(out, "origin/") {
 		t.Errorf("the origin/ prefix of a base is dropped:\n%s", out)
 	}
 	short := plain(factoryModel(true, 80, 24, alpha()))
-	if strings.Contains(short, "waiting for review") || !strings.Contains(short, "◆ review ") || !strings.Contains(short, "⠋ motion") || !strings.Contains(short, "Factory  3 motion · 2 review · 1 merged") {
+	if strings.Contains(short, "waiting for review") || !strings.Contains(short, "◆ review ") || !strings.Contains(short, "⠋ motion") || !strings.Contains(short, "Factory  5 motion (1 blocked) · 1 review · 1 merged · 1 settled") || !strings.Contains(short, "▲ blocked ") || strings.Contains(short, "blocked, needs you") {
 		t.Errorf("below 100 columns the labels are short:\n%s", short)
 	}
 	narrow := plain(factoryModel(true, 60, 20, alpha()))
@@ -207,12 +239,12 @@ func TestFactoryColumnsAlign(t *testing.T) {
 func TestFactoryRowOrder(t *testing.T) {
 	late, early, mid := ftask("zz", "motion"), ftask("aa", "motion"), ftask("mm", "motion")
 	late.Overtime = true
-	rows := sortedTasks([]data.FactoryTask{ftask("merged-one", "merged"), ftask("q", "zeta"), early, ftask("r", "review"), late, mid, ftask("p", "alpha")})
+	rows := sortedTasks([]data.FactoryTask{ftask("done", "settled"), ftask("merged-one", "merged"), ftask("q", "zeta"), early, ftask("r", "review"), late, mid, ftask("p", "alpha"), ftask("b", "blocked")})
 	var got []string
 	for _, r := range rows {
 		got = append(got, r.Slug)
 	}
-	if want := "zz aa mm r merged-one p q"; strings.Join(got, " ") != want {
+	if want := "b zz aa mm r merged-one done p q"; strings.Join(got, " ") != want {
 		t.Fatalf("order %q, want %q", strings.Join(got, " "), want)
 	}
 }
@@ -230,6 +262,16 @@ func TestFactoryCells(t *testing.T) {
 	} {
 		if got != want {
 			t.Errorf("pr cell %q, want %q", got, want)
+		}
+	}
+	dl := func(url, deliverable string) string {
+		x := ftask("x", "settled")
+		x.PRURL, x.Deliverable = url, deliverable
+		return prText(x)
+	}
+	for _, c := range [][3]string{{"", "https://example.com/a/b", "example.com/a/b"}, {"", "/r/docs/notes.md", "notes.md"}, {u, "/r/docs/notes.md", "-"}, {"", "", "-"}} {
+		if got := dl(c[0], c[1]); got != c[2] {
+			t.Errorf("deliverable cell for %q and %q is %q, want %q", c[0], c[1], got, c[2])
 		}
 	}
 	if b, s := baseText("worktree-login-flow"); b != "↳ login-flow" || !s {
@@ -262,7 +304,7 @@ func TestFactoryEmptyAndFirstResult(t *testing.T) {
 func TestFactorySubheaderAndSettingsLine(t *testing.T) {
 	m := factoryModel(true, 140, 40, fakeFactoryRepos()...)
 	out := plain(m)
-	for _, want := range []string{"Factory  6 in motion · 2 waiting for review · 1 merged, not cleaned  · as of 11:00:00", "worktree cap  5  per repo", "⚠ not inside a git repository", "in motion ●●● 3/2"} {
+	for _, want := range []string{"Factory  8 in motion (1 blocked) · 1 waiting for review · 1 merged, not cleaned · 1 settled  · as of 11:00:00", "worktree cap  5  per repo", "⚠ not inside a git repository", "in motion ●●● 3/2"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("lacks %q:\n%s", want, out)
 		}
@@ -271,8 +313,8 @@ func TestFactorySubheaderAndSettingsLine(t *testing.T) {
 	if out := plain(m); !strings.Contains(out, "refreshing") || strings.Contains(out, "as of") {
 		t.Errorf("a refresh in flight shows refreshing:\n%s", out)
 	}
-	m.fac.capErr = "/h/settings.json is not a JSON object"
-	if out := plain(m); !strings.Contains(out, "worktree cap  /h/settings.json is not a JSON object") {
+	m.fac.capErr = "~/settings.json is not a JSON object"
+	if out := plain(m); !strings.Contains(out, "worktree cap  ~/settings.json is not a JSON object") {
 		t.Errorf("a broken settings file shows its error instead of a number:\n%s", out)
 	}
 	m.fac.capErr, m.fac.editing, m.fac.field = "", true, "12"
@@ -371,6 +413,17 @@ func TestFactoryViewKeys(t *testing.T) {
 	send(bare, "shift+tab", "shift+tab", "shift+tab")
 	if bare.view != viewDashboard {
 		t.Fatalf("shift+tab skips it too: %v", bare.view)
+	}
+}
+
+func TestHeaderKeepsTheActiveRangeChipAtSixtyColumns(t *testing.T) {
+	for _, view := range []viewID{viewDashboard, viewSession, viewAgents, viewFactory} {
+		m := fakeModel(true, 60, 20)
+		m.view = view
+		header := strings.Split(plain(m), "\n")[0]
+		if want := "[" + ranges[m.rangeIdx].label + "]"; !strings.Contains(header, want) || !strings.Contains(header, "4 Factory") {
+			t.Errorf("view %v: header lacks %s or the fourth tab: %q", view, want, header)
+		}
 	}
 }
 
@@ -477,8 +530,11 @@ func TestFactoryEnteringStartsOneRefresh(t *testing.T) {
 	if len(got) != 1 || !m.fac.busy || factoryCalls(t, dir) != 2 {
 		t.Fatalf("entering asks each repository with a worktrees directory once: %d results, busy=%v, %d calls", len(got), m.fac.busy, factoryCalls(t, dir))
 	}
-	if len(got[0].repos) != 2 || got[0].repos[0].name != "one" || got[0].repos[1].name != "two" && got[0].repos[1].name != "three" {
+	if len(got[0].repos) != 2 || got[0].repos[0].name != "one" || got[0].repos[1].name != "two" {
 		t.Fatalf("repositories: %+v", got[0].repos)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "calls")); strings.Contains(string(b), "/three") {
+		t.Fatalf("a repository without a worktrees directory must not be asked:\n%s", b)
 	}
 	if more := upd(m, press("1")); len(more) != 0 {
 		t.Fatal("leaving starts nothing")
@@ -704,18 +760,34 @@ func TestCapFieldSwallowsOtherKeys(t *testing.T) {
 }
 
 func TestCapFieldRefusesANonObjectFile(t *testing.T) {
-	m, path := capModel(t, `[1, 2]`)
-	send(m, "c")
-	if m.fac.editing || !m.toast.err || !strings.Contains(m.toast.text, path) {
-		t.Fatalf("a non-object file is reported by path and not opened: editing=%v toast=%+v", m.fac.editing, m.toast)
+	for content, kind := range map[string]string{`[1, 2]`: "not a JSON object", `{"a":`: "not valid JSON"} {
+		m, path := capModel(t, content)
+		send(m, "c")
+		if want := data.ShortPath(path) + " is " + kind; m.fac.editing || m.fac.capErr != want || !strings.Contains(plain(m), want) {
+			t.Fatalf("%s: reported by path and not opened: editing=%v capErr=%q", content, m.fac.editing, m.fac.capErr)
+		}
+		m.fac.editing, m.fac.field = true, "4"
+		send(m, "enter")
+		if !m.fac.editing || !strings.Contains(m.fac.fieldErr, data.ShortPath(path)) {
+			t.Fatalf("saving reports it too: %+v", m.fac)
+		}
+		if b, _ := os.ReadFile(path); string(b) != content {
+			t.Fatalf("the file was written: %q", b)
+		}
 	}
-	m.fac.editing, m.fac.field = true, "4"
-	send(m, "enter")
-	if !m.fac.editing || !strings.Contains(m.fac.fieldErr, path) {
-		t.Fatalf("saving reports it too: %+v", m.fac)
-	}
-	if b, _ := os.ReadFile(path); string(b) != `[1, 2]` {
-		t.Fatalf("the file was written: %q", b)
+}
+
+func TestCapFieldRepairsAnInvalidValue(t *testing.T) {
+	for _, bad := range []string{`0`, `"3"`, `true`} {
+		m, path := capModel(t, `{"lead_model": "x", "worktree_cap": `+bad+`}`)
+		send(m, "c")
+		if !m.fac.editing || m.fac.field != "5" {
+			t.Fatalf("worktree_cap %s: the field opens prefilled with 5: editing=%v field=%q", bad, m.fac.editing, m.fac.field)
+		}
+		send(m, "enter")
+		if got, err := data.ReadWorktreeCap(path); err != nil || got != 5 || m.fac.editing {
+			t.Fatalf("worktree_cap %s: saving repairs the file: %d, %v", bad, got, err)
+		}
 	}
 }
 
@@ -783,7 +855,7 @@ func TestSnapshotFactory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"[4 Factory]", "proj", "stacked", "cost-in-money", "in motion ●○○○○○○ 1/7", "worktree cap  7"} {
+	for _, want := range []string{"[4 Factory]", "proj", "stacked", "cost-in-money", "in motion ▲●○○○○○ 2/7", "write-up.md", "needs-an-answer", "worktree cap  7"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("snapshot lacks %q:\n%s", want, out)
 		}

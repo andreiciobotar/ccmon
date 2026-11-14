@@ -13,14 +13,15 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
 // factoryTimeout bounds one `factory status` call when Runner.Timeout is unset.
 const factoryTimeout = 30 * time.Second
 
-// defaultWorktreeCap is the factory's default (load_settings in factory/bin/factory).
-const defaultWorktreeCap = 5
+// DefaultWorktreeCap is the factory's default (load_settings in factory/bin/factory).
+const DefaultWorktreeCap = 5
 
 // FactoryTask is one row of `factory status --json`.
 type FactoryTask struct {
@@ -33,15 +34,19 @@ type FactoryTask struct {
 	PRState  string `json:"pr_state"`
 	PRURL    string `json:"pr_url"`
 	Session  string `json:"session"`
+
+	Deliverable string `json:"deliverable"` // a link or an absolute file path; empty when null
 }
 
 // FactoryStatus is what `factory status --json` prints for one repository.
 type FactoryStatus struct {
 	Rows     []FactoryTask `json:"rows"`
 	Cap      int           `json:"cap"`
-	InMotion int           `json:"in_motion"`
+	InMotion int           `json:"in_motion"` // tasks holding a slot, the blocked included
+	Blocked  int           `json:"blocked"`
 	InReview int           `json:"in_review"`
 	Merged   int           `json:"merged"`
+	Settled  int           `json:"settled"`
 }
 
 // FactoryStatus runs `factory status --json` in the repository at repoPath.
@@ -62,6 +67,8 @@ func (r *Runner) FactoryStatus(ctx context.Context, repoPath string) (*FactorySt
 	defer cancel()
 	cmd := exec.CommandContext(ctx, r.python(), script, "status", "--json")
 	cmd.Dir = repoPath
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 	cmd.WaitDelay = time.Second
 	var so, se bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &so, &se
@@ -93,8 +100,20 @@ func FactorySettingsPath() string {
 	return filepath.Join(home, ".claude", "factory", "settings.json")
 }
 
+// ErrWorktreeCap marks a settings file that is an object but whose worktree_cap the
+// factory would refuse.
+var ErrWorktreeCap = errors.New("worktree_cap is invalid")
+
+// ShortPath shows the home directory as ~.
+func ShortPath(path string) string {
+	if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(path, home+"/") {
+		return "~" + path[len(home):]
+	}
+	return path
+}
+
 // readSettings returns the file's keys with their values as written; a missing file is
-// no keys, and anything that is not a JSON object is an error naming the path.
+// no keys, and a file that is not JSON or not an object is an error naming the path.
 func readSettings(path string) (map[string]json.RawMessage, error) {
 	b, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -103,9 +122,12 @@ func readSettings(path string) (map[string]json.RawMessage, error) {
 	if err != nil {
 		return nil, err
 	}
+	if !json.Valid(b) {
+		return nil, fmt.Errorf("%s is not valid JSON", ShortPath(path))
+	}
 	var obj map[string]json.RawMessage
-	if err := json.Unmarshal(b, &obj); err != nil || obj == nil {
-		return nil, fmt.Errorf("%s is not a JSON object", path)
+	if json.Unmarshal(b, &obj); obj == nil {
+		return nil, fmt.Errorf("%s is not a JSON object", ShortPath(path))
 	}
 	return obj, nil
 }
@@ -118,22 +140,25 @@ func ReadWorktreeCap(path string) (int, error) {
 	}
 	raw, ok := obj["worktree_cap"]
 	if !ok {
-		return defaultWorktreeCap, nil
+		return DefaultWorktreeCap, nil
 	}
 	n, err := strconv.Atoi(string(raw))
 	if err != nil || n < 1 {
-		return 0, fmt.Errorf("%s: worktree_cap must be an integer of at least 1", path)
+		return 0, fmt.Errorf("%s: %w", ShortPath(path), ErrWorktreeCap)
 	}
 	return n, nil
 }
 
 // WriteWorktreeCap sets worktree_cap and leaves every other key's value as it was. The
-// file is replaced atomically, keeps its permission bits, and is never written when it
-// is not a JSON object.
+// file is replaced atomically (a symbolic link is followed, so the link stays), keeps its
+// permission bits, and is never written when it is not a JSON object.
 func WriteWorktreeCap(path string, n int) error {
 	obj, err := readSettings(path)
 	if err != nil {
 		return err
+	}
+	if p, err := filepath.EvalSymlinks(path); err == nil {
+		path = p
 	}
 	obj["worktree_cap"] = json.RawMessage(strconv.Itoa(n))
 	keys := make([]string, 0, len(obj))

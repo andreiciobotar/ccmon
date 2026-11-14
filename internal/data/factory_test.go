@@ -2,10 +2,13 @@ package data
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -40,7 +43,7 @@ func TestFactoryStatusDecodesNulls(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.Cap != 7 || st.InMotion != 1 || st.InReview != 1 || len(st.Rows) != 2 {
+	if st.Cap != 7 || st.InMotion != 2 || st.Blocked != 1 || st.InReview != 1 || st.Settled != 1 || len(st.Rows) != 4 {
 		t.Fatalf("status %+v", st)
 	}
 	if a := st.Rows[0]; a.Elapsed != nil || a.Slug != "cost-in-money" || a.PRState != "unknown" {
@@ -48,6 +51,9 @@ func TestFactoryStatusDecodesNulls(t *testing.T) {
 	}
 	if b := st.Rows[1]; b.Elapsed == nil || *b.Elapsed != 252 || !b.Overtime || !b.Stale || b.PRURL == "" {
 		t.Fatalf("row: %+v", b)
+	}
+	if c, d := st.Rows[2], st.Rows[3]; c.Phase != "blocked" || c.Deliverable != "" || d.Phase != "settled" || d.Deliverable != "/r/docs/specs/write-up.md" {
+		t.Fatalf("blocked and settled rows: %+v %+v", c, d)
 	}
 	log, _ := os.ReadFile(filepath.Join(dir, "calls"))
 	if !strings.HasPrefix(string(log), "factory ") || !strings.HasSuffix(strings.TrimSpace(string(log)), repo[strings.Index(repo, "TestFactory"):]) {
@@ -72,6 +78,29 @@ func TestFactoryStatusErrors(t *testing.T) {
 	missing := &Runner{Root: t.TempDir(), Python: r.Python}
 	if _, err := missing.FactoryStatus(context.Background(), t.TempDir()); err == nil || !strings.Contains(err.Error(), "factory command not found: "+filepath.Join(missing.Root, "factory", "bin", "factory")) {
 		t.Fatalf("missing script names its path: %v", err)
+	}
+}
+
+func TestFactoryStatusTimeoutKillsTheChildren(t *testing.T) {
+	r, dir := factoryStub(t)
+	os.WriteFile(filepath.Join(dir, "hang"), nil, 0o644)
+	if _, err := r.FactoryStatus(context.Background(), t.TempDir()); err == nil {
+		t.Fatal("a hung call must time out")
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "child"))
+	if err != nil {
+		t.Fatalf("the stub did not start a child: %v", err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; syscall.Kill(pid, 0) == nil; i++ {
+		if i == 100 {
+			syscall.Kill(pid, syscall.SIGKILL)
+			t.Fatalf("child %d survived the timeout", pid)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 
@@ -155,15 +184,21 @@ func TestReadWorktreeCap(t *testing.T) {
 	}
 	for _, content := range []string{`{"worktree_cap":0}`, `{"worktree_cap":-1}`, `{"worktree_cap":1.5}`, `{"worktree_cap":2.0}`, `{"worktree_cap":true}`, `{"worktree_cap":"3"}`, `{"worktree_cap":null}`} {
 		path := settings(t, content)
-		if _, err := ReadWorktreeCap(path); err == nil || !strings.Contains(err.Error(), "worktree_cap") || !strings.Contains(err.Error(), path) {
-			t.Errorf("%q: want an error naming the key and the file, got %v", content, err)
+		if _, err := ReadWorktreeCap(path); !errors.Is(err, ErrWorktreeCap) || !strings.Contains(err.Error(), path) {
+			t.Errorf("%q: want an invalid-value error naming the file, got %v", content, err)
 		}
 	}
-	for _, content := range []string{`[1]`, `5`, `null`, `not json`, `{"a":`} {
+	for content, kind := range map[string]string{`[1]`: "not a JSON object", `5`: "not a JSON object", `null`: "not a JSON object", `not json`: "not valid JSON", `{"a":`: "not valid JSON"} {
 		path := settings(t, content)
-		if _, err := ReadWorktreeCap(path); err == nil || !strings.Contains(err.Error(), path) {
-			t.Errorf("%q: want an error naming the file, got %v", content, err)
+		if _, err := ReadWorktreeCap(path); err == nil || errors.Is(err, ErrWorktreeCap) || !strings.Contains(err.Error(), path+" is "+kind) {
+			t.Errorf("%q: want %q naming the file, got %v", content, kind, err)
 		}
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	os.WriteFile(filepath.Join(home, "s.json"), []byte("[]"), 0o644)
+	if _, err := ReadWorktreeCap(filepath.Join(home, "s.json")); err == nil || err.Error() != "~/s.json is not a JSON object" {
+		t.Errorf("the home directory is shown as ~: %v", err)
 	}
 }
 
@@ -217,5 +252,29 @@ func TestWriteWorktreeCapRefusesANonObject(t *testing.T) {
 		if entries, _ := os.ReadDir(filepath.Dir(path)); len(entries) != 1 {
 			t.Fatalf("temporary file left: %v", entries)
 		}
+	}
+}
+
+func TestWriteWorktreeCapThroughASymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "real.json")
+	link := filepath.Join(dir, "settings.json")
+	if err := os.WriteFile(target, []byte(`{"lead_model": "x"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteWorktreeCap(link, 9); err != nil {
+		t.Fatal(err)
+	}
+	if st, err := os.Lstat(link); err != nil || st.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("the link must stay a link: %v %v", st, err)
+	}
+	if got, err := ReadWorktreeCap(target); err != nil || got != 9 {
+		t.Fatalf("the target holds the new value: %d, %v", got, err)
+	}
+	if st, _ := os.Stat(target); st.Mode().Perm() != 0o600 {
+		t.Fatalf("the target keeps its mode: %v", st.Mode().Perm())
 	}
 }

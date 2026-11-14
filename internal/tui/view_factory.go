@@ -4,7 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"image/color"
-	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -16,7 +16,9 @@ import (
 const (
 	meterCells = 20 // beyond this many slots the meter is a bar
 	baseMax    = 24
+	prMax      = 24
 	slugLeast  = 16
+	nameLeast  = 12 // cells the repository name keeps before the meter shrinks
 )
 
 // factoryBody is the factory view: the settings line, then one section per repository,
@@ -85,32 +87,50 @@ func (m *model) factorySubheader(p paint) string {
 	th := m.th
 	f := &m.fac
 	left := p.b("Factory", th.Text)
-	var motion, review, merged int
+	var motion, blocked, review, merged, settled int
 	reported := false
 	for _, r := range f.repos {
 		if r.st != nil {
-			motion, review, merged = motion+r.st.InMotion, review+r.st.InReview, merged+r.st.Merged
+			motion, blocked, review, merged, settled = motion+r.st.InMotion, blocked+r.st.Blocked, review+r.st.InReview, merged+r.st.Merged, settled+r.st.Settled
 			reported = true
 		}
 	}
-	if reported {
+	totals := func(long bool) string {
+		if !reported {
+			return ""
+		}
 		dot := p.t(" · ", th.Faint)
-		long := m.w >= 100
-		left += p.sp(2) + p.t(fmt.Sprintf("%d %s", motion, phaseLabel("motion", long)), th.Blue) + dot +
-			p.t(fmt.Sprintf("%d %s", review, phaseLabel("review", long)), th.Yellow) + dot +
+		out := p.sp(2) + p.t(fmt.Sprintf("%d %s", motion, phaseLabel("motion", long)), th.Blue)
+		if blocked > 0 {
+			out += p.b(fmt.Sprintf(" (%d blocked)", blocked), th.Orange)
+		}
+		out += dot + p.t(fmt.Sprintf("%d %s", review, phaseLabel("review", long)), th.Yellow) + dot +
 			p.t(fmt.Sprintf("%d %s", merged, phaseLabel("merged", long)), m.mergedColor())
+		if settled > 0 {
+			out += dot + p.t(fmt.Sprintf("%d settled", settled), th.Faint)
+		}
+		return out
 	}
 	lead := p.sp(2)
 	if reported {
 		lead = p.t("  · ", th.Faint)
 	}
-	switch {
-	case f.busy:
-		left += lead + p.t(spin(m.spinFrame())+" refreshing", th.Blue)
-	case !f.doneAt.IsZero():
-		left += lead + p.t("as of "+f.doneAt.Local().Format("15:04:05"), th.Faint)
+	tail := func(asOf string) string {
+		switch {
+		case f.busy:
+			return lead + p.t(spin(m.spinFrame())+" refreshing", th.Blue)
+		case !f.doneAt.IsZero():
+			return lead + p.t(asOf+f.doneAt.Local().Format("15:04:05"), th.Faint)
+		}
+		return ""
 	}
-	return left
+	if long := left + totals(true) + tail("as of "); m.w >= 100 && width(long) <= m.w-2 {
+		return long
+	}
+	if short := left + totals(false) + tail("as of "); width(short) <= m.w-2 {
+		return short
+	}
+	return left + totals(false) + tail("")
 }
 
 func (m *model) settingsLine(p paint, w int) string {
@@ -120,24 +140,20 @@ func (m *model) settingsLine(p paint, w int) string {
 	left := p.sp(1) + p.t("worktree cap  ", th.Muted)
 	switch {
 	case f.editing:
-		left += p.t("[ ", th.Purple) + p.b(f.field, th.Text) + p.t("█", th.Purple) + p.t(" ]", th.Purple) + p.t("  per repo", th.Muted) + p.sp(3)
+		left += p.t("[ ", th.Purple) + p.b(f.field, th.Text) + p.t("█", th.Purple) + p.t(" ]", th.Purple)
 		if f.fieldErr != "" {
-			left += p.t(f.fieldErr, th.Red)
+			left += p.sp(2) + p.t(f.fieldErr, th.Red)
 		} else {
-			left += key("enter", "save") + p.t(" · ", th.Faint) + key("esc", "cancel") + p.t(" · ", th.Faint) + key("↑↓", "adjust")
+			left += p.t("  per repo", th.Muted) + p.sp(3) + key("enter", "save") + p.t(" · ", th.Faint) + key("esc", "cancel") + p.t(" · ", th.Faint) + key("↑↓", "adjust")
 		}
 	case f.capErr != "":
-		left += p.t(f.capErr, th.Red)
+		left += p.t(f.capErr, th.Red) + p.sp(3) + key("c", "edit")
 	case f.cap == 0:
 		left += p.t("…", th.Faint) + p.t("  per repo", th.Muted)
 	default:
 		left += p.b(strconv.Itoa(f.cap), th.Text) + p.t("  per repo", th.Muted) + p.sp(3) + key("c", "edit")
 	}
-	path := data.FactorySettingsPath()
-	if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(path, home+"/") {
-		path = "~" + path[len(home):]
-	}
-	if right := p.t(path, th.Faint); width(left)+width(right)+3 <= w {
+	if right := p.t(data.ShortPath(data.FactorySettingsPath()), th.Faint); width(left)+width(right)+3 <= w {
 		left += p.sp(w-width(left)-width(right)-1) + right
 	}
 	return fit(left, w, p)
@@ -155,15 +171,20 @@ func (m *model) repoHeader(p paint, r factoryRepo, w int) string {
 			}
 			return p.t(label+" ", th.Faint) + p.b(strconv.Itoa(n), c)
 		}
-		right = m.meter(p, st) + p.sp(3) + count("review", st.InReview, th.Yellow) + p.sp(3) + count("merged", st.Merged, m.mergedColor())
+		counts := p.sp(3) + count("review", st.InReview, th.Yellow) + p.sp(3) + count("merged", st.Merged, m.mergedColor())
+		if st.Settled > 0 {
+			counts += p.sp(3) + count("settled", st.Settled, th.Muted)
+		}
+		right = m.meter(p, st, w-3-(1+min(nameLeast, width(r.name)))-width(counts)) + counts
 	}
 	left := trunc(p.sp(1)+p.b(r.name, th.Text), max(1, w-width(right)-3))
 	return fit(left+p.sp(max(1, w-width(left)-width(right)-1))+right, w, p)
 }
 
 // meter shows tasks in motion against the cap: one cell per slot, a bar when there are
-// too many to count. Green below the cap, yellow at it, red above it.
-func (m *model) meter(p paint, st *data.FactoryStatus) string {
+// too many to count or no room for them within budget cells. Green below the cap, yellow
+// at it, red above it; the cells of blocked tasks keep the blocked phase's look.
+func (m *model) meter(p paint, st *data.FactoryStatus, budget int) string {
 	th := m.th
 	n, limit := st.InMotion, st.Cap
 	col := th.Green
@@ -175,20 +196,23 @@ func (m *model) meter(p paint, st *data.FactoryStatus) string {
 	case n == 0:
 		col = th.Muted
 	}
+	label := fmt.Sprintf("%d/%d", n, limit)
+	room := min(meterCells, budget-len("in motion ")-1-len(label))
 	var cells string
-	if max(n, limit) > meterCells {
-		cells = p.bar(meterCells, float64(n)/float64(max(1, limit)), col, false)
+	if max(n, limit) > room {
+		cells = p.bar(max(4, room), float64(n)/float64(max(1, limit)), col, false)
 	} else {
-		cells = p.t(strings.Repeat("●", n), col) + p.t(strings.Repeat("○", max(0, limit-n)), th.Faint)
+		blocked := min(st.Blocked, n)
+		cells = p.t(strings.Repeat("▲", blocked), th.Orange) + p.t(strings.Repeat("●", n-blocked), col) + p.t(strings.Repeat("○", max(0, limit-n)), th.Faint)
 	}
-	return p.t("in motion ", th.Faint) + cells + p.sp(1) + p.b(fmt.Sprintf("%d/%d", n, limit), col)
+	return p.t("in motion ", th.Faint) + cells + p.sp(1) + p.b(label, col)
 }
 
 func (m *model) mergedColor() color.Color { return mix(m.th.Green, m.th.Muted, 0.45) }
 
 // ---- tasks ------------------------------------------------------------------------
 
-var knownPhases = []string{"motion", "review", "merged"}
+var knownPhases = []string{"blocked", "motion", "review", "merged", "settled"}
 
 // sortedTasks orders by phase (the known ones first, the rest by name), overtime first, then slug.
 func sortedTasks(rows []data.FactoryTask) []data.FactoryTask {
@@ -224,6 +248,10 @@ func phaseLabel(phase string, long bool) string {
 			return "waiting for review"
 		case "merged":
 			return "merged, not cleaned"
+		case "blocked":
+			return "blocked, needs you"
+		case "settled":
+			return "settled, not cleaned"
 		}
 	}
 	return phase
@@ -245,11 +273,21 @@ func (m *model) phaseLook(t data.FactoryTask, long bool) (glyph, label string, c
 		return "◆", label, th.Yellow
 	case "merged":
 		return "✓", label, m.mergedColor()
+	case "blocked":
+		return "▲", label, th.Orange
+	case "settled":
+		return "·", label, th.Faint
 	}
 	return "·", label, th.Muted
 }
 
 func prText(t data.FactoryTask) string {
+	if t.PRURL == "" && t.Deliverable != "" {
+		if _, link, ok := strings.Cut(t.Deliverable, "://"); ok {
+			return link
+		}
+		return filepath.Base(t.Deliverable)
+	}
 	switch t.PRState {
 	case "none":
 		return "-"
@@ -298,7 +336,7 @@ func (m *model) factoryCols(p paint, w int, tasks []data.FactoryTask) factoryCol
 		base, _ := baseText(t.Base)
 		c.slug = max(c.slug, width(t.Slug))
 		c.phase = max(c.phase, 2+width(label))
-		c.pr = max(c.pr, width(prText(t)))
+		c.pr = max(c.pr, min(width(prText(t)), prMax))
 		c.base = max(c.base, min(width(base), baseMax))
 		c.flags = max(c.flags, width(flagPills(p, t)))
 	}
@@ -361,9 +399,13 @@ func (m *model) taskRow(p paint, c factoryCols, t data.FactoryTask) string {
 	if stacked {
 		baseCol = th.Purple
 	}
+	phase := p.t
+	if t.Phase == "blocked" {
+		phase = p.b
+	}
 	return c.join(p,
 		p.t(cell(t.Slug, c.slug, false), th.Text),
-		fit(p.t(glyph+" ", col)+p.t(label, col), c.phase, p),
+		fit(phase(glyph+" ", col)+phase(label, col), c.phase, p),
 		p.t(cell(elapsed, c.elapsed, true), th.Muted),
 		p.t(cell(pr, c.pr, false), prCol),
 		p.t(cell(base, c.base, false), baseCol),

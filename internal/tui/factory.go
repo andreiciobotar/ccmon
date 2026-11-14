@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -157,8 +158,11 @@ func (m *model) factoryWorking() bool {
 
 func (m *model) openCap() {
 	n, err := data.ReadWorktreeCap(data.FactorySettingsPath())
-	if err != nil {
-		m.setToast(err.Error(), true)
+	switch {
+	case errors.Is(err, data.ErrWorktreeCap):
+		n = data.DefaultWorktreeCap
+	case err != nil:
+		m.fac.capErr = err.Error()
 		return
 	}
 	m.fac.editing, m.fac.field, m.fac.fieldErr = true, strconv.Itoa(n), ""
