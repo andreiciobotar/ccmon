@@ -2,6 +2,7 @@ package data
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -99,6 +100,39 @@ func TestAgentsFixture(t *testing.T) {
 	}
 	if _, ok := a.ByModel["claude-haiku-5-5"]; !ok {
 		t.Fatal("missing haiku model")
+	}
+}
+
+func TestDecodeCost(t *testing.T) {
+	var res SessionsResult
+	doc := `{"sessions":[{"id":"s","by_model":{"m":{"total":9,"cost":1.5,"unpriced":0},"x":{"total":4,"cost":0,"unpriced":4}},
+		"tokens":{"total":13},"cost":{"total":1.5,"main":1,"subagents":0.5,"main_pct":66.7,"subagent_pct":33.3,"unpriced_tokens":4,"unpriced_models":["x"]}}],
+		"prices":{"currency":"USD","as_of":"2026-11-14","source":"https://example.test","path":"/p/prices.toml"}}`
+	if err := json.Unmarshal([]byte(doc), &res); err != nil {
+		t.Fatal(err)
+	}
+	s := res.Sessions[0]
+	if s.Cost.Total != 1.5 || s.Cost.SubagentPct != 33.3 || s.Cost.UnpricedTokens != 4 || len(s.Cost.UnpricedModels) != 1 || s.Cost.UnpricedModels[0] != "x" {
+		t.Fatalf("cost block %+v", s.Cost)
+	}
+	if u := s.ByModel["x"]; u.Cost != 0 || u.Unpriced != 4 {
+		t.Fatalf("unpriced usage %+v", u)
+	}
+	if res.Prices.Currency != "USD" || res.Prices.AsOf != "2026-11-14" || res.Prices.Path != "/p/prices.toml" {
+		t.Fatalf("prices %+v", res.Prices)
+	}
+	var sum Usage
+	sum.Add(s.ByModel["m"])
+	sum.Add(s.ByModel["x"])
+	if sum.Cost != 1.5 || sum.Unpriced != 4 {
+		t.Fatalf("Add drops cost: %+v", sum)
+	}
+	var ag Agents
+	if err := json.Unmarshal([]byte(`{"agents":[{"agent":"coder","cost_p50":0.25,"cost_p90":1.5}],"prices":{"currency":"EUR"}}`), &ag); err != nil {
+		t.Fatal(err)
+	}
+	if *ag.Agents[0].CostP50 != 0.25 || *ag.Agents[0].CostP90 != 1.5 || ag.Prices.Currency != "EUR" {
+		t.Fatalf("agents %+v", ag)
 	}
 }
 

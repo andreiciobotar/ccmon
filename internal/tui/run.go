@@ -56,6 +56,7 @@ func Snapshot(so SnapshotOptions) (string, error) {
 		return "", err
 	}
 	m.seen = seen
+	m.prices = res.Prices
 	for i := range res.Sessions {
 		s := &res.Sessions[i]
 		s.LastChange = seen[s.ID]

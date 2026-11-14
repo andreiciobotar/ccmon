@@ -226,6 +226,10 @@ def usage_by_model(session):
     return out
 
 
+def _round(x):
+    return None if x is None else round(x, 6)
+
+
 def _pct(n, d):
     return round(100.0 * n / d, 1) if d else 0.0
 
@@ -257,6 +261,10 @@ def dispatch_dict(d):
     }
 
 
+def unpriced_models(by_model):
+    return sorted(m for m, u in by_model.items() if u.unpriced)
+
+
 def totals(sessions):
     """The numbers a session, a task and a repository share, computed once for a list of sessions."""
     by_agent, by_model = {}, {}
@@ -268,6 +276,9 @@ def totals(sessions):
     main_total = by_agent["main"].total
     sub_total = sum(u.total for k, u in by_agent.items() if k != "main")
     total = main_total + sub_total
+    main_cost = by_agent["main"].cost
+    sub_cost = sum(u.cost for k, u in by_agent.items() if k != "main")
+    cost = main_cost + sub_cost
     cands = sum(s.recheck_candidates for s in sessions)
     rechecked = sum(s.rechecked for s in sessions)
     starts = [s.first_ts for s in sessions if s.first_ts]
@@ -277,6 +288,10 @@ def totals(sessions):
         "end": max(ends).isoformat() if ends else None,
         "tokens": {"total": total, "main": main_total, "subagents": sub_total,
                    "main_pct": _pct(main_total, total), "subagent_pct": _pct(sub_total, total)},
+        "cost": {"total": round(cost, 6), "main": round(main_cost, 6), "subagents": round(sub_cost, 6),
+                 "main_pct": _pct(main_cost, cost), "subagent_pct": _pct(sub_cost, cost),
+                 "unpriced_tokens": sum(u.unpriced for u in by_model.values()),
+                 "unpriced_models": unpriced_models(by_model)},
         "by_model": {m: u.to_dict() for m, u in sorted(by_model.items())},
         "by_agent": {a: u.to_dict() for a, u in sorted(by_agent.items())},
         "dispatch_count": sum(len(s.dispatches) for s in sessions),
@@ -351,6 +366,7 @@ def aggregate_agents(sessions):
     for name, g in sorted(groups.items(), key=lambda kv: (kv[0] != "main", kv[0])):
         ds = g["dispatches"]
         toks = [d.usage.total for d in ds if d.status != "no-run"]
+        costs = [d.usage.cost for d in ds if d.status != "no-run"]
         durs = [d.duration_ms for d in ds if d.duration_ms is not None]
         rows.append({
             "agent": name,
@@ -359,6 +375,7 @@ def aggregate_agents(sessions):
             "usage": g["usage"].to_dict(),
             "usage_by_model": {m: u.to_dict() for m, u in sorted(g["models"].items())},
             "tokens_p50": percentile(toks, 50), "tokens_p90": percentile(toks, 90),
+            "cost_p50": _round(percentile(costs, 50)), "cost_p90": _round(percentile(costs, 90)),
             "duration_ms_p50": percentile(durs, 50), "duration_ms_p90": percentile(durs, 90),
             "repeats": sum(1 for d in ds if "repeat" in d.flags),
             "review_loops": sum(d.review_loops_dispatch + d.review_loops_resume for d in ds),
@@ -366,5 +383,6 @@ def aggregate_agents(sessions):
         })
     return {"agents": rows,
             "by_model": {m: u.to_dict() for m, u in sorted(models_total.items())},
+            "unpriced_models": unpriced_models(models_total),
             "sessions": len(sessions),
             "malformed": sum(s.malformed for s in sessions)}

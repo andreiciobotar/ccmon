@@ -22,25 +22,29 @@ class SessionError(Exception):
 
 
 class Usage:
-    __slots__ = TOKEN_CLASSES
+    __slots__ = TOKEN_CLASSES + ("cost", "unpriced")
 
-    def __init__(self, input=0, output=0, cache_write=0, cache_read=0):
+    def __init__(self, input=0, output=0, cache_write=0, cache_read=0, cost=0.0, unpriced=0):
         self.input = input
         self.output = output
         self.cache_write = cache_write
         self.cache_read = cache_read
+        self.cost = cost  # money of messages whose model has a price
+        self.unpriced = unpriced  # tokens of messages whose model has none
 
     @property
     def total(self):
         return self.input + self.output + self.cache_write + self.cache_read
 
     def add(self, other):
-        for k in TOKEN_CLASSES:
+        for k in TOKEN_CLASSES + ("cost", "unpriced"):
             setattr(self, k, getattr(self, k) + getattr(other, k))
 
     def to_dict(self):
         d = {k: getattr(self, k) for k in TOKEN_CLASSES}
         d["total"] = self.total
+        d["cost"] = round(self.cost, 6)
+        d["unpriced"] = self.unpriced
         return d
 
 
@@ -50,10 +54,17 @@ def _int(v):
     return int(v)
 
 
-def usage_from(raw):
+def usage_from(raw, model=None, prices=None):
     if not isinstance(raw, dict):
         return Usage()
-    return Usage(**{k: _int(raw.get(src)) for k, src in _USAGE_KEYS.items()})
+    u = Usage(**{k: _int(raw.get(src)) for k, src in _USAGE_KEYS.items()})
+    if prices is not None:
+        c = prices.cost(model, raw)
+        if c is None:
+            u.unpriced = u.total
+        else:
+            u.cost = c
+    return u
 
 
 def parse_ts(s):
@@ -249,7 +260,7 @@ def iter_objects(path):
                 yield None
 
 
-def _scan(path, seen, depth, agent_id):
+def _scan(path, seen, depth, agent_id, prices):
     sc = _Scan()
     pending = {}  # message id -> [ts, [texts], end_turn]
     order = []
@@ -299,7 +310,7 @@ def _scan(path, seen, depth, agent_id):
                 if not (isinstance(key, str) and key in seen):
                     if isinstance(key, str):
                         seen.add(key)
-                    add_usage(sc.usage, model, usage_from(msg.get("usage")))
+                    add_usage(sc.usage, model, usage_from(msg.get("usage"), model, prices))
             texts = []
             if isinstance(content, list):
                 for b in content:
@@ -393,14 +404,14 @@ def _read_meta(path):
     return d if isinstance(d, dict) else {}
 
 
-def load_session(path):
+def load_session(path, prices):
     s = Session(path)
     try:
         s.mtime = os.path.getmtime(path)
     except OSError:
         pass
     seen = set()
-    main = _scan(path, seen, 1, None)
+    main = _scan(path, seen, 1, None, prices)
     s.cwd = main.cwd
     s.malformed = main.malformed
     s.main_usage_by_model = main.usage
@@ -413,7 +424,7 @@ def load_session(path):
         meta = _read_meta(ap[:-len(".jsonl")] + ".meta.json")
         sd = meta.get("spawnDepth")
         sd = sd if isinstance(sd, int) and not isinstance(sd, bool) else 1
-        sc = _scan(ap, seen, sd + 1, aid)
+        sc = _scan(ap, seen, sd + 1, aid, prices)
         s.malformed += sc.malformed
         scans.append(sc)
         agent_files.append((aid, meta, sc))

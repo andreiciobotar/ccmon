@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -26,12 +27,12 @@ type sortMode int
 
 const (
 	sortRecent sortMode = iota
-	sortTokens
+	sortCost
 	sortShare
 )
 
 func (s sortMode) String() string {
-	return [...]string{"recent", "tokens", "subagent share"}[s]
+	return [...]string{"recent", "cost", "subagent share"}[s]
 }
 
 type rangeOpt struct{ label, since string }
@@ -90,6 +91,7 @@ type model struct {
 	sessions map[string]*data.Session // list entries: summaries, no dispatches
 	details  map[string]*data.Session // per-session results with dispatches
 	agents   *data.Agents
+	prices   data.Prices
 
 	selID      string
 	top        int // first visible session row
@@ -338,8 +340,8 @@ type treeRow struct {
 
 // rankKey is what a sort mode compares: a session or the sum of a group.
 type rankKey struct {
-	tokens, sub int64
-	act         time.Time
+	cost, sub float64
+	act       time.Time
 }
 
 type unit struct {
@@ -351,8 +353,8 @@ type unit struct {
 func (m *model) unit(group []*data.Session, name, tie string) unit {
 	u := unit{group: group, name: name, tie: tie}
 	for _, s := range group {
-		u.key.tokens += s.Tokens.Total
-		u.key.sub += s.Tokens.Subagents
+		u.key.cost += s.Cost.Total
+		u.key.sub += s.Cost.Subagents
 		if a := m.activity(s); a.After(u.key.act) {
 			u.key.act = a
 		}
@@ -363,17 +365,17 @@ func (m *model) unit(group []*data.Session, name, tie string) unit {
 // sortUnits orders units by the sort mode, then latest activity, then name.
 func (m *model) sortUnits(us []unit) {
 	share := func(k rankKey) float64 {
-		if k.tokens == 0 {
+		if k.cost == 0 {
 			return 0
 		}
-		return float64(k.sub) / float64(k.tokens)
+		return k.sub / k.cost
 	}
 	sort.Slice(us, func(i, j int) bool {
 		a, b := us[i], us[j]
 		switch m.sortBy {
-		case sortTokens:
-			if a.key.tokens != b.key.tokens {
-				return a.key.tokens > b.key.tokens
+		case sortCost:
+			if a.key.cost != b.key.cost {
+				return a.key.cost > b.key.cost
 			}
 		case sortShare:
 			if sa, sb := share(a.key), share(b.key); sa != sb {
@@ -546,7 +548,10 @@ func (m *model) normalizeSelection() {
 }
 
 type totals struct {
-	tokens, main, sub                 int64
+	tokens                            int64
+	cost, mainCost, subCost           float64
+	unpriced                          int64
+	unpricedModels                    []string
 	dispatches, repeats, loops, warns int
 	rechecked, candidates, malformed  int
 	byAgent                           map[string]data.Usage
@@ -559,8 +564,15 @@ func sumTotals(ss []*data.Session) totals {
 	t := totals{byAgent: map[string]data.Usage{}, byModel: map[string]data.Usage{}}
 	for _, s := range ss {
 		t.tokens += s.Tokens.Total
-		t.main += s.Tokens.Main
-		t.sub += s.Tokens.Subagents
+		t.cost += s.Cost.Total
+		t.mainCost += s.Cost.Main
+		t.subCost += s.Cost.Subagents
+		t.unpriced += s.Cost.UnpricedTokens
+		for _, id := range s.Cost.UnpricedModels {
+			if !slices.Contains(t.unpricedModels, id) {
+				t.unpricedModels = append(t.unpricedModels, id)
+			}
+		}
 		t.dispatches += s.DispatchCount
 		t.repeats += s.Repeats
 		t.loops += s.ReviewLoops
@@ -579,6 +591,7 @@ func sumTotals(ss []*data.Session) totals {
 			t.byModel[k] = v
 		}
 	}
+	slices.Sort(t.unpricedModels)
 	return t
 }
 
@@ -598,8 +611,8 @@ func (m *model) retarget(jump bool) {
 	set("loops", float64(t.loops))
 	set("warns", float64(t.warns))
 	share := 0.0
-	if t.tokens > 0 {
-		share = 1000 * float64(t.sub) / float64(t.tokens)
+	if t.cost > 0 {
+		share = 1000 * t.subCost / t.cost
 	}
 	set("share", share)
 	rc := -1.0
@@ -796,6 +809,7 @@ func (m *model) mergeLoad(msg sessionsMsg) {
 		}
 	}
 	m.sessions = next
+	m.prices = msg.res.Prices
 	m.pruneCaches()
 }
 
