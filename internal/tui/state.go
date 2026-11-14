@@ -315,13 +315,23 @@ func (m *model) liveCount() int {
 	return n
 }
 
+type rowKind int
+
+const (
+	kindRepo rowKind = iota
+	kindTask
+	kindSession
+)
+
 // treeRow is one display row of the sessions table: a repository, a task or a session.
+// A group of exactly one session is merged into that session's row: s is set, the kind stays the group's.
 type treeRow struct {
-	s     *data.Session   // set on session rows only: only these can be selected
-	name  string          // repository, task or 8-character session id
-	depth int             // indent in steps of two cells
-	task  bool            // a task row (else a repository row when s is nil)
-	group []*data.Session // what the row totals; a session row holds just itself
+	kind   rowKind
+	s      *data.Session   // set on session rows and merged rows only: only these can be selected
+	name   string          // repository, task or 8-character session id
+	suffix string          // faint, after the name: ×N sessions of a group, the id of a merged row
+	depth  int             // indent in steps of two cells
+	group  []*data.Session // what the row totals; a session row holds just itself
 }
 
 // rankKey is what a sort mode compares: a session or the sum of a group.
@@ -424,9 +434,13 @@ func (m *model) rows() []treeRow {
 	var out []treeRow
 	for _, ru := range repos {
 		r := byRepo[[2]string{ru.tie, ru.name}]
-		out = append(out, treeRow{name: r.name, group: ru.group})
+		if len(r.all) == 1 && len(r.bare) == 1 {
+			out = append(out, treeRow{kind: kindRepo, s: r.all[0], name: r.name, suffix: short8(r.all[0].ID), group: ru.group})
+			continue
+		}
+		out = append(out, treeRow{kind: kindRepo, name: r.name, suffix: fmt.Sprintf("×%d", len(ru.group)), group: ru.group})
 		for _, u := range m.sessionUnits(r.bare) {
-			out = append(out, treeRow{s: u.group[0], name: short8(u.name), depth: 1, group: u.group})
+			out = append(out, treeRow{kind: kindSession, s: u.group[0], name: short8(u.name), depth: 1, group: u.group})
 		}
 		var tasks []unit
 		for name, ss := range r.tasks {
@@ -434,9 +448,13 @@ func (m *model) rows() []treeRow {
 		}
 		m.sortUnits(tasks)
 		for _, tu := range tasks {
-			out = append(out, treeRow{name: tu.name, depth: 1, task: true, group: tu.group})
+			if len(tu.group) == 1 {
+				out = append(out, treeRow{kind: kindTask, s: tu.group[0], name: tu.name, suffix: short8(tu.group[0].ID), depth: 1, group: tu.group})
+				continue
+			}
+			out = append(out, treeRow{kind: kindTask, name: tu.name, suffix: fmt.Sprintf("×%d", len(tu.group)), depth: 1, group: tu.group})
 			for _, u := range m.sessionUnits(tu.group) {
-				out = append(out, treeRow{s: u.group[0], name: short8(u.name), depth: 2, group: u.group})
+				out = append(out, treeRow{kind: kindSession, s: u.group[0], name: short8(u.name), depth: 2, group: u.group})
 			}
 		}
 	}
@@ -457,12 +475,11 @@ func (m *model) visible() []*data.Session {
 // shownGroups counts the repositories and tasks in the visible table.
 func shownGroups(rows []treeRow) (repos, tasks int) {
 	for _, r := range rows {
-		switch {
-		case r.s != nil:
-		case r.task:
-			tasks++
-		default:
+		switch r.kind {
+		case kindRepo:
 			repos++
+		case kindTask:
+			tasks++
 		}
 	}
 	return

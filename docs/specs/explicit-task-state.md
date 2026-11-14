@@ -17,7 +17,7 @@ A task's declared state is the `state` of the last record with its `repo` and `s
 | Declared state | Written by | Meaning |
 |---|---|---|
 | `working` | `factory new` at start; the lead whenever it resumes | being built |
-| `blocked` | the lead before `QUESTION:`, `BLOCKED:`, `OVERTIME:`, `SPLIT:` | waiting on the human |
+| `blocked` | the lead before `QUESTION:`, `BLOCKED:`, `OVERTIME:` (not `SPLIT:`: the lead carries on with the part it keeps) | waiting on the human |
 | `handed-over` | the lead before `DONE:`, and again before it reports after any later turn (comments addressed, a rebase pushed) | the deliverable is with the human |
 | `acknowledged`, `dismissed` | the dispatcher, on the human's word | the human accepted, or dropped, handed-over work |
 

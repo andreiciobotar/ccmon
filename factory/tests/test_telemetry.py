@@ -293,6 +293,37 @@ class FilingTests(StoreCase):
         self.assertEqual([(d["id"], d["status"]) for d in data], [(b, "open")])
         self.assertEqual(json.loads(self.feedback("--json", "--status", "rejected")[1]), [])
 
+    def decide(self, text):
+        return self.run_main(["feedback", "decide", text], env={"CLAUDE_PROJECT_DIR": TASK})
+
+    def test_decide_files_one_line_and_refiling_is_one_entry(self):
+        code, out, err = self.decide("  rows keep the full name.\n Why: it says which definition ran. ")
+        self.assertEqual((code, err), (0, ""))
+        self.decide("rows keep the full name. Why: it says which definition ran.")
+        (entry,) = factory.read_feedback()
+        self.assertEqual((entry["id"], entry["role"], entry["slug"], entry["kind"], entry["status"], entry["text"]),
+                         (out.strip(), "lead", "my-task", "decision", "open",
+                          "DECISION: rows keep the full name. Why: it says which definition ran."))
+
+    def test_decide_refuses_empty_and_over_long(self):
+        self.assertEqual(self.decide("x" * 200)[0], 0)
+        for text in ("", " \n ", "x" * 201):
+            code, out, err = self.decide(text)
+            self.assertEqual((code, out, len(err.splitlines())), (2, "", 1))
+        self.assertEqual(len(self.lines("feedback")), 1)
+
+    def test_kind_filter_and_json(self):
+        issue, old = self.file("- the brief omitted the base\n- DECISION: filed before decide existed. Why: x")
+        new = self.decide("b. Why: c")[1].strip()
+        self.feedback("set", new, "accepted")
+        kinds = {e["id"]: e["kind"] for e in json.loads(self.feedback("--json")[1])}
+        self.assertEqual(kinds, {issue: "issue", old: "decision", new: "decision"})
+        self.assertEqual([line.split()[0] for line in self.feedback("--kind", "issue")[1].splitlines()], [issue])
+        self.assertEqual([line.split()[0] for line in self.feedback("--kind", "decision")[1].splitlines()], [old, new])
+        data = json.loads(self.feedback("--json", "--kind", "decision", "--status", "open")[1])
+        self.assertEqual([d["id"] for d in data], [old])
+        self.assertNotIn("kind", self.lines("feedback")[0])
+
     def test_unreadable_lines_are_skipped(self):
         a, = self.file("- alpha")
         with open(self.store / "feedback.jsonl", "a") as f:

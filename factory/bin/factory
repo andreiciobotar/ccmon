@@ -25,6 +25,8 @@ STATES = ("working", "blocked", "handed-over", "acknowledged", "dismissed")
 SETTLED = ("acknowledged", "dismissed")
 KINDS = ("QUESTION", "BLOCKED", "OVERTIME", "SPLIT", "DONE")
 STATUSES = ("open", "accepted", "rejected", "done")
+DECISION = "DECISION:"
+DECISION_MAX = 200
 CAUGHT_BY = ("tests", "reviewer", "lead", "ci", "human")
 RETRO_LISTS = ("slowed", "rules_missing", "rules_dead_weight", "brief_questions")
 COPIED = {"SessionStart": ("source",), "SessionEnd": ("reason",), "SubagentStart": ("agent_id",),
@@ -379,6 +381,7 @@ def read_feedback():
     for fid, entry in entries.items():
         change = changes.get(fid, {})
         entry["status"] = change.get("status", "open")
+        entry["kind"] = "decision" if entry["text"].startswith(DECISION) else "issue"
         entry.pop("pr", None)
         if "pr" in change:
             entry["pr"] = change["pr"]
@@ -749,13 +752,19 @@ def cmd_feedback(args):
         section = feedback_section(text)
         ids = file_feedback(text.splitlines() if section is None else section, tag)
         print(" ".join(ids) or "no items")
+    elif args.action == "decide":
+        text = " ".join(args.text.split())
+        if not 0 < len(text) <= DECISION_MAX:
+            raise Fail(f"feedback decide: one line of what and why, 1 to {DECISION_MAX} characters (got {len(text)})")
+        print(*file_feedback([f"{DECISION} {text}"], tags()))
     elif args.action == "set":
         found = [e["id"] for e in read_feedback() if e["id"].startswith(args.id)]
         if len(found) != 1:
             raise Fail(f"feedback: {'no entry' if not found else 'several entries'} matches {args.id!r}")
         append("feedback", {"id": found[0], "ts": now(), "status": args.status, **({"pr": args.pr} if args.pr else {})})
     else:
-        entries = [e for e in read_feedback() if not args.status or e["status"] == args.status]
+        entries = [e for e in read_feedback() if (not args.status or e["status"] == args.status)
+                   and (not args.kind or e["kind"] == args.kind)]
         if args.json:
             print(json.dumps(entries, indent=2))
         else:
@@ -786,10 +795,13 @@ def parse_args(argv):
     ack.add_argument("state", choices=SETTLED)
     sub.add_parser("hook", help="record one hook payload read from stdin (run by the plugin's hooks)")
     sub.add_parser("retro", help="store a lead retrospective (a JSON object on stdin)")
-    feedback = sub.add_parser("feedback", help="list or change the factory feedback outbox")
+    feedback = sub.add_parser("feedback", help="list or change the factory outbox: issues and decisions")
     feedback.add_argument("--json", action="store_true")
     feedback.add_argument("--status", choices=STATUSES)
+    feedback.add_argument("--kind", choices=("issue", "decision"))
     actions = feedback.add_subparsers(dest="action")
+    decide = actions.add_parser("decide", help="file one key decision: what and why, one line")
+    decide.add_argument("text")
     add = actions.add_parser("add", help="file feedback items read from stdin")
     add.add_argument("--role", required=True)
     add.add_argument("--slug")

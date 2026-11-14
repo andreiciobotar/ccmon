@@ -276,12 +276,13 @@ func TestGoldenSnapshots(t *testing.T) {
 	for _, fx := range []struct {
 		root, prefix string
 		views        []string
+		sizes        [][2]int
 	}{
-		{"projects", "", []string{"dashboard", "session", "agents", "help"}},
-		{"grouping", "grouping-", []string{"dashboard"}},
+		{"projects", "", []string{"dashboard", "session", "agents", "help"}, [][2]int{{140, 40}, {80, 24}}},
+		{"grouping", "grouping-", []string{"dashboard"}, [][2]int{{140, 40}, {100, 30}, {80, 24}}},
 	} {
 		projects := fixtureCopy(t, fx.root)
-		for _, sz := range [][2]int{{140, 40}, {80, 24}} {
+		for _, sz := range fx.sizes {
 			for _, view := range fx.views {
 				name := fmt.Sprintf("%s%s-%dx%d", fx.prefix, view, sz[0], sz[1])
 				t.Run(name, func(t *testing.T) {
@@ -400,8 +401,8 @@ func TestTimelineKeepsTheSelectedLane(t *testing.T) {
 }
 
 func TestAgentOrderIsFixed(t *testing.T) {
-	want := []string{"main", "coder", "reviewer", "explorer", "general-purpose", "Explore", "Plan", "fork", "alpha", "zed"}
-	got := []string{"zed", "fork", "Plan", "explorer", "alpha", "main", "Explore", "reviewer", "general-purpose", "coder"}
+	want := []string{"main", "coder", "factory:coder", "zz:coder", "reviewer", "factory:reviewer", "explorer", "general-purpose", "Explore", "Plan", "fork", "alpha", "vercel:beta", "zed"}
+	got := []string{"zz:coder", "zed", "factory:reviewer", "vercel:beta", "fork", "factory:coder", "Plan", "explorer", "alpha", "main", "Explore", "reviewer", "general-purpose", "coder"}
 	sort.Slice(got, func(i, j int) bool { return agentLess(got[i], got[j]) })
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("order %v", got)

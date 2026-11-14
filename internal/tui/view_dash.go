@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"image/color"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -28,11 +29,8 @@ func (m *model) dashLayout() dashLayout {
 	l.compactTiles = m.w < 112
 	avail := m.h - 3 - tileH - 1
 	l.tableW = m.w
-	if m.w >= 100 {
-		l.sideW = 32
-		if m.w >= 120 {
-			l.sideW = 38
-		}
+	if m.w >= 120 {
+		l.sideW = 38
 		l.tableW = m.w - l.sideW - 1
 	} else {
 		l.stripH = 2
@@ -333,33 +331,41 @@ func (m *model) emptyTable(p paint, w, h int, title string) block {
 
 type tableCols struct {
 	name, start, tok, split, dis int
-	sig                          int
-	showStart                    bool
+	showStart, sig, subPct, bad  bool
 }
 
+const (
+	sigW             = 3 + 1 + 4 + 1 + 4 + 1 + 4 // REP LOOP RCHK WARN
+	minName, maxName = 14, 30
+)
+
+// tableCols adds the optional columns in a fixed order as the width allows (signals, time, SUB%, BAD),
+// so a wider table never loses a column.
 func (m *model) tableCols(iw int) tableCols {
-	var c tableCols
-	c.tok, c.split, c.dis = 7, 8, 4
-	c.showStart = iw >= 60
-	c.start = 11
-	fixed := 2 + 1 + c.tok + 1 + c.split + 1 + c.dis // marker+dot, gaps
-	if c.showStart {
-		fixed += c.start + 1
-	}
-	rest := iw - fixed - 1
-	// the name column fits the longest indent+name over all rows (not the scroll window), 14..30 cells:
-	// room for a four-cell indent and an 8-character id
-	want := 14
+	c := tableCols{tok: 7, split: 8, dis: 4, start: 11}
+	avail := iw - (3 + 1 + c.tok + 1 + c.split + 1 + c.dis)
+	want, malformed := minName, false
 	for _, r := range m.rows() {
-		want = max(want, 2*r.depth+width(r.name))
+		want = max(want, 2*r.depth+width(r.name)+1+width(r.suffix))
+		malformed = malformed || r.s != nil && r.s.Malformed > 0
 	}
-	c.name = min(want, 30)
-	if sig := rest - c.name - 1; sig >= 10 {
-		c.sig = min(28, sig)
-		c.name = rest - c.sig - 1 // the name column takes what signals leave
-	} else {
-		c.name = max(rest, 14)
+	want = min(want, maxName)
+	add := func(on bool, w, keep int) bool {
+		if !on || avail-w < keep {
+			return false
+		}
+		avail -= w
+		return true
 	}
+	c.sig = add(true, sigW+1, 12) // an indented session id still fits at the smallest terminal
+	c.showStart = add(c.sig, c.start+1, minName)
+	c.subPct = add(c.showStart, 5, want)
+	c.bad = add(c.subPct && malformed, 4, want)
+	c.name = min(want, avail)
+	slack := avail - c.name
+	grow := min(slack, 8)
+	c.split += grow
+	c.name += min(slack-grow, maxName-c.name)
 	return c
 }
 
@@ -368,9 +374,16 @@ func (c tableCols) header(timeLabel string) string {
 	if c.showStart {
 		s += cell(timeLabel, c.start, false) + " "
 	}
-	s += cell("TOKENS", c.tok, true) + " " + cell("MAIN│SUB", c.split, false) + " " + cell("DISP", c.dis, true)
-	if c.sig > 0 {
-		s += " " + "SIGNALS"
+	s += cell("TOKENS", c.tok, true) + " " + cell("MAIN│SUB", c.split, false)
+	if c.subPct {
+		s += " " + cell("SUB%", 4, true)
+	}
+	s += " " + cell("DISP", c.dis, true)
+	if c.sig {
+		s += " " + cell("REP", 3, true) + " " + cell("LOOP", 4, true) + " " + cell("RCHK", 4, true) + " " + cell("WARN", 4, true)
+	}
+	if c.bad {
+		s += " " + cell("BAD", 3, true)
 	}
 	return s
 }
@@ -404,7 +417,8 @@ func (m *model) rowTime(group []*data.Session) time.Time {
 	return out
 }
 
-// treeLine renders one repository, task or session row. Only session rows select, flash and show a live dot.
+// treeLine renders one repository, task or session row. Only rows with a session select and flash;
+// a group row shows a live dot when any of its sessions is live.
 func (m *model) treeLine(r treeRow, selected bool, c tableCols, iw int, base paint) string {
 	th := m.th
 	bg := th.Surface
@@ -430,23 +444,31 @@ func (m *model) treeLine(r treeRow, selected bool, c tableCols, iw int, base pai
 	dot := q.sp(1)
 	if r.s != nil {
 		dot = q.t("·", th.Faint)
-		if m.isLive(r.s) {
-			dot = q.dot(th.Green, m.pulse())
-		}
 	}
-	label := cell(strings.Repeat("  ", r.depth)+r.name, c.name, false)
+	if slices.ContainsFunc(r.group, m.isLive) {
+		dot = q.dot(th.Green, m.pulse())
+	}
+	lead := strings.Repeat("  ", r.depth) + r.name
+	text := lead
+	if r.suffix != "" {
+		text += " " + r.suffix
+	}
+	text = cell(text, c.name, false)
+	n := min(width(lead), c.name)
+	head, tail := ansi.Truncate(text, n, ""), ansi.TruncateLeft(text, n, "")
 	var name string
 	switch {
-	case r.s != nil && selected:
-		name = q.b(label, th.Text)
-	case r.s != nil:
-		name = q.t(label, th.Faint)
-	case r.task:
-		name = q.t(label, th.Purple)
+	case r.kind == kindTask:
+		name = q.b(head, th.Purple)
+		if !selected {
+			name = q.t(head, th.Purple)
+		}
+	case r.kind == kindRepo || selected:
+		name = q.b(head, th.Text)
 	default:
-		name = q.b(label, th.Text)
+		name = q.t(head, th.Faint)
 	}
-	line := marker + dot + q.sp(1) + name + q.sp(1)
+	line := marker + dot + q.sp(1) + name + q.t(tail, th.Faint) + q.sp(1)
 	if c.showStart {
 		st := "-"
 		if t := m.rowTime(r.group); !t.IsZero() {
@@ -462,37 +484,50 @@ func (m *model) treeLine(r treeRow, selected bool, c tableCols, iw int, base pai
 		}
 	}
 	line += q.t(cell(Human(tok), c.tok, true), th.Text) + q.sp(1)
-	line += q.stack(c.split, []seg{{float64(t.main), th.Yellow}, {float64(t.sub), th.Purple}}) + q.sp(1)
-	line += q.t(cell(fmt.Sprintf("%d", t.dispatches), c.dis, true), th.Muted)
-	if c.sig > 0 {
-		line += q.sp(1) + m.signalPills(q, t, c.sig)
+	line += q.stack(c.split, []seg{{float64(t.main), th.Yellow}, {float64(t.sub), th.Purple}})
+	if c.subPct {
+		line += q.sp(1) + q.t(cell(share(t.sub, t.tokens), 4, true), th.Muted)
+	}
+	line += q.sp(1) + q.t(cell(fmt.Sprintf("%d", t.dispatches), c.dis, true), th.Muted)
+	if c.sig {
+		line += q.sp(1) + countCell(q, t.repeats, 3, th.Yellow, false) + q.sp(1) + countCell(q, t.loops, 4, th.Yellow, false)
+		line += q.sp(1) + recheckCell(q, t) + q.sp(1) + countCell(q, t.warns, 4, th.Red, true)
+	}
+	if c.bad {
+		line += q.sp(1) + countCell(q, t.malformed, 3, th.Faint, false)
 	}
 	return fit(line, iw+1, q)
 }
 
-// signalPills lists the non-zero signals of a row's totals as pills within w cells.
-func (m *model) signalPills(q paint, t totals, w int) string {
-	th := m.th
-	var pls []pill
-	if t.warns > 0 {
-		pls = append(pls, pill{fmt.Sprintf("WARN %d", t.warns), th.Red})
+// countCell is a right-aligned count in col, or a faint dot for zero.
+func countCell(q paint, n, w int, col color.Color, bold bool) string {
+	switch {
+	case n == 0:
+		return q.t(cell("·", w, true), q.th.Faint)
+	case bold:
+		return q.b(cell(fmt.Sprint(n), w, true), col)
 	}
-	if t.repeats > 0 {
-		pls = append(pls, pill{fmt.Sprintf("repeat %d", t.repeats), th.Yellow})
+	return q.t(cell(fmt.Sprint(n), w, true), col)
+}
+
+// recheckCell is the share of explorer claims re-read, from the summed counts.
+func recheckCell(q paint, t totals) string {
+	th := q.th
+	switch {
+	case t.candidates == 0:
+		return q.t(cell("·", 4, true), th.Faint)
+	case t.rechecked == 0:
+		return q.t(cell("0%", 4, true), th.Muted)
 	}
-	if t.loops > 0 {
-		pls = append(pls, pill{fmt.Sprintf("loop %d", t.loops), th.Yellow})
+	return q.t(cell(share(int64(t.rechecked), int64(t.candidates)), 4, true), th.Orange)
+}
+
+// share is n of d as a whole percent, from summed counts; "-" when d is 0.
+func share(n, d int64) string {
+	if d == 0 {
+		return "-"
 	}
-	if t.rechecked > 0 {
-		pls = append(pls, pill{fmt.Sprintf("recheck %.0f%%", 100*float64(t.rechecked)/float64(t.candidates)), th.Orange})
-	}
-	if t.malformed > 0 {
-		pls = append(pls, pill{fmt.Sprintf("bad %d", t.malformed), th.Faint})
-	}
-	if len(pls) == 0 {
-		return q.t("·", th.Faint)
-	}
-	return m.flagPills(q, pls, w)
+	return pct(100 * float64(n) / float64(d))
 }
 
 // ---- mix panels -----------------------------------------------------------------------

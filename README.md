@@ -43,6 +43,14 @@ started in a subdirectory of a repository, outside any worktree, shows that
 subdirectory as its repository; review loops are detected inside one session, so a
 task's count is the sum over its sessions.
 
+Plugin agents: a plugin's agent is dispatched as `<plugin>:<name>` (`factory:coder`)
+and counts as `<name>` for review loops, re-checks and repeats, and for its colour and
+position in the dashboard. Its full name is shown, and it keeps its own row in `agents`
+and its own `by_agent` key, apart from a bare `coder`. Its model is not checked by
+default, because a transcript does not record where a plugin's definitions were loaded
+from; pass `--agents-dir <plugin>/agents` to check it against `<name>.md` there (the option
+replaces the default directories, so bare agents are checked against the same files).
+
 For a resumed agent (`SendMessage`), duration covers dispatch to first return while
 tokens include the resumed work. `running` means no completion (hand-back or
 task-notification) was found in the transcript.
@@ -64,12 +72,19 @@ relative to its own path (`CCMON_ROOT` overrides) and works from any directory;
 `--projects-dir` and `--agents-dir` are resolved against your working directory
 and passed through to the CLI.
 
-Views: dashboard (KPI tiles, sessions table grouped by repository and task with per-group totals, agent and model mix, Now running),
+Views: dashboard (KPI tiles, sessions table grouped by repository and task with per-group totals and signal columns, agent and model mix, Now running),
 session (header signals, timeline with a row per concurrent dispatch, dispatch
 list, detail pane), agents (per agent type token classes and p50/p90). A session
 is live when its transcript changed in the last 30 s. One 1 s poll of the
 transcripts' mtimes finds changed, new and deleted sessions; only those are
 re-read. Quitting stops every python process the dashboard started.
+
+Repository and task rows show `×N` (their session count) and the sum of their
+sessions: tokens, subagent share, dispatches, repeats, review loops, re-check
+rate and warnings, with a live dot when any session in the group is live. A
+group of one session is one row. Group numbers in the dashboard follow the
+filter and range; the same totals are in `sessions --json` under `repos`; live
+state is dashboard-only.
 
 Keys: `tab`/`shift+tab` or `1 2 3` views, `j k g G` or arrows to move,
 `enter` open, `esc`/`backspace` back, `r` range (24h 7d 30d all; retry on the
@@ -95,13 +110,14 @@ factory clean [--dry-run]
 factory state working|blocked|handed-over [<deliverable>]   # a lead declares its task's state; a link, or a file outside the worktree
 factory ack <slug> acknowledged|dismissed       # the dispatcher, on the human's word, for handed-over work
 factory retro                                   # a lead's retrospective, JSON on stdin
-factory feedback [--json] [--status open|accepted|rejected|done]
+factory feedback [--json] [--status open|accepted|rejected|done] [--kind issue|decision]
 factory feedback add --role <role> [--slug <slug>] [--model <model>]   # items on stdin
+factory feedback decide '<what>. Why: <why>'    # a lead's key decision, one line, 200 characters at most
 factory feedback set <id> open|accepted|rejected|done [--pr <url>]
 ```
 `new` starts a lead in `.claude/worktrees/<slug>`; `--base` stacks it on another open task's branch. The calling session must be named `--dispatcher` (default `dispatcher-<repo directory name>`); name it with `/rename <name>`, or `new` refuses. `new` refuses when the repo is at its cap of tasks in motion or blocked on the human's answer; a task stops counting once its lead has handed its work over (`state handed-over`, or an open pull request for a task that never declared) and no session is unfinished in it (an open interactive session counts as unfinished), so work waiting for review does not block new work. `status` shows one row per task with its phase (`motion`, `blocked`, `review`, `merged`, `settled`), declared state, session, changes, distance from the default branch, pull request and staleness, then the number in motion against the cap (and how many of those are blocked), the number waiting for review, merged and settled and not yet cleaned, and a `waiting on the human` line for each task in review; `clean` removes a task only on positive evidence (pull request merged into the default branch, or the human acknowledged or dismissed its handed-over work and its head is pushed; nothing uncommitted, no live session, nothing stacked on it), removes nothing when sessions cannot be listed, and says why it kept the rest.
 
-The factory records what happens in four JSONL files under `~/.claude/factory/`: `events.jsonl` (the plugin's hooks append to it automatically, and `new` and `clean` add task events), `retros.jsonl` (lead retrospectives from `factory retro`), `feedback.jsonl` (the "Factory feedback" items from reports, with their status) and `tasks.jsonl` (each task's declared state, from `new`, `state` and `ack`). Formats are in `docs/specs/factory-events.md`; `tasks.jsonl` is in `docs/specs/factory.md`.
+The factory records what happens in four JSONL files under `~/.claude/factory/`: `events.jsonl` (the plugin's hooks append to it automatically, and `new` and `clean` add task events), `retros.jsonl` (lead retrospectives from `factory retro`), `feedback.jsonl` (the outbox: issues from the "Factory feedback" items of reports and the key decisions leads took, with their status) and `tasks.jsonl` (each task's declared state, from `new`, `state` and `ack`). Formats are in `docs/specs/factory-events.md`; `tasks.jsonl` is in `docs/specs/factory.md`.
 
 Exit codes: 0 success, 2 usage or precondition error, 1 a `claude`, `git` or `gh` step failed.
 
